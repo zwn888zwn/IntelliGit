@@ -12,6 +12,7 @@ describe("merge conflict parser", () => {
         expect(segments).toHaveLength(2);
         expect(segments[0]).toMatchObject({
             type: "conflict",
+            changeKind: "ours-only",
             oursLines: ["x"],
             theirsLines: [],
             baseLines: [],
@@ -47,6 +48,7 @@ describe("merge conflict parser", () => {
         expect(segments).toHaveLength(2);
         expect(segments[0]).toMatchObject({
             type: "conflict",
+            changeKind: "conflict",
             oursLines: ["x"],
             theirsLines: ["y"],
             baseLines: [],
@@ -54,6 +56,39 @@ describe("merge conflict parser", () => {
         expect(segments[1]).toEqual({
             type: "common",
             lines: ["a", "b"],
+        });
+    });
+
+    it("classifies theirs-only change as theirs-only", () => {
+        const base = "a\nb";
+        const ours = "a\nb";
+        const theirs = "a\nz\nb";
+
+        const segments = parseConflictVersions(base, ours, theirs);
+
+        const conflict = segments.find((s) => s.type === "conflict");
+        expect(conflict).toBeDefined();
+        expect(conflict).toMatchObject({
+            type: "conflict",
+            changeKind: "theirs-only",
+        });
+    });
+
+    it("classifies both-sides-different as a true conflict", () => {
+        const base = "a\nb\nc";
+        const ours = "a\nX\nc";
+        const theirs = "a\nY\nc";
+
+        const segments = parseConflictVersions(base, ours, theirs);
+
+        const conflict = segments.find((s) => s.type === "conflict");
+        expect(conflict).toBeDefined();
+        expect(conflict).toMatchObject({
+            type: "conflict",
+            changeKind: "conflict",
+            oursLines: ["X"],
+            theirsLines: ["Y"],
+            baseLines: ["b"],
         });
     });
 });

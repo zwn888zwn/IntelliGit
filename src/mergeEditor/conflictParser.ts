@@ -7,9 +7,12 @@ export interface CommonSegment {
     lines: string[];
 }
 
+export type ConflictChangeKind = "conflict" | "ours-only" | "theirs-only";
+
 export interface ConflictSegment {
     type: "conflict";
     id: number;
+    changeKind: ConflictChangeKind;
     oursLines: string[];
     theirsLines: string[];
     baseLines: string[];
@@ -198,9 +201,12 @@ function buildSegments(
                 segments.push({ type: "common", lines: oLines });
             }
         } else {
+            const changeKind: ConflictChangeKind =
+                oursEdit && theirsEdit ? "conflict" : oursEdit ? "ours-only" : "theirs-only";
             segments.push({
                 type: "conflict",
                 id: conflictId++,
+                changeKind,
                 oursLines: oLines,
                 theirsLines: tLines,
                 baseLines: baseLines.slice(bi, endBase),

@@ -8,5 +8,8 @@ export const PYCHARM_THEME = {
         // Left and Right pane background for conflict blocks
         conflictBlockBg: "rgba(116, 46, 53, 0.25)",
         conflictBlockAddedBg: "rgba(57, 127, 78, 0.2)",
+        // Muted blue-gray for non-conflicting (one-side-only) changes
+        nonConflictBlockBg: "rgba(47, 79, 130, 0.2)",
+        nonConflictResultBg: "rgba(47, 79, 130, 0.35)",
     },
 };

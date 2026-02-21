@@ -3,7 +3,11 @@
 import type { MergeEditorData, MergeSegment } from "../../../mergeEditor/conflictParser";
 
 export type { MergeEditorData, MergeSegment };
-export type { CommonSegment, ConflictSegment } from "../../../mergeEditor/conflictParser";
+export type {
+    CommonSegment,
+    ConflictSegment,
+    ConflictChangeKind,
+} from "../../../mergeEditor/conflictParser";
 
 export type OutboundMessage =
     | { type: "ready" }

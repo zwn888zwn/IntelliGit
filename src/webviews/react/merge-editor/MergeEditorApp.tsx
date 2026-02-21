@@ -64,6 +64,9 @@ function getResultLines(
         case "none":
             return [];
         default:
+            // Non-conflicting changes auto-resolve to the changed side
+            if (segment.changeKind === "ours-only") return segment.oursLines;
+            if (segment.changeKind === "theirs-only") return segment.theirsLines;
             return segment.baseLines;
     }
 }
@@ -87,19 +90,29 @@ function allResolved(
     segments: MergeSegment[],
     resolutions: Record<number, HunkResolution>,
 ): boolean {
-    return segments.every((seg) => seg.type === "common" || resolutions[seg.id] !== undefined);
+    return segments.every(
+        (seg) =>
+            seg.type === "common" ||
+            seg.changeKind !== "conflict" ||
+            resolutions[seg.id] !== undefined,
+    );
 }
 
-function conflictCount(segments: MergeSegment[]): number {
-    return segments.filter((seg) => seg.type === "conflict").length;
+function trueConflictCount(segments: MergeSegment[]): number {
+    return segments.filter((seg) => seg.type === "conflict" && seg.changeKind === "conflict")
+        .length;
 }
 
-function resolvedCount(
+function resolvedTrueConflictCount(
     segments: MergeSegment[],
     resolutions: Record<number, HunkResolution>,
 ): number {
-    return segments.filter((seg) => seg.type === "conflict" && resolutions[seg.id] !== undefined)
-        .length;
+    return segments.filter(
+        (seg) =>
+            seg.type === "conflict" &&
+            seg.changeKind === "conflict" &&
+            resolutions[seg.id] !== undefined,
+    ).length;
 }
 
 function padLines(lines: string[], count: number): string[] {
@@ -296,7 +309,9 @@ function ConflictSection({
     const isTheirs = resolution === "theirs";
 
     return (
-        <div className={`segment segment-conflict ${resolution ? "resolved" : "unresolved"}`}>
+        <div
+            className={`segment segment-conflict change-${segment.changeKind} ${resolution ? "resolved" : "unresolved"}`}
+        >
             <div className="hunk-columns">
                 <div className={`column column-left conflict-column ${isOurs ? "accepted" : ""}`}>
                     <CodeBlock
@@ -427,6 +442,17 @@ function App() {
         }
     }, [state.data]);
 
+    const handleApplyNonConflicting = useCallback(() => {
+        if (!state.data) return;
+        for (const seg of state.data.segments) {
+            if (seg.type === "conflict" && seg.changeKind === "ours-only") {
+                dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "ours" });
+            } else if (seg.type === "conflict" && seg.changeKind === "theirs-only") {
+                dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "theirs" });
+            }
+        }
+    }, [state.data]);
+
     const handleBulkAcceptYours = useCallback(() => {
         getVsCodeApi().postMessage({ type: "acceptYours" });
     }, []);
@@ -459,8 +485,8 @@ function App() {
         return <div className="loading">Loading conflict data...</div>;
     }
 
-    const total = conflictCount(segments);
-    const resolved = resolvedCount(segments, state.resolutions);
+    const total = trueConflictCount(segments);
+    const resolved = resolvedTrueConflictCount(segments, state.resolutions);
     const unresolved = total - resolved;
     const canApply = allResolved(segments, state.resolutions);
     const changeCount = segments.length;
@@ -469,7 +495,7 @@ function App() {
         <div className="merge-editor">
             <div className="merge-toolbar">
                 <div className="toolbar-left">
-                    <button className="toolbar-btn subtle">
+                    <button className="toolbar-btn subtle" onClick={handleApplyNonConflicting}>
                         <span className="toolbar-icon">
                             <IconSpark />
                         </span>
@@ -609,7 +635,7 @@ const STYLES = `
     color: var(--vscode-foreground);
     background: var(--vscode-editor-background);
     font-family: var(--vscode-font-family, sans-serif);
-    font-size: 12px;
+    font-size: var(--vscode-font-size, 13px);
 }
 
 .loading {
@@ -682,14 +708,14 @@ const STYLES = `
     opacity: 0.9;
 }
 .toolbar-btn:hover {
-    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
     opacity: 1;
 }
 .toolbar-btn.subtle {
     /* No difference in PyCharm, all top buttons are subtle */
 }
 .toolbar-btn.subtle:hover {
-    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
 }
 
 .merge-header {
@@ -758,8 +784,8 @@ const STYLES = `
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    font-family: "JetBrains Mono", var(--vscode-editor-font-family, monospace);
-    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--vscode-editor-font-size, 12px);
     line-height: 22px;
     background: var(--vscode-editor-background);
 }
@@ -853,7 +879,7 @@ const STYLES = `
     opacity: 0.95;
 }
 .action-btn:hover {
-    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.15));
+    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
     opacity: 1;
 }
 .accept-btn.active {
@@ -866,18 +892,37 @@ const STYLES = `
     color: var(--vscode-errorForeground, #f48771);
 }
 
-.conflict-ours .code-line {
+/* True conflicts — deep red */
+.change-conflict .conflict-ours .code-line,
+.change-conflict .conflict-theirs .code-line {
     background: ${PYCHARM_THEME.mergeEditor.conflictBlockBg};
     color: var(--vscode-editor-foreground);
 }
-.conflict-theirs .code-line {
-    background: ${PYCHARM_THEME.mergeEditor.conflictBlockBg};
-    color: var(--vscode-editor-foreground);
-}
-.conflict-result.unresolved .code-line {
+.change-conflict .conflict-result.unresolved .code-line {
     background: ${PYCHARM_THEME.mergeEditor.conflictResultBg};
     color: var(--vscode-editor-foreground);
 }
+
+/* One-side-only changes — muted blue */
+.change-ours-only .conflict-ours .code-line {
+    background: ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg};
+    color: var(--vscode-editor-foreground);
+}
+.change-ours-only .conflict-theirs .code-line,
+.change-theirs-only .conflict-ours .code-line {
+    color: var(--vscode-editor-foreground);
+}
+.change-theirs-only .conflict-theirs .code-line {
+    background: ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg};
+    color: var(--vscode-editor-foreground);
+}
+.change-ours-only .conflict-result.unresolved .code-line,
+.change-theirs-only .conflict-result.unresolved .code-line {
+    background: ${PYCHARM_THEME.mergeEditor.nonConflictResultBg};
+    color: var(--vscode-editor-foreground);
+}
+
+/* Resolved result — green for all types */
 .conflict-result.resolved .code-line {
     background: ${PYCHARM_THEME.mergeEditor.addedResultBg};
     color: var(--vscode-editor-foreground);
@@ -888,11 +933,17 @@ const STYLES = `
     border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
 }
 
-.column-left.accepted .conflict-ours .code-line {
+.change-conflict .column-left.accepted .conflict-ours .code-line {
     background: ${PYCHARM_THEME.mergeEditor.conflictBlockBg};
 }
-.column-right.accepted .conflict-theirs .code-line {
+.change-conflict .column-right.accepted .conflict-theirs .code-line {
     background: ${PYCHARM_THEME.mergeEditor.conflictBlockBg};
+}
+.change-ours-only .column-left.accepted .conflict-ours .code-line {
+    background: ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg};
+}
+.change-theirs-only .column-right.accepted .conflict-theirs .code-line {
+    background: ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg};
 }
 
 .merge-footer {
