@@ -10,6 +10,7 @@ import { GitOps, UpstreamPushDeclinedError } from "./git/operations";
 import { CommitGraphViewProvider } from "./views/CommitGraphViewProvider";
 import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
 import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
+import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
 import type { Branch } from "./types";
 import type { CommitAction } from "./webviews/react/commitGraphTypes";
 import { getErrorMessage, isBranchNotFullyMergedError } from "./utils/errors";
@@ -40,6 +41,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const commitGraph = new CommitGraphViewProvider(context.extensionUri, gitOps);
     const commitInfo = new CommitInfoViewProvider(context.extensionUri);
     const commitPanel = new CommitPanelViewProvider(context.extensionUri, gitOps);
+    const mergeConflicts = new MergeConflictsTreeProvider(gitOps, workspaceFolder.uri);
 
     // --- Register views ---
 
@@ -52,6 +54,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const badgeView = vscode.window.createTreeView("intelligit.fileCountBadge", {
         treeDataProvider: emptyTreeProvider,
     });
+    const mergeConflictsView = vscode.window.createTreeView("intelligit.mergeConflicts", {
+        treeDataProvider: mergeConflicts,
+    });
 
     const updateBadge = (count: number) => {
         badgeView.badge =
@@ -59,9 +64,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 ? { tooltip: `${count} changed file${count !== 1 ? "s" : ""}`, value: count }
                 : undefined;
     };
+    const updateConflictCount = (count: number) => {
+        mergeConflictsView.description = count > 0 ? `${count}` : "";
+    };
+    const refreshMergeConflicts = async () => {
+        updateConflictCount(await mergeConflicts.refresh());
+    };
 
     context.subscriptions.push(
         badgeView,
+        mergeConflictsView,
         commitPanel.onDidChangeFileCount(updateBadge),
         vscode.window.registerWebviewViewProvider(CommitGraphViewProvider.viewType, commitGraph),
         vscode.window.registerWebviewViewProvider(CommitInfoViewProvider.viewType, commitInfo),
@@ -627,6 +639,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             commitGraph.setBranches(currentBranches);
             await commitGraph.refresh();
             await commitPanel.refresh();
+            await refreshMergeConflicts();
             await clearSelection();
         }),
 
@@ -641,6 +654,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("intelligit.showGitLog", async () => {
             await vscode.commands.executeCommand("intelligit.commitGraph.focus");
         }),
+
+        vscode.commands.registerCommand("intelligit.mergeConflictsRefresh", async () => {
+            await refreshMergeConflicts();
+        }),
+    );
+
+    const resolveConflictPath = (ctx: unknown): string | null => {
+        if (!ctx || typeof ctx !== "object") return null;
+        if ("filePath" in ctx && typeof (ctx as { filePath?: unknown }).filePath === "string") {
+            return (ctx as { filePath: string }).filePath;
+        }
+        return null;
+    };
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand("intelligit.openMergeConflict", async (ctx: unknown) => {
+            const filePath = resolveConflictPath(ctx);
+            if (!filePath) return;
+            const uri = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+            try {
+                await vscode.commands.executeCommand("vscode.open", uri);
+            } catch {
+                await vscode.window.showTextDocument(uri);
+            }
+        }),
+        vscode.commands.registerCommand(
+            "intelligit.conflictAcceptYours",
+            async (ctx: unknown) => {
+                const filePath = resolveConflictPath(ctx);
+                if (!filePath) return;
+                try {
+                    await runWithNotificationProgress(`Accepting yours for ${filePath}...`, async () => {
+                        await gitOps.acceptConflictSide(filePath, "ours");
+                    });
+                    vscode.window.showInformationMessage(`Accepted yours for ${filePath}`);
+                    await commitPanel.refresh();
+                    await refreshMergeConflicts();
+                } catch (error) {
+                    const message = getErrorMessage(error);
+                    vscode.window.showErrorMessage(`Accept yours failed: ${message}`);
+                }
+            },
+        ),
+        vscode.commands.registerCommand(
+            "intelligit.conflictAcceptTheirs",
+            async (ctx: unknown) => {
+                const filePath = resolveConflictPath(ctx);
+                if (!filePath) return;
+                try {
+                    await runWithNotificationProgress(
+                        `Accepting theirs for ${filePath}...`,
+                        async () => {
+                            await gitOps.acceptConflictSide(filePath, "theirs");
+                        },
+                    );
+                    vscode.window.showInformationMessage(`Accepted theirs for ${filePath}`);
+                    await commitPanel.refresh();
+                    await refreshMergeConflicts();
+                } catch (error) {
+                    const message = getErrorMessage(error);
+                    vscode.window.showErrorMessage(`Accept theirs failed: ${message}`);
+                }
+            },
+        ),
     );
 
     // --- Branch action commands ---
@@ -1063,6 +1140,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     commitPanel.refresh().catch((err) => {
         console.error("Initial commit panel refresh failed:", err);
     });
+    refreshMergeConflicts().catch((err) => {
+        console.error("Initial merge conflicts refresh failed:", err);
+    });
 
     // --- Auto-refresh on file changes ---
 
@@ -1072,6 +1152,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (lightTimer) clearTimeout(lightTimer);
         lightTimer = setTimeout(async () => {
             await commitPanel.refresh();
+            await refreshMergeConflicts();
         }, 300);
     };
 
@@ -1092,6 +1173,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             commitGraph.setBranches(currentBranches);
             await commitGraph.refresh();
             await commitPanel.refresh();
+            await refreshMergeConflicts();
         }, 500);
     };
 

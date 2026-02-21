@@ -134,6 +134,8 @@ const gitOpsState = {
     getStatus: vi.fn(async () => []),
     listShelved: vi.fn(async () => []),
     getShelvedFiles: vi.fn(async () => []),
+    getConflictedFiles: vi.fn(async () => []),
+    acceptConflictSide: vi.fn(async () => undefined),
 };
 
 const deleteFileWithFallback = vi.fn(async () => true);
@@ -317,6 +319,8 @@ vi.mock("../../src/git/operations", async (importOriginal) => {
             getStatus = gitOpsState.getStatus;
             listShelved = gitOpsState.listShelved;
             getShelvedFiles = gitOpsState.getShelvedFiles;
+            getConflictedFiles = gitOpsState.getConflictedFiles;
+            acceptConflictSide = gitOpsState.acceptConflictSide;
         },
     };
 });
@@ -408,6 +412,8 @@ describe("extension integration", () => {
         gitOpsState.rollbackFiles.mockResolvedValue(undefined);
         gitOpsState.shelveSave.mockResolvedValue("saved");
         gitOpsState.getFileHistory.mockResolvedValue("history");
+        gitOpsState.getConflictedFiles.mockResolvedValue([]);
+        gitOpsState.acceptConflictSide.mockResolvedValue(undefined);
         deleteFileWithFallback.mockResolvedValue(true);
 
         showWarningMessage.mockImplementation(async (_msg?: string, _opts?: unknown, ...items: string[]) => items[0]);
@@ -438,6 +444,9 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.refresh")).toBe(true);
         expect(registeredCommands.has("intelligit.checkout")).toBe(true);
         expect(registeredCommands.has("intelligit.fileDelete")).toBe(true);
+        expect(registeredCommands.has("intelligit.openMergeConflict")).toBe(true);
+        expect(registeredCommands.has("intelligit.conflictAcceptYours")).toBe(true);
+        expect(registeredCommands.has("intelligit.conflictAcceptTheirs")).toBe(true);
 
         await registeredCommands.get("intelligit.refresh")?.();
         await registeredCommands.get("intelligit.filterByBranch")?.("main");
@@ -483,10 +492,22 @@ describe("extension integration", () => {
         await registeredCommands.get("intelligit.fileShelve")?.({ filePath: "src/a.ts" });
         await registeredCommands.get("intelligit.fileShowHistory")?.({ filePath: "src/a.ts" });
         await registeredCommands.get("intelligit.fileRefresh")?.();
+        await registeredCommands
+            .get("intelligit.openMergeConflict")
+            ?.({ filePath: "src/conflicted.ts" });
+        await registeredCommands
+            .get("intelligit.conflictAcceptYours")
+            ?.({ filePath: "src/conflicted.ts" });
+        await registeredCommands
+            .get("intelligit.conflictAcceptTheirs")
+            ?.({ filePath: "src/conflicted.ts" });
+        await registeredCommands.get("intelligit.mergeConflictsRefresh")?.();
 
         expect(executorRun).toHaveBeenCalled();
         expect(showInformationMessage).toHaveBeenCalled();
         expect(showWarningMessage).toHaveBeenCalled();
+        expect(gitOpsState.acceptConflictSide).toHaveBeenCalledWith("src/conflicted.ts", "ours");
+        expect(gitOpsState.acceptConflictSide).toHaveBeenCalledWith("src/conflicted.ts", "theirs");
         expect(withProgress).toHaveBeenCalledWith(
             expect.objectContaining({
                 location: 15,

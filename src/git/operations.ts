@@ -646,6 +646,20 @@ export class GitOps {
         ]);
     }
 
+    async getConflictedFiles(): Promise<string[]> {
+        const out = await this.executor.run(["diff", "--name-only", "--diff-filter=U"]);
+        return out
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean);
+    }
+
+    async acceptConflictSide(filePath: string, side: "ours" | "theirs"): Promise<void> {
+        const sideArg = side === "ours" ? "--ours" : "--theirs";
+        await this.executor.run(["checkout", sideArg, "--", filePath]);
+        await this.executor.run(["add", "--", filePath]);
+    }
+
     async deleteFile(filePath: string, force: boolean = false): Promise<void> {
         const args = force ? ["rm", "-f", "--", filePath] : ["rm", "--", filePath];
         await this.executor.run(args);

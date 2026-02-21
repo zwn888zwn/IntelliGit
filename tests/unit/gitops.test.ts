@@ -488,6 +488,29 @@ describe("GitOps", () => {
         });
     });
 
+    describe("merge conflict helpers", () => {
+        it("returns conflicted files from diff-filter=U output", async () => {
+            const executor = createMockExecutor({
+                "diff --name-only --diff-filter=U": "src/a.ts\nsrc/b.ts\n\n",
+            });
+            const ops = new GitOps(executor);
+            await expect(ops.getConflictedFiles()).resolves.toEqual(["src/a.ts", "src/b.ts"]);
+        });
+
+        it("acceptConflictSide checks out chosen side and stages file", async () => {
+            const executor = createMockExecutor({});
+            const ops = new GitOps(executor);
+
+            await ops.acceptConflictSide("src/conflicted.ts", "ours");
+            await ops.acceptConflictSide("src/conflicted.ts", "theirs");
+
+            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+            expect(calls).toContainEqual(["checkout", "--ours", "--", "src/conflicted.ts"]);
+            expect(calls).toContainEqual(["checkout", "--theirs", "--", "src/conflicted.ts"]);
+            expect(calls.filter((args) => args.join(" ") === "add -- src/conflicted.ts")).toHaveLength(2);
+        });
+    });
+
     describe("stashSave", () => {
         it("calls git stash push with message", async () => {
             const executor = createMockExecutor({});
