@@ -196,10 +196,10 @@ function HighlightedLine({ line }: { line: string }): React.ReactElement {
             nodes.push(<span key={`txt-${idx++}`}>{line.slice(last, start)}</span>);
         }
         const token = match[0];
-        let className = "tok-default";
+        let className: string;
         if (match[1]) className = "tok-string";
-        else if (match[6]) className = "tok-keyword";
-        else if (match[7]) className = "tok-constant";
+        else if (match[5]) className = "tok-keyword";
+        else if (match[6]) className = "tok-constant";
         else className = "tok-number";
         nodes.push(
             <span key={`tok-${idx++}`} className={className}>
@@ -285,9 +285,15 @@ function ConflictSection({
 
     return (
         <div className={`segment segment-conflict ${resolution ? "resolved" : "unresolved"}`}>
-            <div className="hunk-toolbar">
-                <div className="hunk-cell hunk-left">
-                    <div className="conflict-actions">
+            <div className="hunk-columns">
+                <div className={`column column-left conflict-column ${isOurs ? "accepted" : ""}`}>
+                    <CodeBlock
+                        lines={segment.oursLines}
+                        startLine={startLine}
+                        lineCount={lineCount}
+                        className="conflict-ours"
+                    />
+                    <div className="conflict-actions-inline conflict-actions-left">
                         <button
                             className={`action-btn accept-btn ${isOurs ? "active" : ""}`}
                             onClick={() => onResolve(segment.id, isOurs ? "none" : "ours")}
@@ -298,41 +304,11 @@ function ConflictSection({
                         <button
                             className="action-btn discard-btn"
                             onClick={() => onResolve(segment.id, "theirs")}
-                            title="Discard yours (accept theirs)"
+                            title="Ignore"
                         >
                             <IconClose />
                         </button>
                     </div>
-                </div>
-                <div className="hunk-cell hunk-middle" />
-                <div className="hunk-cell hunk-right">
-                    <div className="conflict-actions">
-                        <button
-                            className="action-btn discard-btn"
-                            onClick={() => onResolve(segment.id, "ours")}
-                            title="Discard theirs (accept yours)"
-                        >
-                            <IconClose />
-                        </button>
-                        <button
-                            className={`action-btn accept-btn ${isTheirs ? "active" : ""}`}
-                            onClick={() => onResolve(segment.id, isTheirs ? "none" : "theirs")}
-                            title="Accept theirs"
-                        >
-                            <IconArrowLeft />
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div className="hunk-columns">
-                <div className={`column column-left conflict-column ${isOurs ? "accepted" : ""}`}>
-                    <CodeBlock
-                        lines={segment.oursLines}
-                        startLine={startLine}
-                        lineCount={lineCount}
-                        className="conflict-ours"
-                    />
                 </div>
 
                 <div className="column column-middle conflict-column result-column">
@@ -353,6 +329,22 @@ function ConflictSection({
                         lineCount={lineCount}
                         className="conflict-theirs"
                     />
+                    <div className="conflict-actions-inline conflict-actions-right">
+                        <button
+                            className="action-btn discard-btn"
+                            onClick={() => onResolve(segment.id, "ours")}
+                            title="Ignore"
+                        >
+                            <IconClose />
+                        </button>
+                        <button
+                            className={`action-btn accept-btn ${isTheirs ? "active" : ""}`}
+                            onClick={() => onResolve(segment.id, isTheirs ? "none" : "theirs")}
+                            title="Accept theirs"
+                        >
+                            <IconArrowLeft />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -465,12 +457,13 @@ function App() {
         <div className="merge-editor">
             <div className="merge-toolbar">
                 <div className="toolbar-left">
-                    <button className="toolbar-btn">
+                    <button className="toolbar-btn subtle">
                         <span className="toolbar-icon">
                             <IconSpark />
                         </span>
                         Apply non-conflicting changes
                     </button>
+                    <div className="toolbar-separator" />
                     <button className="toolbar-btn subtle">
                         <span className="toolbar-icon">
                             <IconFilter />
@@ -638,7 +631,13 @@ const STYLES = `
 .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
+}
+.toolbar-separator {
+    width: 1px;
+    height: 14px;
+    background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border, #444));
+    margin: 0 4px;
 }
 .toolbar-icon {
     display: inline-flex;
@@ -649,27 +648,26 @@ const STYLES = `
     color: var(--vscode-icon-foreground, currentColor);
 }
 .toolbar-btn {
-    height: 20px;
-    padding: 0 8px;
-    border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, transparent));
-    border-radius: 2px;
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-    font-size: 11px;
-    line-height: 18px;
+    height: 24px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--vscode-foreground);
+    font-size: 12px;
+    line-height: 24px;
     cursor: pointer;
+    opacity: 0.9;
 }
 .toolbar-btn:hover {
-    background: var(--vscode-button-secondaryHoverBackground);
+    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+    opacity: 1;
 }
 .toolbar-btn.subtle {
-    background: transparent;
-    border-color: transparent;
-    color: var(--vscode-descriptionForeground);
+    /* No difference in PyCharm, all top buttons are subtle */
 }
 .toolbar-btn.subtle:hover {
-    border-color: var(--vscode-panel-border, var(--vscode-widget-border, transparent));
-    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.06));
+    background: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
 }
 
 .merge-header {
@@ -710,7 +708,7 @@ const STYLES = `
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 3px 10px;
+    padding: 4px 12px;
     color: var(--vscode-descriptionForeground);
     font-size: 11px;
     border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
@@ -724,6 +722,10 @@ const STYLES = `
 }
 .show-details {
     color: var(--vscode-textLink-foreground, #4ea1ff);
+    cursor: pointer;
+}
+.show-details:hover {
+    text-decoration: underline;
 }
 
 .merge-content {
@@ -786,39 +788,6 @@ const STYLES = `
     border-top: 1px solid var(--vscode-merge-border, var(--vscode-panel-border, transparent));
     border-bottom: 1px solid var(--vscode-merge-border, var(--vscode-panel-border, transparent));
 }
-.hunk-toolbar {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
-    background: var(--vscode-editorGroupHeader-tabsBackground);
-}
-.hunk-cell {
-    min-height: 22px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 8px;
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
-    border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
-}
-.hunk-left {
-    justify-content: flex-end;
-}
-.hunk-middle {
-    padding: 0;
-    border-right: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
-}
-.segment-conflict.unresolved .hunk-middle {
-    background: var(--vscode-diffEditor-removedLineBackground, rgba(116, 46, 53, 0.45));
-}
-.segment-conflict.resolved .hunk-middle {
-    background: var(--vscode-diffEditor-insertedLineBackground, rgba(56, 118, 66, 0.32));
-}
-.hunk-right {
-    justify-content: flex-start;
-    border-right: none;
-}
 
 .conflict-column {
     position: relative;
@@ -826,22 +795,30 @@ const STYLES = `
 .hunk-columns {
     display: flex;
 }
-.conflict-actions {
+.conflict-actions-inline {
+    position: absolute;
+    top: 4px;
     display: flex;
-    gap: 3px;
+    gap: 0;
+    z-index: 10;
+}
+.conflict-actions-left {
+    right: 0px; /* Position directly on the border edge */
+}
+.conflict-actions-right {
+    left: 0px; /* Position directly on the border edge */
 }
 .action-btn {
-    width: 18px;
+    width: 20px;
     height: 18px;
     border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
-    border-radius: 2px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
-    background: var(--vscode-button-secondaryBackground);
+    background: var(--vscode-editorGroupHeader-tabsBackground);
     color: var(--vscode-foreground);
 }
 .action-btn:hover {
