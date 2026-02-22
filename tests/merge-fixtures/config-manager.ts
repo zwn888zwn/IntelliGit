@@ -16,7 +16,7 @@ const LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
 // ============================================================
 // SECTION 2: Types
 // ============================================================
-interface AppConfig {
+export interface AppConfig {
   port: number;
   host: string;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -53,7 +53,9 @@ export class ConfigManager {
       parsed = JSON.parse(raw) as Partial<AppConfig>;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`Failed to load config from ${this.configPath}: ${message}`);
+      throw new Error(`Failed to load config from ${this.configPath}: ${message}`, {
+        cause: error,
+      });
     }
 
     this.config = {
@@ -62,6 +64,10 @@ export class ConfigManager {
       database: {
         ...this.config.database,
         ...(parsed.database ?? {}),
+      },
+      features: {
+        ...this.config.features,
+        ...(parsed.features ?? {}),
       },
     };
 

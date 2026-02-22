@@ -108,24 +108,33 @@ export class MergeEditorPanel {
                 await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, "utf8"));
                 await this.gitOps.stageFile(this.filePath);
                 vscode.window.showInformationMessage(`Resolved: ${this.filePath}`);
-                this.onResolved();
-                this.panel.dispose();
+                try {
+                    this.onResolved();
+                } finally {
+                    this.panel.dispose();
+                }
                 break;
             }
 
             case "acceptYours": {
                 await this.gitOps.acceptConflictSide(this.filePath, "ours");
                 vscode.window.showInformationMessage(`Accepted yours: ${this.filePath}`);
-                this.onResolved();
-                this.panel.dispose();
+                try {
+                    this.onResolved();
+                } finally {
+                    this.panel.dispose();
+                }
                 break;
             }
 
             case "acceptTheirs": {
                 await this.gitOps.acceptConflictSide(this.filePath, "theirs");
                 vscode.window.showInformationMessage(`Accepted theirs: ${this.filePath}`);
-                this.onResolved();
-                this.panel.dispose();
+                try {
+                    this.onResolved();
+                } finally {
+                    this.panel.dispose();
+                }
                 break;
             }
 

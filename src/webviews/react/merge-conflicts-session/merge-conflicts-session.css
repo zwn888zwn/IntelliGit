@@ -31,8 +31,10 @@
     border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
 }
 
 .table-meta {
@@ -50,8 +52,9 @@
 
 .conflict-table {
     width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     font-size: 12px;
 }
 
@@ -77,8 +80,9 @@
 
 .conflict-table tbody {
     display: block;
+    flex: 1;
+    min-height: 0;
     overflow: auto;
-    height: calc(100vh - 180px);
 }
 
 .conflict-table thead,
@@ -179,4 +183,3 @@
     color: var(--vscode-descriptionForeground);
     font-size: 12px;
 }
-

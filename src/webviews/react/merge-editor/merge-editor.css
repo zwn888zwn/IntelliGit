@@ -10,15 +10,15 @@
     --merge-ok: #79c18d;
     --merge-current-content-bg: var(
         --vscode-merge-currentContentBackground,
-        ${PYCHARM_THEME.mergeEditor.conflictBlockBg}
+        rgba(116, 46, 53, 0.25)
     );
     --merge-incoming-content-bg: var(
         --vscode-merge-incomingContentBackground,
-        ${PYCHARM_THEME.mergeEditor.conflictBlockBg}
+        rgba(116, 46, 53, 0.25)
     );
     --merge-common-content-bg: var(
         --vscode-merge-commonContentBackground,
-        ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg}
+        rgba(47, 79, 130, 0.2)
     );
     --merge-result-conflict-bg: color-mix(
         in srgb,
@@ -32,7 +32,7 @@
     );
     --merge-result-resolved-bg: var(
         --vscode-diffEditor-insertedTextBackground,
-        ${PYCHARM_THEME.mergeEditor.addedResultBg}
+        rgba(56, 118, 66, 0.35)
     );
 
     display: flex;
@@ -848,4 +848,3 @@
         display: none;
     }
 }
-

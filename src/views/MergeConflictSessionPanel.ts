@@ -44,6 +44,7 @@ export class MergeConflictSessionPanel {
             try {
                 await this.handleMessage(msg);
             } catch (error) {
+                if (!this.isPanelActive()) return;
                 const message = getErrorMessage(error);
                 vscode.window.showErrorMessage(message);
                 await this.panel.webview.postMessage({ type: "loadError", message });
@@ -167,9 +168,16 @@ export class MergeConflictSessionPanel {
         return filePath ? filePath : null;
     }
 
+    private isPanelActive(): boolean {
+        return !this.disposed;
+    }
+
     private async postSessionData(options: { closeWhenResolved: boolean }): Promise<void> {
+        if (!this.isPanelActive()) return;
         const files = await this.gitOps.getConflictFilesDetailed();
+        if (!this.isPanelActive()) return;
         if (files.length === 0 && options.closeWhenResolved) {
+            if (!this.isPanelActive()) return;
             vscode.window.showInformationMessage("All merge conflicts are resolved.");
             this.panel.dispose();
             return;
@@ -181,6 +189,7 @@ export class MergeConflictSessionPanel {
             files,
         };
 
+        if (!this.isPanelActive()) return;
         await this.panel.webview.postMessage({ type: "setSessionData", data });
     }
 

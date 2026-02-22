@@ -58,8 +58,10 @@ function splitLines(text: string): string[] {
     if (text === "") return [];
     // Drop exactly one trailing newline to avoid creating a synthetic empty
     // "last line" entry when the file ends with a newline terminator.
-    const normalized = text.endsWith("\n") ? text.slice(0, -1) : text;
-    return normalized === "" ? [] : normalized.split("\n");
+    let normalized = text;
+    if (normalized.endsWith("\r\n")) normalized = normalized.slice(0, -2);
+    else if (normalized.endsWith("\n")) normalized = normalized.slice(0, -1);
+    return normalized === "" ? [] : normalized.split(/\r?\n/);
 }
 
 // --- Simple LCS-based diff ---

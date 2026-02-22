@@ -45,6 +45,8 @@ function reducer(state: State, action: Action): State {
                 ...state,
                 resolutions: { ...state.resolutions, [action.id]: action.resolution },
             };
+        default:
+            return state;
     }
 }
 
@@ -1145,11 +1147,12 @@ function App() {
             const target = event.target as HTMLElement | null;
             const tag = target?.tagName;
             if (tag === "INPUT" || tag === "TEXTAREA") return;
+            const normalizedKey = event.key.toLowerCase();
 
-            if (event.key === "n" || event.key === "F7") {
+            if (normalizedKey === "n" || event.key === "F7") {
                 event.preventDefault();
                 moveActiveConflict(1);
-            } else if (event.key === "p" || (event.shiftKey && event.key === "F7")) {
+            } else if (normalizedKey === "p" || (event.shiftKey && event.key === "F7")) {
                 event.preventDefault();
                 moveActiveConflict(-1);
             } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
