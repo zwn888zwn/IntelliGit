@@ -17,6 +17,7 @@ import type { Branch } from "./types";
 import type { CommitAction } from "./webviews/react/commitGraphTypes";
 import { getErrorMessage, isBranchNotFullyMergedError } from "./utils/errors";
 import { deleteFileWithFallback } from "./utils/fileOps";
+import { containsConflictMarkers, launchJetBrainsMergeTool } from "./utils/jetbrainsMergeTool";
 import { runWithNotificationProgress } from "./utils/notifications";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -83,7 +84,49 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await MergeConflictSessionPanel.refreshIfOpen();
     };
 
-    const openMergeEditorForFile = async (filePath: string) => {
+    const getJetBrainsMergeToolPath = (): string => {
+        const cfg = vscode.workspace.getConfiguration("intelligit");
+        return (cfg.get<string>("jetbrainsMergeTool.path") ?? "").trim();
+    };
+
+    const getDefaultJetBrainsMergeToolPath = (): string => {
+        switch (process.platform) {
+            case "darwin":
+                return "/Applications/PyCharm.app/Contents/MacOS/pycharm";
+            case "win32":
+                return "C:\\Program Files\\JetBrains\\PyCharm\\bin\\pycharm64.exe";
+            default:
+                return "pycharm";
+        }
+    };
+
+    const promptForJetBrainsMergeToolPath = async (): Promise<string | null> => {
+        const existing = getJetBrainsMergeToolPath();
+        const suggested = existing || getDefaultJetBrainsMergeToolPath();
+        const input = await vscode.window.showInputBox({
+            title: "JetBrains Merge Tool Path",
+            prompt:
+                "Enter the path (or PATH command) for a JetBrains IDE binary (e.g. pycharm, idea, webstorm).",
+            placeHolder: suggested,
+            value: suggested,
+            ignoreFocusOut: true,
+        });
+        if (!input) return null;
+
+        const trimmed = input.trim();
+        if (!trimmed) return null;
+        if (path.isAbsolute(trimmed) && !fs.existsSync(trimmed)) {
+            vscode.window.showErrorMessage(`JetBrains binary not found: ${trimmed}`);
+            return null;
+        }
+
+        await vscode.workspace
+            .getConfiguration("intelligit")
+            .update("jetbrainsMergeTool.path", trimmed, vscode.ConfigurationTarget.Global);
+        return trimmed;
+    };
+
+    const openBuiltInMergeEditorForFile = async (filePath: string) => {
         MergeEditorPanel.open(
             context.extensionUri,
             gitOps,
@@ -97,6 +140,80 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 await refreshConflictUi();
             },
         );
+    };
+
+    const openJetBrainsMergeToolForFile = async (filePath: string): Promise<boolean> => {
+        let binaryPath = getJetBrainsMergeToolPath();
+        if (!binaryPath) {
+            const action = await vscode.window.showInformationMessage(
+                "JetBrains merge tool path is not configured.",
+                "Configure",
+                "Open Built-in Merge Editor",
+            );
+            if (action === "Open Built-in Merge Editor") {
+                await openBuiltInMergeEditorForFile(filePath);
+                return true;
+            }
+            if (action !== "Configure") return false;
+            const configured = await promptForJetBrainsMergeToolPath();
+            if (!configured) return false;
+            binaryPath = configured;
+        }
+
+        try {
+            const versions = await gitOps.getConflictFileVersions(filePath);
+            const outputFileFsPath = path.join(repoRoot, filePath);
+
+            await runWithNotificationProgress(`Opening JetBrains merge tool for ${filePath}...`, async () => {
+                await launchJetBrainsMergeTool({
+                    binaryPath,
+                    repoRootFsPath: repoRoot,
+                    relativeFilePath: filePath,
+                    outputFileFsPath,
+                    baseContent: versions.base,
+                    oursContent: versions.ours,
+                    theirsContent: versions.theirs,
+                });
+            });
+
+            try {
+                const outputText = await fs.promises.readFile(outputFileFsPath, "utf8");
+                if (!containsConflictMarkers(outputText)) {
+                    await gitOps.stageFile(filePath);
+                    vscode.window.showInformationMessage(
+                        `Merged with JetBrains and staged: ${filePath}`,
+                    );
+                } else {
+                    vscode.window.showInformationMessage(
+                        `JetBrains merge closed; conflict markers still present in ${filePath}`,
+                    );
+                }
+            } catch (readErr) {
+                const msg = getErrorMessage(readErr);
+                vscode.window.showWarningMessage(
+                    `JetBrains merge finished but IntelliGit could not inspect '${filePath}': ${msg}`,
+                );
+            }
+
+            await refreshConflictUi();
+            return true;
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`JetBrains merge tool failed: ${message}`);
+            return false;
+        }
+    };
+
+    const openMergeConflictForFile = async (filePath: string) => {
+        const preferExternal = vscode.workspace
+            .getConfiguration("intelligit")
+            .get<boolean>("jetbrainsMergeTool.preferExternal", true);
+
+        if (preferExternal) {
+            const opened = await openJetBrainsMergeToolForFile(filePath);
+            if (opened) return;
+        }
+        await openBuiltInMergeEditorForFile(filePath);
     };
 
     const openConflictSession = async (labels?: {
@@ -115,7 +232,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             },
             {
                 onOpenMergeConflict: async (filePath) => {
-                    await openMergeEditorForFile(filePath);
+                    await openMergeConflictForFile(filePath);
                 },
                 onConflictStateChanged: async () => {
                     await refreshConflictStateViews();
@@ -744,8 +861,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("intelligit.openMergeConflict", async (ctx: unknown) => {
             const filePath = resolveConflictPath(ctx);
             if (!filePath) return;
-            await openMergeEditorForFile(filePath);
+            await openMergeConflictForFile(filePath);
         }),
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand(
+            "intelligit.openMergeConflictInJetBrains",
+            async (ctx: unknown) => {
+                const filePath = resolveConflictPath(ctx);
+                if (!filePath) return;
+                await openJetBrainsMergeToolForFile(filePath);
+            },
+        ),
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand("intelligit.conflictAcceptYours", async (ctx: unknown) => {
             const filePath = resolveConflictPath(ctx);
             if (!filePath) return;

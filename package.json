@@ -192,6 +192,12 @@
                 "icon": "$(go-to-file)"
             },
             {
+                "command": "intelligit.openMergeConflictInJetBrains",
+                "title": "Open in JetBrains Merge Tool",
+                "category": "IntelliGit",
+                "icon": "$(link-external)"
+            },
+            {
                 "command": "intelligit.conflictAcceptYours",
                 "title": "Accept Yours",
                 "category": "IntelliGit",
@@ -261,6 +267,11 @@
                     "group": "navigation@1"
                 },
                 {
+                    "command": "intelligit.openMergeConflictInJetBrains",
+                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.conflictFile",
+                    "group": "navigation@2"
+                },
+                {
                     "command": "intelligit.conflictAcceptYours",
                     "when": "view == intelligit.mergeConflicts && viewItem == intelligit.conflictFile",
                     "group": "1_actions@1"
@@ -310,7 +321,22 @@
                 "key": "alt+9",
                 "mac": "alt+9"
             }
-        ]
+        ],
+        "configuration": {
+            "title": "IntelliGit",
+            "properties": {
+                "intelligit.jetbrainsMergeTool.path": {
+                    "type": "string",
+                    "default": "",
+                    "markdownDescription": "Path or PATH command for a JetBrains IDE binary (for example `pycharm`, `idea`, `webstorm`, or an absolute executable path) used to launch the external JetBrains merge tool."
+                },
+                "intelligit.jetbrainsMergeTool.preferExternal": {
+                    "type": "boolean",
+                    "default": true,
+                    "markdownDescription": "When enabled, `Open Merge Conflict` will prefer the external JetBrains merge tool if a JetBrains binary path is configured. Falls back to IntelliGit's built-in merge editor otherwise."
+                }
+            }
+        }
     },
     "scripts": {
         "vscode:prepublish": "bun scripts/build.js --production",
