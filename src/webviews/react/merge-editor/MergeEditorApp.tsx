@@ -334,6 +334,10 @@ function tokenizeWordDiff(line: string): string[] {
     return line.match(/(\s+|[A-Za-z0-9_]+|[^A-Za-z0-9_\s]+)/g) ?? [line];
 }
 
+function normalizeLineForWordDiff(line: string): string {
+    return line.replace(/\s+/g, " ").trim();
+}
+
 function computeTokenLcsPairs(a: string[], b: string[]): Array<[number, number]> {
     const m = a.length;
     const n = b.length;
@@ -377,6 +381,115 @@ function computeTokenLcsPairs(a: string[], b: string[]): Array<[number, number]>
     return pairs;
 }
 
+function tokenSimilarityRatio(a: string, b: string): number {
+    if (a === b) return 1;
+    const aNorm = normalizeLineForWordDiff(a);
+    const bNorm = normalizeLineForWordDiff(b);
+    if (aNorm === bNorm) return 0.98;
+    if (!aNorm && !bNorm) return 1;
+    if (!aNorm || !bNorm) return 0;
+
+    const aTokens = tokenizeWordDiff(aNorm);
+    const bTokens = tokenizeWordDiff(bNorm);
+    if (aTokens.length === 0 && bTokens.length === 0) return 1;
+    if (aTokens.length === 0 || bTokens.length === 0) return 0;
+
+    const lcsLen = computeTokenLcsPairs(aTokens, bTokens).length;
+    return (2 * lcsLen) / (aTokens.length + bTokens.length);
+}
+
+function alignCompareLinesForWordDiff(lines: string[], compareLines: string[]): string[] {
+    if (lines.length === 0) return [];
+    if (compareLines.length === 0) return new Array(lines.length).fill("");
+    if (lines.length === compareLines.length) {
+        return [...compareLines];
+    }
+
+    const m = lines.length;
+    const n = compareLines.length;
+    const gapPenalty = -0.8;
+    const pairScoreCache = new Map<string, number>();
+    const scorePair = (i: number, j: number): number => {
+        const key = `${i}:${j}`;
+        const cached = pairScoreCache.get(key);
+        if (cached !== undefined) return cached;
+
+        const a = lines[i];
+        const b = compareLines[j];
+        let score: number;
+        if (a === b) {
+            score = 4;
+        } else {
+            const sim = tokenSimilarityRatio(a, b);
+            if (normalizeLineForWordDiff(a) === normalizeLineForWordDiff(b)) score = 3.5;
+            else if (sim >= 0.78) score = 2.4 + sim;
+            else if (sim >= 0.52) score = 1 + sim;
+            else if (sim >= 0.34) score = 0.2 + sim * 0.4;
+            else score = -1.6;
+        }
+
+        pairScoreCache.set(key, score);
+        return score;
+    };
+
+    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    const trace: ("pair" | "skipA" | "skipB")[][] = Array.from({ length: m + 1 }, () =>
+        new Array(n + 1).fill("pair"),
+    );
+
+    for (let i = m - 1; i >= 0; i--) {
+        dp[i][n] = dp[i + 1][n] + gapPenalty;
+        trace[i][n] = "skipA";
+    }
+    for (let j = n - 1; j >= 0; j--) {
+        dp[m][j] = dp[m][j + 1] + gapPenalty;
+        trace[m][j] = "skipB";
+    }
+
+    for (let i = m - 1; i >= 0; i--) {
+        for (let j = n - 1; j >= 0; j--) {
+            const pair = dp[i + 1][j + 1] + scorePair(i, j);
+            const skipA = dp[i + 1][j] + gapPenalty;
+            const skipB = dp[i][j + 1] + gapPenalty;
+
+            if (pair >= skipA && pair >= skipB) {
+                dp[i][j] = pair;
+                trace[i][j] = "pair";
+            } else if (skipA >= skipB) {
+                dp[i][j] = skipA;
+                trace[i][j] = "skipA";
+            } else {
+                dp[i][j] = skipB;
+                trace[i][j] = "skipB";
+            }
+        }
+    }
+
+    const aligned = new Array<string>(m).fill("");
+    let i = 0;
+    let j = 0;
+    while (i < m && j < n) {
+        const action = trace[i][j];
+        if (action === "pair") {
+            // Only pair lines for word-diff if they are at least moderately similar.
+            aligned[i] = tokenSimilarityRatio(lines[i], compareLines[j]) >= 0.28 ? compareLines[j] : "";
+            i++;
+            j++;
+        } else if (action === "skipA") {
+            aligned[i] = "";
+            i++;
+        } else {
+            j++;
+        }
+    }
+    while (i < m) {
+        aligned[i] = "";
+        i++;
+    }
+
+    return aligned;
+}
+
 function buildWordDiffMask(line: string, compareLine: string): boolean[] {
     const tokens = tokenizeWordDiff(line);
     const compareTokens = tokenizeWordDiff(compareLine);
@@ -402,6 +515,14 @@ function WordDiffLine({
 }): React.ReactElement {
     if (!line) return <>{`\u00A0`}</>;
     if (line === compareLine) return <HighlightedLine line={line} />;
+    if (!compareLine) return <HighlightedLine line={line} />;
+
+    const similarity = tokenSimilarityRatio(line, compareLine);
+    if (similarity < 0.28) {
+        // PyCharm-style behavior is conservative: for low similarity, keep line-level diff
+        // instead of noisy token highlights.
+        return <HighlightedLine line={line} />;
+    }
 
     const tokens = tokenizeWordDiff(line);
     if (tokens.length === 0) return <>{`\u00A0`}</>;
@@ -448,7 +569,8 @@ function CodeBlock({
     compareLines?: string[];
 }) {
     const padded = padLines(lines, lineCount);
-    const paddedCompare = compareLines ? padLines(compareLines, lineCount) : undefined;
+    const alignedCompare = compareLines ? alignCompareLinesForWordDiff(lines, compareLines) : undefined;
+    const paddedCompare = alignedCompare ? padLines(alignedCompare, lineCount) : undefined;
 
     return (
         <div className={`code-block ${className ?? ""} ${wordHighlight ? "word-highlight" : ""}`}>
@@ -1351,6 +1473,32 @@ const STYLES = `
     --merge-warning: #f2c572;
     --merge-danger: #d86c6c;
     --merge-ok: #79c18d;
+    --merge-current-content-bg: var(
+        --vscode-merge-currentContentBackground,
+        ${PYCHARM_THEME.mergeEditor.conflictBlockBg}
+    );
+    --merge-incoming-content-bg: var(
+        --vscode-merge-incomingContentBackground,
+        ${PYCHARM_THEME.mergeEditor.conflictBlockBg}
+    );
+    --merge-common-content-bg: var(
+        --vscode-merge-commonContentBackground,
+        ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg}
+    );
+    --merge-result-conflict-bg: color-mix(
+        in srgb,
+        var(--merge-current-content-bg) 45%,
+        var(--merge-incoming-content-bg) 55%
+    );
+    --merge-result-nonconflict-bg: color-mix(
+        in srgb,
+        var(--merge-common-content-bg) 65%,
+        transparent
+    );
+    --merge-result-resolved-bg: var(
+        --vscode-diffEditor-insertedTextBackground,
+        ${PYCHARM_THEME.mergeEditor.addedResultBg}
+    );
 
     display: flex;
     flex-direction: column;
@@ -1659,7 +1807,8 @@ const STYLES = `
 }
 .merge-content {
     height: 100%;
-    overflow: auto hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: var(--vscode-editor-font-size, 12px);
     line-height: 20px;
@@ -1955,21 +2104,31 @@ const STYLES = `
 
 .change-conflict .conflict-ours .code-lines::before,
 .change-conflict .conflict-theirs .code-lines::before {
-    background: ${PYCHARM_THEME.mergeEditor.conflictBlockBg};
+    background: transparent;
+}
+.change-conflict .conflict-ours .code-lines::before {
+    background: var(--merge-current-content-bg);
+}
+.change-conflict .conflict-theirs .code-lines::before {
+    background: var(--merge-incoming-content-bg);
 }
 .change-conflict .conflict-result.unresolved .code-lines::before {
-    background: ${PYCHARM_THEME.mergeEditor.conflictResultBg};
+    background: var(
+        --vscode-mergeEditor-conflict-unhandledUnfocusedMinimapOverViewRuler,
+        var(--merge-result-conflict-bg)
+    );
+    opacity: 0.7;
 }
 .change-ours-only .conflict-ours .code-lines::before,
 .change-theirs-only .conflict-theirs .code-lines::before {
-    background: ${PYCHARM_THEME.mergeEditor.nonConflictBlockBg};
+    background: var(--merge-common-content-bg);
 }
 .change-ours-only .conflict-result.unresolved .code-lines::before,
 .change-theirs-only .conflict-result.unresolved .code-lines::before {
-    background: ${PYCHARM_THEME.mergeEditor.nonConflictResultBg};
+    background: var(--merge-result-nonconflict-bg);
 }
 .conflict-result.resolved .code-lines::before {
-    background: ${PYCHARM_THEME.mergeEditor.addedResultBg};
+    background: var(--merge-result-resolved-bg);
 }
 
 .conflict-ours .code-line,
