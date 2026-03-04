@@ -186,6 +186,12 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         const requestId = ++this.requestSeq;
         this.offset = 0;
         this.loadingMore = false;
+
+        if (this.currentBranch && !this.branches.some((b) => b.name === this.currentBranch)) {
+            this.currentBranch = null;
+            this.postToWebview({ type: "setSelectedBranch", branch: null });
+        }
+
         try {
             const commits = await this.gitOps.getLog(
                 this.PAGE_SIZE,
