@@ -128,6 +128,7 @@ const gitOpsState = {
         files: [],
     })),
     getUnpushedCommitHashes: vi.fn(async () => ["a1b2c3d4", "feed1234", "deadbee"]),
+    getFileContentAtRef: vi.fn(async (_filePath: string, ref: string) => `content:${ref}`),
     rollbackFiles: vi.fn(async () => undefined),
     shelveSave: vi.fn(async () => "saved"),
     getFileHistory: vi.fn(async () => "history"),
@@ -159,6 +160,10 @@ class MockCommitGraphViewProvider {
         action: string;
         hash: string;
     }>();
+    private openCommitFileDiffEmitter = new MockEventEmitter<{
+        commitHash: string;
+        filePath: string;
+    }>();
 
     constructor(_uri: unknown, _gitOps: unknown) {
         // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -168,6 +173,7 @@ class MockCommitGraphViewProvider {
     onBranchFilterChanged = this.branchFilterEmitter.event;
     onBranchAction = this.branchActionEmitter.event;
     onCommitAction = this.commitActionEmitter.event;
+    onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
     setBranches = vi.fn();
     refresh = vi.fn(async () => undefined);
     filterByBranch = vi.fn(async () => undefined);
@@ -187,12 +193,20 @@ class MockCommitGraphViewProvider {
     emitCommitAction(payload: { action: string; hash: string }): void {
         this.commitActionEmitter.fire(payload);
     }
+    emitOpenCommitFileDiff(payload: { commitHash: string; filePath: string }): void {
+        this.openCommitFileDiffEmitter.fire(payload);
+    }
 }
 
 class MockCommitInfoViewProvider {
     static readonly viewType = "intelligit.commitFiles";
+    private openCommitFileDiffEmitter = new MockEventEmitter<{
+        commitHash: string;
+        filePath: string;
+    }>();
     setCommitDetail = vi.fn();
     clear = vi.fn();
+    onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
     dispose = vi.fn();
 }
 
@@ -342,6 +356,7 @@ vi.mock("../../src/git/operations", async (importOriginal) => {
             getBranches = gitOpsState.getBranches;
             getCommitDetail = gitOpsState.getCommitDetail;
             getUnpushedCommitHashes = gitOpsState.getUnpushedCommitHashes;
+            getFileContentAtRef = gitOpsState.getFileContentAtRef;
             rollbackFiles = gitOpsState.rollbackFiles;
             shelveSave = gitOpsState.shelveSave;
             getFileHistory = gitOpsState.getFileHistory;
@@ -441,6 +456,9 @@ describe("extension integration", () => {
             files: [],
         }));
         gitOpsState.getUnpushedCommitHashes.mockResolvedValue(["a1b2c3d4", "feed1234", "deadbee"]);
+        gitOpsState.getFileContentAtRef.mockImplementation(
+            async (_filePath: string, ref: string) => `content:${ref}`,
+        );
         gitOpsState.rollbackFiles.mockResolvedValue(undefined);
         gitOpsState.shelveSave.mockResolvedValue("saved");
         gitOpsState.getFileHistory.mockResolvedValue("history");
@@ -778,6 +796,58 @@ describe("extension integration", () => {
         );
         expect(showErrorMessage).not.toHaveBeenCalledWith(
             "Invalid commit hash received for commit action.",
+        );
+    });
+
+    it("opens commit diff when commit graph requests file diff", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        openTextDocument.mockImplementation(async (arg: unknown) => {
+            if (arg && typeof arg === "object" && "content" in (arg as Record<string, unknown>)) {
+                const contentDoc = arg as { content: string };
+                return {
+                    uri: {
+                        toString: () => `untitled:${contentDoc.content}`,
+                    },
+                    languageId: "typescript",
+                };
+            }
+            return {
+                uri: {
+                    toString: () => JSON.stringify(arg),
+                },
+                languageId: "typescript",
+            };
+        });
+
+        await activate(context);
+
+        executeCommandFallback.mockClear();
+        latestCommitGraphProvider!.emitOpenCommitFileDiff({
+            commitHash: "a1b2c3d4",
+            filePath: "src/feature.ts",
+        });
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenNthCalledWith(
+            1,
+            "src/feature.ts",
+            "parent1",
+        );
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenNthCalledWith(
+            2,
+            "src/feature.ts",
+            "a1b2c3d4",
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.anything(),
+            expect.anything(),
+            "src/feature.ts (parent1 ↔ a1b2c3d4)",
         );
     });
 

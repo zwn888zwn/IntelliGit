@@ -275,11 +275,13 @@ describe("view providers integration", () => {
         const branchFilter = vi.fn();
         const branchAction = vi.fn();
         const commitAction = vi.fn();
+        const openCommitFileDiff = vi.fn();
 
         provider.onCommitSelected(selected);
         provider.onBranchFilterChanged(branchFilter);
         provider.onBranchAction(branchAction);
         provider.onCommitAction(commitAction);
+        provider.onOpenCommitFileDiff(openCommitFileDiff);
 
         provider.resolveWebviewView(
             webview.view as unknown as object,
@@ -316,6 +318,16 @@ describe("view providers integration", () => {
         expect(commitAction).toHaveBeenCalledWith({
             action: "copyRevision",
             hash: "abc1234",
+        });
+
+        await webview.send({
+            type: "openCommitFileDiff",
+            commitHash: "abc1234",
+            filePath: "src/file.ts",
+        });
+        expect(openCommitFileDiff).toHaveBeenCalledWith({
+            commitHash: "abc1234",
+            filePath: "src/file.ts",
         });
 
         const logCallsBeforePagedFetch = gitOps.getLog.mock.calls.length;

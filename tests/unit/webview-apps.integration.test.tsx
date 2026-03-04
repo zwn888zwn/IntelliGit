@@ -313,9 +313,43 @@ describe("CommitGraphApp integration", () => {
                     },
                 }),
             );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setCommitDetail",
+                        detail: {
+                            hash: "aa11",
+                            shortHash: "aa11",
+                            message: "feat: first commit",
+                            body: "",
+                            author: "Mahesh",
+                            email: "m@example.com",
+                            date: "2026-02-19T00:00:00Z",
+                            parentHashes: ["p1"],
+                            refs: ["HEAD -> main"],
+                            files: [
+                                {
+                                    path: "src/feature.ts",
+                                    status: "M",
+                                    additions: 3,
+                                    deletions: 1,
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
         });
         await flush();
         expect(document.body.textContent).toContain("Branch: features/right-click-context");
+
+        const changedFileRow = document.querySelector(
+            '[title="src/feature.ts"]',
+        ) as HTMLElement | null;
+        expect(changedFileRow).toBeTruthy();
+        act(() => {
+            changedFileRow?.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        });
 
         const branchRow = Array.from(document.querySelectorAll(".branch-row")).find((row) =>
             row.textContent?.includes("HEAD (main)"),
@@ -367,6 +401,13 @@ describe("CommitGraphApp integration", () => {
         );
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "selectCommit", hash: "aa11" }),
+        );
+        expect(vscode.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "openCommitFileDiff",
+                commitHash: "aa11",
+                filePath: "src/feature.ts",
+            }),
         );
     });
 });

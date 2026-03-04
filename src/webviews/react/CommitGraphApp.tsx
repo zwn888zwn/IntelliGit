@@ -247,6 +247,10 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "commitAction", action, hash });
     }, []);
 
+    const handleOpenDiff = useCallback((commitHash: string, filePath: string) => {
+        vscode.postMessage({ type: "openCommitFileDiff", commitHash, filePath });
+    }, []);
+
     return (
         <>
             <ThemeIconFontFaces fonts={iconFonts} />
@@ -314,6 +318,7 @@ function App(): React.ReactElement {
                             folderIcon={commitFolderIcon}
                             folderExpandedIcon={commitFolderExpandedIcon}
                             folderIconsByName={commitFolderIconsByName}
+                            onOpenDiff={handleOpenDiff}
                         />
                     </div>
                 </div>
