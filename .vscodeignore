@@ -49,6 +49,9 @@ bun.lock
 .DS_Store
 Thumbs.db
 
+# Vexp local data
+.vexp/**
+
 # Claude and swarm data
 .claude/**
 .claude-flow/**
