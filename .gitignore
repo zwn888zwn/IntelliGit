@@ -14,3 +14,6 @@ package-lock.json
 coverage/
 
 .vexp/
+
+CLAUDE.md
+.github/
