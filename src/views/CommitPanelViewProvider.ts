@@ -12,6 +12,7 @@ import { deleteFileWithFallback } from "../utils/fileOps";
 import { runWithNotificationProgress } from "../utils/notifications";
 import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
+import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 
 export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = "intelligit.commitPanel";
@@ -425,27 +426,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
     private registerThemeChangeListeners(): void {
         this.themeChangeDisposables.push(
-            vscode.window.onDidChangeActiveColorTheme(() => {
-                this.refreshDataWithErrorHandling();
-            }),
-        );
-
-        this.themeChangeDisposables.push(
-            vscode.workspace.onDidChangeConfiguration((event) => {
-                if (
-                    event.affectsConfiguration("workbench.iconTheme") ||
-                    event.affectsConfiguration("workbench.colorTheme")
-                ) {
-                    this.refreshDataWithErrorHandling();
-                }
-            }),
+            ...registerThemeChangeListeners(() => this.refreshDataWithErrorHandling()),
         );
     }
 
     private disposeThemeChangeDisposables(): void {
-        for (const disposable of this.themeChangeDisposables) {
-            disposable.dispose();
-        }
-        this.themeChangeDisposables = [];
+        disposeAll(this.themeChangeDisposables);
     }
 }

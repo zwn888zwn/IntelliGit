@@ -7,6 +7,7 @@ import type {
     WorkingFile,
 } from "../../types";
 import { FileIconThemeResolver, type ThemeFolderIcons } from "../../utils/fileIconTheme";
+import { registerThemeChangeListeners, disposeAll } from "./themeListeners";
 
 export class IconThemeService implements vscode.Disposable {
     private webview?: vscode.Webview;
@@ -185,18 +186,7 @@ export class IconThemeService implements vscode.Disposable {
 
     private registerIconThemeListeners(): void {
         this.iconThemeDisposables.push(
-            vscode.window.onDidChangeActiveColorTheme(() => this.markIconThemeDirty()),
-        );
-
-        this.iconThemeDisposables.push(
-            vscode.workspace.onDidChangeConfiguration((event) => {
-                if (
-                    event.affectsConfiguration("workbench.iconTheme") ||
-                    event.affectsConfiguration("workbench.colorTheme")
-                ) {
-                    this.markIconThemeDirty();
-                }
-            }),
+            ...registerThemeChangeListeners(() => this.markIconThemeDirty()),
         );
     }
 
@@ -206,9 +196,6 @@ export class IconThemeService implements vscode.Disposable {
     }
 
     private disposeIconThemeDisposables(): void {
-        for (const disposable of this.iconThemeDisposables) {
-            disposable.dispose();
-        }
-        this.iconThemeDisposables = [];
+        disposeAll(this.iconThemeDisposables);
     }
 }

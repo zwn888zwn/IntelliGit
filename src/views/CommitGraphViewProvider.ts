@@ -12,6 +12,7 @@ import type {
     CommitGraphInbound,
 } from "../webviews/react/commitGraphTypes";
 import { IconThemeService } from "./shared";
+import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import { buildWebviewShellHtml } from "./webviewHtml";
 
 export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
@@ -333,27 +334,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     private registerThemeChangeListeners(): void {
         this.themeChangeDisposables.push(
-            vscode.window.onDidChangeActiveColorTheme(() => {
-                this.refreshThemeDataWithErrorHandling();
-            }),
-        );
-
-        this.themeChangeDisposables.push(
-            vscode.workspace.onDidChangeConfiguration((event) => {
-                if (
-                    event.affectsConfiguration("workbench.iconTheme") ||
-                    event.affectsConfiguration("workbench.colorTheme")
-                ) {
-                    this.refreshThemeDataWithErrorHandling();
-                }
-            }),
+            ...registerThemeChangeListeners(() => this.refreshThemeDataWithErrorHandling()),
         );
     }
 
     private disposeThemeChangeDisposables(): void {
-        for (const disposable of this.themeChangeDisposables) {
-            disposable.dispose();
-        }
-        this.themeChangeDisposables = [];
+        disposeAll(this.themeChangeDisposables);
     }
 }
