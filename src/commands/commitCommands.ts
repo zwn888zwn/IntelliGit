@@ -58,12 +58,7 @@ export async function handleCommitContextAction(params: {
                 filters: { Patch: ["patch", "diff"] },
             });
             if (!targetUri) return;
-            const patchText = await executor.run([
-                "format-patch",
-                "-1",
-                "--stdout",
-                validatedHash,
-            ]);
+            const patchText = await executor.run(["format-patch", "-1", "--stdout", validatedHash]);
             await vscode.workspace.fs.writeFile(targetUri, Buffer.from(patchText, "utf8"));
             vscode.window.showInformationMessage(
                 `Patch created: ${path.basename(targetUri.fsPath)}`,
@@ -162,17 +157,16 @@ export async function handleCommitContextAction(params: {
                 return;
             }
 
-            const currentBranch =
-                currentBranches.find(
-                    (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
-                ) ?? {
-                    name: checkedOutBranchName,
-                    hash: "",
-                    isRemote: false,
-                    isCurrent: true,
-                    ahead: 0,
-                    behind: 0,
-                };
+            const currentBranch = currentBranches.find(
+                (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
+            ) ?? {
+                name: checkedOutBranchName,
+                hash: "",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            };
 
             let target = resolveTrackedRemoteBranch(currentBranch, currentBranches);
             let setUpstream = false;
@@ -260,9 +254,7 @@ export async function handleCommitContextAction(params: {
                 return;
             }
             if (await isMergeCommitHash(validatedHash, executor)) {
-                vscode.window.showErrorMessage(
-                    "Undo Commit is not available for merge commits.",
-                );
+                vscode.window.showErrorMessage("Undo Commit is not available for merge commits.");
                 return;
             }
             const undoCount = await getUndoCommitCount(validatedHash, executor);
@@ -273,9 +265,7 @@ export async function handleCommitContextAction(params: {
             );
             if (confirm !== "Undo") return;
             await executor.run(["reset", "--soft", `${validatedHash}^`]);
-            vscode.window.showInformationMessage(
-                `Undid ${undoCount} commit(s) up to ${short}.`,
-            );
+            vscode.window.showInformationMessage(`Undid ${undoCount} commit(s) up to ${short}.`);
             await refreshAll();
             return;
         }
@@ -295,9 +285,7 @@ export async function handleCommitContextAction(params: {
 
             const headHash = (await executor.run(["rev-parse", "HEAD"])).trim();
             if (isHashMatch(validatedHash, headHash)) {
-                const currentMessage = (
-                    await executor.run(["log", "-1", "--format=%B"])
-                ).trim();
+                const currentMessage = (await executor.run(["log", "-1", "--format=%B"])).trim();
                 const nextMessage = await vscode.window.showInputBox({
                     prompt: "Edit commit message",
                     value: currentMessage,
@@ -328,9 +316,7 @@ export async function handleCommitContextAction(params: {
                 return;
             }
             if (await isMergeCommitHash(validatedHash, executor)) {
-                vscode.window.showErrorMessage(
-                    "Drop Commit is not available for merge commits.",
-                );
+                vscode.window.showErrorMessage("Drop Commit is not available for merge commits.");
                 return;
             }
             const confirm = await vscode.window.showWarningMessage(
@@ -339,13 +325,7 @@ export async function handleCommitContextAction(params: {
                 "Drop",
             );
             if (confirm !== "Drop") return;
-            await executor.run([
-                "rebase",
-                "--onto",
-                `${validatedHash}^`,
-                validatedHash,
-                "HEAD",
-            ]);
+            await executor.run(["rebase", "--onto", `${validatedHash}^`, validatedHash, "HEAD"]);
             vscode.window.showInformationMessage(`Dropped ${short} from history.`);
             await refreshAll();
             return;

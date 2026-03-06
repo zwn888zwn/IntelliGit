@@ -3,12 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type {
-    ConflictSegment,
-    HunkResolution,
-    InboundMessage,
-    OutboundMessage,
-} from "./types";
+import type { ConflictSegment, HunkResolution, InboundMessage, OutboundMessage } from "./types";
 import { getVsCodeApi as getSharedVsCodeApi } from "../shared/vscodeApi";
 import {
     IconArrowRight,

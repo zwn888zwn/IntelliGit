@@ -27,9 +27,7 @@ export function getJetBrainsMergeToolPath(): string {
 }
 
 export function getPreferExternalMergeTool(): boolean {
-    return (
-        getIntelliGitConfig()?.get<boolean>("jetbrainsMergeTool.preferExternal", true) ?? true
-    );
+    return getIntelliGitConfig()?.get<boolean>("jetbrainsMergeTool.preferExternal", true) ?? true;
 }
 
 function getDefaultJetBrainsMergeToolPath(): string {
@@ -63,11 +61,7 @@ async function saveJetBrainsMergeToolPath(rawPath: string): Promise<string | nul
 
     const config = getIntelliGitConfig();
     if (config && typeof config.update === "function") {
-        await config.update(
-            "jetbrainsMergeTool.path",
-            trimmed,
-            vscode.ConfigurationTarget.Global,
-        );
+        await config.update("jetbrainsMergeTool.path", trimmed, vscode.ConfigurationTarget.Global);
     }
 
     const resolutionText =

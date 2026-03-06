@@ -2,8 +2,16 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { GitOps } from "../../src/git/operations";
 import { computeGraph } from "../../src/webviews/react/graph";
 import { formatDateTime } from "../../src/webviews/react/shared/date";
-import { FILE_TYPE_BADGES, GIT_STATUS_COLORS, GIT_STATUS_LABELS } from "../../src/webviews/react/shared/tokens";
-import { getErrorMessage, isBranchNotFullyMergedError, isUntrackedPathspecError } from "../../src/utils/errors";
+import {
+    FILE_TYPE_BADGES,
+    GIT_STATUS_COLORS,
+    GIT_STATUS_LABELS,
+} from "../../src/webviews/react/shared/tokens";
+import {
+    getErrorMessage,
+    isBranchNotFullyMergedError,
+    isUntrackedPathspecError,
+} from "../../src/utils/errors";
 import { getChevronIconStyle } from "../../src/webviews/react/branch-column/styles";
 import { contentContainerStyle, headerRowStyle } from "../../src/webviews/react/commit-list/styles";
 
@@ -33,7 +41,11 @@ describe("core utilities", () => {
         vi.doMock("vscode", () => ({
             window: { showErrorMessage },
             workspace: { fs: { delete: fsDelete } },
-            Uri: { joinPath: (root: { fsPath: string }, filePath: string) => ({ fsPath: `${root.fsPath}/${filePath}` }) },
+            Uri: {
+                joinPath: (root: { fsPath: string }, filePath: string) => ({
+                    fsPath: `${root.fsPath}/${filePath}`,
+                }),
+            },
         }));
         const { deleteFileWithFallback } = await import("../../src/utils/fileOps");
         type GitDeleteMock = Pick<GitOps, "deleteFile">;
@@ -56,7 +68,11 @@ describe("core utilities", () => {
         vi.doMock("vscode", () => ({
             window: { showErrorMessage },
             workspace: { fs: { delete: fsDelete } },
-            Uri: { joinPath: (root: { fsPath: string }, filePath: string) => ({ fsPath: `${root.fsPath}/${filePath}` }) },
+            Uri: {
+                joinPath: (root: { fsPath: string }, filePath: string) => ({
+                    fsPath: `${root.fsPath}/${filePath}`,
+                }),
+            },
         }));
         const { deleteFileWithFallback } = await import("../../src/utils/fileOps");
         type GitDeleteMock = Pick<GitOps, "deleteFile">;
@@ -84,7 +100,11 @@ describe("core utilities", () => {
         vi.doMock("vscode", () => ({
             window: { showErrorMessage },
             workspace: { fs: { delete: fsDelete } },
-            Uri: { joinPath: (_root: { fsPath: string }, filePath: string) => ({ fsPath: `/repo/${filePath}` }) },
+            Uri: {
+                joinPath: (_root: { fsPath: string }, filePath: string) => ({
+                    fsPath: `/repo/${filePath}`,
+                }),
+            },
         }));
         const { deleteFileWithFallback } = await import("../../src/utils/fileOps");
         type GitDeleteMock = Pick<GitOps, "deleteFile">;
@@ -109,9 +129,36 @@ describe("core utilities", () => {
                 throw new Error("pathspec did not match");
             }),
         };
-        const okFsFail = await deleteFileWithFallback(gitUntracked as GitOps, workspaceRoot, "a.txt");
+        const okFsFail = await deleteFileWithFallback(
+            gitUntracked as GitOps,
+            workspaceRoot,
+            "a.txt",
+        );
         expect(okFsFail).toBe(false);
         expect(showErrorMessage).toHaveBeenCalled();
+    });
+
+    it("assertRepoRelativePath accepts valid paths and rejects traversal/absolute", async () => {
+        vi.doMock("vscode", () => ({}));
+        const { assertRepoRelativePath } = await import("../../src/utils/fileOps");
+
+        // Valid relative paths
+        expect(assertRepoRelativePath("src/a.ts")).toBe("src/a.ts");
+        expect(assertRepoRelativePath("file.txt")).toBe("file.txt");
+        expect(assertRepoRelativePath("..env")).toBe("..env");
+        expect(assertRepoRelativePath("..foo/bar.ts")).toBe("..foo/bar.ts");
+        expect(assertRepoRelativePath(".config/file.ts")).toBe(".config/file.ts");
+
+        // Traversal — rejected
+        expect(() => assertRepoRelativePath("../etc/passwd")).toThrow("escaping repo root");
+        expect(() => assertRepoRelativePath("foo/../../etc/passwd")).toThrow("escaping repo root");
+        expect(() => assertRepoRelativePath("..")).toThrow("escaping repo root");
+
+        // Absolute — rejected
+        expect(() => assertRepoRelativePath("/etc/passwd")).toThrow("non-relative");
+
+        // Empty — rejected
+        expect(() => assertRepoRelativePath("")).toThrow("non-relative");
     });
 
     it("buildWebviewShellHtml includes CSP, nonce, title and script URI", async () => {
@@ -143,7 +190,7 @@ describe("core utilities", () => {
         expect(html).toContain("<title>Commit Graph</title>");
         expect(html).toContain("Content-Security-Policy");
         expect(html).toContain("script-src 'nonce-");
-        expect(html).toContain("src=\"webview:///dist/webview-commitgraph.js\"");
+        expect(html).toContain('src="webview:///dist/webview-commitgraph.js"');
         expect(html).toContain("background: #123");
     });
 

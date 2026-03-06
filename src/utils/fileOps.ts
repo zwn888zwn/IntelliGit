@@ -1,8 +1,26 @@
 // Shared file operation utilities used by extension host and view providers.
 
+import * as path from "path";
 import * as vscode from "vscode";
 import type { GitOps } from "../git/operations";
 import { getErrorMessage, isUntrackedPathspecError } from "./errors";
+
+/**
+ * Validate that a relative file path stays inside the repo root.
+ * Rejects absolute paths, '..' traversal, and empty strings.
+ * Returns the normalized relative path or throws.
+ */
+export function assertRepoRelativePath(filePath: string): string {
+    if (!filePath || path.isAbsolute(filePath)) {
+        throw new Error(`Rejected non-relative path: ${filePath}`);
+    }
+    const normalized = path.normalize(filePath);
+    const segments = normalized.split(path.sep);
+    if (segments.some((seg) => seg === "..")) {
+        throw new Error(`Rejected path escaping repo root: ${filePath}`);
+    }
+    return normalized;
+}
 
 /**
  * Delete a file via git rm, falling back to filesystem delete for untracked files.

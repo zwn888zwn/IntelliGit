@@ -8,7 +8,7 @@ import { GitOps } from "../git/operations";
 import type { ThemeFolderIconMap, WorkingFile, StashEntry } from "../types";
 import { buildWebviewShellHtml } from "./webviewHtml";
 import { getErrorMessage } from "../utils/errors";
-import { deleteFileWithFallback } from "../utils/fileOps";
+import { assertRepoRelativePath, deleteFileWithFallback } from "../utils/fileOps";
 import { runWithNotificationProgress } from "../utils/notifications";
 import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
@@ -139,6 +139,30 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private assertStringArray(value: unknown, field: string): string[] {
+        if (!Array.isArray(value)) {
+            throw new Error(`Expected string[] for '${field}', got ${typeof value}`);
+        }
+        if (!value.every((item): item is string => typeof item === "string")) {
+            throw new Error(`Expected all elements of '${field}' to be strings`);
+        }
+        return value;
+    }
+
+    private assertString(value: unknown, field: string): string {
+        if (typeof value !== "string") {
+            throw new Error(`Expected string for '${field}', got ${typeof value}`);
+        }
+        return value;
+    }
+
+    private assertNumber(value: unknown, field: string): number {
+        if (typeof value !== "number" || !Number.isFinite(value)) {
+            throw new Error(`Expected number for '${field}', got ${typeof value}`);
+        }
+        return value;
+    }
+
     private async handleMessage(msg: { type: string; [key: string]: unknown }): Promise<void> {
         switch (msg.type) {
             case "ready":
@@ -149,15 +173,19 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 await this.refreshData();
                 break;
 
-            case "stageFiles":
-                await this.gitOps.stageFiles(msg.paths as string[]);
+            case "stageFiles": {
+                const paths = this.assertStringArray(msg.paths, "paths");
+                await this.gitOps.stageFiles(paths);
                 await this.refreshData();
                 break;
+            }
 
-            case "unstageFiles":
-                await this.gitOps.unstageFiles(msg.paths as string[]);
+            case "unstageFiles": {
+                const paths = this.assertStringArray(msg.paths, "paths");
+                await this.gitOps.unstageFiles(paths);
                 await this.refreshData();
                 break;
+            }
 
             case "commitSelected": {
                 const message = (typeof msg.message === "string" ? msg.message : "").trim();
@@ -234,7 +262,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "rollback": {
-                const paths = msg.paths as string[];
+                const paths = this.assertStringArray(msg.paths, "paths");
                 if (paths.length === 0) {
                     const confirm = await vscode.window.showWarningMessage(
                         "Rollback all changes?",
@@ -258,7 +286,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "showDiff": {
-                const filePath = msg.path as string;
+                const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
                 const workspaceRoot = this.getWorkspaceRoot();
                 const uri = vscode.Uri.joinPath(workspaceRoot, filePath);
                 await vscode.commands.executeCommand("git.openChange", uri);
@@ -266,8 +294,10 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "shelveSave": {
-                const name = (msg.name as string | undefined) || "Shelved changes";
-                const paths = msg.paths as string[] | undefined;
+                const name = typeof msg.name === "string" ? msg.name : "Shelved changes";
+                const paths = Array.isArray(msg.paths)
+                    ? this.assertStringArray(msg.paths, "paths")
+                    : undefined;
                 await this.gitOps.shelveSave(paths, name);
                 vscode.window.showInformationMessage("Changes shelved.");
                 await this.refreshData();
@@ -275,7 +305,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "shelfPop": {
-                const index = msg.index as number;
+                const index = this.assertNumber(msg.index, "index");
                 await this.gitOps.shelvePop(index);
                 vscode.window.showInformationMessage("Unshelved changes.");
                 await this.refreshData();
@@ -283,7 +313,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "shelfApply": {
-                const index = msg.index as number;
+                const index = this.assertNumber(msg.index, "index");
                 await this.gitOps.shelveApply(index);
                 vscode.window.showInformationMessage("Applied shelved changes.");
                 await this.refreshData();
@@ -291,7 +321,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "shelfDelete": {
-                const index = msg.index as number;
+                const index = this.assertNumber(msg.index, "index");
                 const confirm = await vscode.window.showWarningMessage(
                     "Delete this shelved change?",
                     { modal: true },
@@ -305,8 +335,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "shelfSelect": {
-                const index = msg.index as number;
-                this.selectedShelfIndex = Number.isFinite(index) ? index : null;
+                const raw = typeof msg.index === "number" ? msg.index : NaN;
+                this.selectedShelfIndex = Number.isFinite(raw) ? raw : null;
                 if (this.selectedShelfIndex !== null) {
                     this.shelfFiles = await this.iconTheme.decorateWorkingFiles(
                         await this.gitOps.getShelvedFiles(this.selectedShelfIndex),
@@ -334,8 +364,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "showShelfDiff": {
-                const index = msg.index as number;
-                const filePath = msg.path as string;
+                const index = this.assertNumber(msg.index, "index");
+                const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
                 const patch = await this.gitOps.getShelvedFilePatch(index, filePath);
                 const doc = await vscode.workspace.openTextDocument({
                     content: patch || `No shelved diff found for ${filePath}.`,
@@ -346,7 +376,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "openFile": {
-                const filePath = msg.path as string;
+                const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
                 const workspaceRoot = this.getWorkspaceRoot();
                 const uri = vscode.Uri.joinPath(workspaceRoot, filePath);
                 await vscode.window.showTextDocument(uri);
@@ -354,7 +384,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "deleteFile": {
-                const filePath = msg.path as string;
+                const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
                 const confirm = await vscode.window.showWarningMessage(
                     `Delete ${filePath}?`,
                     { modal: true },
@@ -370,7 +400,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "showHistory": {
-                const filePath = msg.path as string;
+                const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
                 const history = await this.gitOps.getFileHistory(filePath);
                 const doc = await vscode.workspace.openTextDocument({
                     content: history || "No history found.",

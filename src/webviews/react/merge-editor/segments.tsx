@@ -14,7 +14,12 @@ import {
     IconCheck,
     IconDot,
 } from "./icons";
-import { tokenSimilarityRatio, buildWordDiffMask, tokenizeWordDiff, alignCompareLinesForWordDiff } from "./wordDiff";
+import {
+    tokenSimilarityRatio,
+    buildWordDiffMask,
+    tokenizeWordDiff,
+    alignCompareLinesForWordDiff,
+} from "./wordDiff";
 import { getResultLines } from "./mergeState";
 
 // --- Syntax highlighting ---

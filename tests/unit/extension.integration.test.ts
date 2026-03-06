@@ -7,7 +7,9 @@ const mockDisposables: Array<{ dispose: () => void }> = [];
 const executeCommandFallback = vi.fn(async () => undefined);
 const showInformationMessage = vi.fn(async () => undefined);
 const showErrorMessage = vi.fn(async () => undefined);
-const showWarningMessage = vi.fn(async (_msg?: string, _opts?: unknown, ...items: string[]) => items[0]);
+const showWarningMessage = vi.fn(
+    async (_msg?: string, _opts?: unknown, ...items: string[]) => items[0],
+);
 const showInputBox = vi.fn(async (opts?: { prompt?: string; value?: string }) => {
     if (!opts?.prompt) return "input";
     if (opts.prompt.includes("New branch")) return "feature/new";
@@ -384,9 +386,13 @@ vi.mock("../../src/views/CommitPanelViewProvider", () => ({
     CommitPanelViewProvider: MockCommitPanelViewProvider,
 }));
 
-vi.mock("../../src/utils/fileOps", () => ({
-    deleteFileWithFallback,
-}));
+vi.mock("../../src/utils/fileOps", async () => {
+    const actual = await vi.importActual("../../src/utils/fileOps");
+    return {
+        ...actual,
+        deleteFileWithFallback,
+    };
+});
 
 async function waitForAsync(): Promise<void> {
     const maxPasses = 8;
@@ -424,7 +430,14 @@ describe("extension integration", () => {
         executorRun.mockImplementation(defaultExecutorRunImpl);
         gitOpsState.isRepository.mockResolvedValue(true);
         gitOpsState.getBranches.mockResolvedValue([
-            { name: "main", hash: "feed1234", isRemote: false, isCurrent: true, ahead: 0, behind: 0 },
+            {
+                name: "main",
+                hash: "feed1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
             {
                 name: "feature-local",
                 hash: "a1b2c3d4",
@@ -467,7 +480,9 @@ describe("extension integration", () => {
         gitOpsState.acceptConflictSide.mockResolvedValue(undefined);
         deleteFileWithFallback.mockResolvedValue(true);
 
-        showWarningMessage.mockImplementation(async (_msg?: string, _opts?: unknown, ...items: string[]) => items[0]);
+        showWarningMessage.mockImplementation(
+            async (_msg?: string, _opts?: unknown, ...items: string[]) => items[0],
+        );
         showInputBox.mockImplementation(async (opts?: { prompt?: string; value?: string }) => {
             if (!opts?.prompt) return "input";
             if (opts.prompt.includes("New branch")) return "feature/new";
@@ -480,7 +495,9 @@ describe("extension integration", () => {
             fsPath: "/tmp/patch.diff",
             path: "/tmp/patch.diff",
         } as unknown as { fsPath: string; path: string });
-        showQuickPick.mockImplementation(async (items: Array<{ parentNumber: number }>) => items[0]);
+        showQuickPick.mockImplementation(
+            async (items: Array<{ parentNumber: number }>) => items[0],
+        );
     });
 
     it("activates and executes branch/file command handlers", async () => {
@@ -504,39 +521,39 @@ describe("extension integration", () => {
         await registeredCommands.get("intelligit.filterByBranch")?.("main");
         await registeredCommands.get("intelligit.showGitLog")?.();
 
-        await registeredCommands
-            .get("intelligit.checkout")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.newBranchFrom")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.checkoutAndRebase")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.rebaseCurrentOnto")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.mergeIntoCurrent")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.updateBranch")
-            ?.({ branch: { name: "main", isRemote: false, isCurrent: true } });
-        await registeredCommands
-            .get("intelligit.pushBranch")
-            ?.({ branch: { name: "main", isRemote: false, isCurrent: true, remote: "origin" } });
-        await registeredCommands
-            .get("intelligit.renameBranch")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.deleteBranch")
-            ?.({ branch: { name: "feature-unmerged", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.deleteBranch")
-            ?.({ branch: { name: "feature-force", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.deleteBranch")
-            ?.({ branch: { name: "origin/feature-remote", isRemote: true, remote: "origin" } });
+        await registeredCommands.get("intelligit.checkout")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.newBranchFrom")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.checkoutAndRebase")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.rebaseCurrentOnto")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.mergeIntoCurrent")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.updateBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true },
+        });
+        await registeredCommands.get("intelligit.pushBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true, remote: "origin" },
+        });
+        await registeredCommands.get("intelligit.renameBranch")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.deleteBranch")?.({
+            branch: { name: "feature-unmerged", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.deleteBranch")?.({
+            branch: { name: "feature-force", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.deleteBranch")?.({
+            branch: { name: "origin/feature-remote", isRemote: true, remote: "origin" },
+        });
 
         await registeredCommands.get("intelligit.fileRollback")?.({ filePath: "src/a.ts" });
         await registeredCommands.get("intelligit.fileJumpToSource")?.({ filePath: "src/a.ts" });
@@ -544,15 +561,15 @@ describe("extension integration", () => {
         await registeredCommands.get("intelligit.fileShelve")?.({ filePath: "src/a.ts" });
         await registeredCommands.get("intelligit.fileShowHistory")?.({ filePath: "src/a.ts" });
         await registeredCommands.get("intelligit.fileRefresh")?.();
-        await registeredCommands
-            .get("intelligit.openMergeConflict")
-            ?.({ filePath: "src/conflicted.ts" });
-        await registeredCommands
-            .get("intelligit.conflictAcceptYours")
-            ?.({ filePath: "src/conflicted.ts" });
-        await registeredCommands
-            .get("intelligit.conflictAcceptTheirs")
-            ?.({ filePath: "src/conflicted.ts" });
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/conflicted.ts",
+        });
+        await registeredCommands.get("intelligit.conflictAcceptYours")?.({
+            filePath: "src/conflicted.ts",
+        });
+        await registeredCommands.get("intelligit.conflictAcceptTheirs")?.({
+            filePath: "src/conflicted.ts",
+        });
         await registeredCommands.get("intelligit.mergeConflictsRefresh")?.();
         await registeredCommands.get("intelligit.openConflictSession")?.();
 
@@ -625,9 +642,9 @@ describe("extension integration", () => {
             },
         ]);
 
-        await registeredCommands
-            .get("intelligit.mergeIntoCurrent")
-            ?.({ branch: { name: "feature-local", isRemote: false } });
+        await registeredCommands.get("intelligit.mergeIntoCurrent")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
 
         const vscode = await import("vscode");
         const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
@@ -757,10 +774,7 @@ describe("extension integration", () => {
 
         await activate(context);
 
-        const emitCommitAction = async (payload: {
-            action: string;
-            hash: string;
-        }) => {
+        const emitCommitAction = async (payload: { action: string; hash: string }) => {
             latestCommitGraphProvider!.emitCommitAction(payload);
             await waitForAsync();
         };
@@ -841,11 +855,7 @@ describe("extension integration", () => {
             "a1b2c3d4",
             "HEAD",
         ]);
-        expect(executorRun).toHaveBeenCalledWith([
-            "push",
-            "origin",
-            "a1b2c3d4:refs/heads/main",
-        ]);
+        expect(executorRun).toHaveBeenCalledWith(["push", "origin", "a1b2c3d4:refs/heads/main"]);
         expect(withProgress).toHaveBeenCalledWith(
             expect.objectContaining({
                 location: 15,
@@ -1040,10 +1050,7 @@ describe("extension integration", () => {
         } as unknown as MockExtensionContext;
         await activate(context);
 
-        const emitCommitAction = async (payload: {
-            action: string;
-            hash: string;
-        }) => {
+        const emitCommitAction = async (payload: { action: string; hash: string }) => {
             latestCommitGraphProvider!.emitCommitAction(payload);
             await waitForAsync();
         };
@@ -1142,7 +1149,8 @@ describe("extension integration", () => {
         await activate(context);
 
         executorRun.mockImplementation(async (args: string[]) => {
-            if (args[0] === "checkout" && args[1] === "broken-branch") throw new Error("checkout boom");
+            if (args[0] === "checkout" && args[1] === "broken-branch")
+                throw new Error("checkout boom");
             if (args[0] === "rebase" && args[1] === "fail-rebase") throw new Error("rebase boom");
             if (args[0] === "merge" && args[1] === "fail-merge") throw new Error("merge boom");
             if (args[0] === "fetch") throw new Error("fetch boom");
@@ -1162,65 +1170,70 @@ describe("extension integration", () => {
             return defaultExecutorRunImpl(args);
         });
 
-        await registeredCommands
-            .get("intelligit.checkout")
-            ?.({ branch: { name: "origin/feature-local", isRemote: true } });
-        await registeredCommands
-            .get("intelligit.checkout")
-            ?.({ branch: { name: "origin/topic/new", isRemote: true } });
-        await registeredCommands
-            .get("intelligit.checkout")
-            ?.({ branch: { name: "broken-branch", isRemote: false } });
+        await registeredCommands.get("intelligit.checkout")?.({
+            branch: { name: "origin/feature-local", isRemote: true },
+        });
+        await registeredCommands.get("intelligit.checkout")?.({
+            branch: { name: "origin/topic/new", isRemote: true },
+        });
+        await registeredCommands.get("intelligit.checkout")?.({
+            branch: { name: "broken-branch", isRemote: false },
+        });
 
         gitOpsState.getBranches.mockResolvedValueOnce([
             { name: "topic", hash: "a1", isRemote: false, isCurrent: false, ahead: 0, behind: 0 },
         ]);
         await registeredCommands.get("intelligit.refresh")?.();
-        await registeredCommands
-            .get("intelligit.checkoutAndRebase")
-            ?.({ branch: { name: "topic", isRemote: false } });
+        await registeredCommands.get("intelligit.checkoutAndRebase")?.({
+            branch: { name: "topic", isRemote: false },
+        });
 
         gitOpsState.getBranches.mockResolvedValueOnce([
-            { name: "main", hash: "feed1234", isRemote: false, isCurrent: true, ahead: 0, behind: 0 },
+            {
+                name: "main",
+                hash: "feed1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
         ]);
         await registeredCommands.get("intelligit.refresh")?.();
-        await registeredCommands
-            .get("intelligit.checkoutAndRebase")
-            ?.({ branch: { name: "main", isRemote: false } });
+        await registeredCommands.get("intelligit.checkoutAndRebase")?.({
+            branch: { name: "main", isRemote: false },
+        });
 
-        await registeredCommands
-            .get("intelligit.rebaseCurrentOnto")
-            ?.({ branch: { name: "fail-rebase", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.mergeIntoCurrent")
-            ?.({ branch: { name: "fail-merge", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.updateBranch")
-            ?.({ branch: { name: "main", isRemote: false, isCurrent: false, remote: "origin" } });
+        await registeredCommands.get("intelligit.rebaseCurrentOnto")?.({
+            branch: { name: "fail-rebase", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.mergeIntoCurrent")?.({
+            branch: { name: "fail-merge", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.updateBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: false, remote: "origin" },
+        });
 
-        await registeredCommands
-            .get("intelligit.pushBranch")
-            ?.({ branch: { name: "main", isRemote: false, isCurrent: true } });
-        await registeredCommands
-            .get("intelligit.pushBranch")
-            ?.({ branch: { name: "topic", isRemote: false, isCurrent: false } });
-        await registeredCommands
-            .get("intelligit.pushBranch")
-            ?.({
-                branch: { name: "force-fail", isRemote: false, isCurrent: true, remote: "origin" },
-            });
+        await registeredCommands.get("intelligit.pushBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true },
+        });
+        await registeredCommands.get("intelligit.pushBranch")?.({
+            branch: { name: "topic", isRemote: false, isCurrent: false },
+        });
+        await registeredCommands.get("intelligit.pushBranch")?.({
+            branch: { name: "force-fail", isRemote: false, isCurrent: true, remote: "origin" },
+        });
 
         showInputBox.mockResolvedValueOnce("renamed-branch");
-        await registeredCommands
-            .get("intelligit.renameBranch")
-            ?.({ branch: { name: "fail-rename", isRemote: false } });
+        await registeredCommands.get("intelligit.renameBranch")?.({
+            branch: { name: "fail-rename", isRemote: false },
+        });
 
-        await registeredCommands
-            .get("intelligit.deleteBranch")
-            ?.({ branch: { name: "main", isRemote: false } });
-        await registeredCommands
-            .get("intelligit.deleteBranch")
-            ?.({ branch: { name: "feature-force-fail", isRemote: false } });
+        await registeredCommands.get("intelligit.deleteBranch")?.({
+            branch: { name: "main", isRemote: false },
+        });
+        await registeredCommands.get("intelligit.deleteBranch")?.({
+            branch: { name: "feature-force-fail", isRemote: false },
+        });
 
         gitOpsState.rollbackFiles.mockRejectedValueOnce(new Error("rollback failed"));
         await registeredCommands.get("intelligit.fileRollback")?.({ filePath: "src/a.ts" });
@@ -1231,15 +1244,25 @@ describe("extension integration", () => {
         deleteFileWithFallback.mockResolvedValueOnce(false);
         await registeredCommands.get("intelligit.fileDelete")?.({ filePath: "src/a.ts" });
 
-        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Checkout failed: checkout boom"));
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining("Checkout failed: checkout boom"),
+        );
         expect(showErrorMessage).toHaveBeenCalledWith("No current branch found.");
-        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Merge failed: merge boom"));
-        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Update failed: fetch boom"));
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining("Merge failed: merge boom"),
+        );
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining("Update failed: fetch boom"),
+        );
         expect(showErrorMessage).toHaveBeenCalledWith(
             "Push failed: No remote configured for branch topic.",
         );
-        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Push failed: push boom"));
-        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Rename failed: rename boom"));
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining("Push failed: push boom"),
+        );
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining("Rename failed: rename boom"),
+        );
         expect(showErrorMessage).toHaveBeenCalledWith(
             expect.stringContaining("Delete failed: force delete failed"),
         );

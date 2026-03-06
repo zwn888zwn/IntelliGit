@@ -14,7 +14,7 @@ import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
 import type { Branch } from "./types";
 import type { CommitAction } from "./webviews/react/commitGraphTypes";
 import { getErrorMessage } from "./utils/errors";
-import { deleteFileWithFallback } from "./utils/fileOps";
+import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
 import { createBranchCommands } from "./commands/branchCommands";
 import { RefreshService } from "./services/refreshService";
@@ -100,7 +100,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // --- Merge conflict helpers ---
 
     const openBuiltInMergeEditorForFile = async (filePath: string): Promise<void> => {
-        const fileUri = vscode.Uri.file(path.join(repoRoot, filePath));
+        const fileUri = vscode.Uri.file(path.join(repoRoot, assertRepoRelativePath(filePath)));
         try {
             await vscode.commands.executeCommand("git.openMergeEditor", fileUri);
         } catch (error) {
@@ -212,7 +212,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         filePath: string;
     }): Promise<void> => {
         try {
-            await openCommitFileDiff(params.commitHash, params.filePath, repoRoot, gitOps, executor);
+            await openCommitFileDiff(
+                params.commitHash,
+                params.filePath,
+                repoRoot,
+                gitOps,
+                executor,
+            );
         } catch (error) {
             const message = getErrorMessage(error);
             vscode.window.showErrorMessage(`Failed to open commit diff: ${message}`);
@@ -419,7 +425,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             "intelligit.fileJumpToSource",
             async (ctx: { filePath?: string }) => {
                 if (!ctx?.filePath) return;
-                const uri = vscode.Uri.joinPath(workspaceFolder.uri, ctx.filePath);
+                const uri = vscode.Uri.joinPath(
+                    workspaceFolder.uri,
+                    assertRepoRelativePath(ctx.filePath),
+                );
                 await vscode.window.showTextDocument(uri);
             },
         ),
@@ -427,21 +436,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             "intelligit.fileDelete",
             async (ctx: { filePath?: string }) => {
                 if (!ctx?.filePath) return;
+                const safePath = assertRepoRelativePath(ctx.filePath);
                 const confirm = await vscode.window.showWarningMessage(
-                    `Delete ${ctx.filePath}?`,
+                    `Delete ${safePath}?`,
                     { modal: true },
                     "Delete",
                 );
                 if (confirm !== "Delete") return;
 
-                const deleted = await deleteFileWithFallback(
-                    gitOps,
-                    workspaceFolder.uri,
-                    ctx.filePath,
-                );
+                const deleted = await deleteFileWithFallback(gitOps, workspaceFolder.uri, safePath);
                 if (!deleted) return;
 
-                vscode.window.showInformationMessage(`Deleted ${ctx.filePath}`);
+                vscode.window.showInformationMessage(`Deleted ${safePath}`);
                 await commitPanel.refresh();
             },
         ),

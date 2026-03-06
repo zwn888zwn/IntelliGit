@@ -10,20 +10,13 @@ import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
-import {
-    getCommitParentHashes,
-    pickMainlineParent,
-    buildCommitFilePatch,
-} from "./gitHelpers";
+import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from "./gitHelpers";
 
 export function normalizeGitPath(fsPathValue: string): string {
     return fsPathValue.split(path.sep).join("/");
 }
 
-export function getRepoRelativeFilePathFromUri(
-    uri: vscode.Uri,
-    repoRoot: string,
-): string | null {
+export function getRepoRelativeFilePathFromUri(uri: vscode.Uri, repoRoot: string): string | null {
     if (uri.scheme !== "file") return null;
     const relative = path.relative(repoRoot, uri.fsPath);
     if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return null;
@@ -63,9 +56,7 @@ async function closeTemporaryDiffSourceTab(uri: vscode.Uri): Promise<void> {
         .flatMap((group) => group.tabs)
         .find((tab) => {
             const input = tab.input;
-            return (
-                input instanceof vscode.TabInputText && input.uri.toString() === uri.toString()
-            );
+            return input instanceof vscode.TabInputText && input.uri.toString() === uri.toString();
         });
     if (!matchingTab) return;
     try {
@@ -108,7 +99,12 @@ export async function openCommitFileDiff(
     let parentRef: string;
     let parentDisplayHash: string;
     if (parents.length > 1) {
-        const result = await pickMainlineParent(commitHash, "Open Commit File Diff", executor, parents);
+        const result = await pickMainlineParent(
+            commitHash,
+            "Open Commit File Diff",
+            executor,
+            parents,
+        );
         if (result.kind === "cancelled") return;
         if (result.kind === "notMerge") return;
         parentRef = `${commitHash}^${result.parentNumber}`;
@@ -187,9 +183,7 @@ export async function compareEditorFileWithBranch(
 ): Promise<void> {
     const fileUri = getEditorContextFileUri(ctx);
     if (!fileUri) {
-        vscode.window.showErrorMessage(
-            "Compare with Branch is only available for local files.",
-        );
+        vscode.window.showErrorMessage("Compare with Branch is only available for local files.");
         return;
     }
 
@@ -226,7 +220,13 @@ export async function compareEditorFileWithBranch(
         });
         if (!picked) return;
 
-        await openDiffAgainstGitRef(fileUri, repoRelativeFilePath, picked.refName, "branch", gitOps);
+        await openDiffAgainstGitRef(
+            fileUri,
+            repoRelativeFilePath,
+            picked.refName,
+            "branch",
+            gitOps,
+        );
     } catch (error) {
         const message = getErrorMessage(error);
         vscode.window.showErrorMessage(`Compare with branch failed: ${message}`);
@@ -240,9 +240,7 @@ export async function compareEditorFileWithRevision(
 ): Promise<void> {
     const fileUri = getEditorContextFileUri(ctx);
     if (!fileUri) {
-        vscode.window.showErrorMessage(
-            "Compare with Revision is only available for local files.",
-        );
+        vscode.window.showErrorMessage("Compare with Revision is only available for local files.");
         return;
     }
 
@@ -313,7 +311,13 @@ export async function compareCommitInfoFileWithLocal(
     if (!fileCtx) return;
     try {
         const fileUri = vscode.Uri.file(path.join(repoRoot, fileCtx.filePath));
-        await openDiffAgainstGitRef(fileUri, fileCtx.filePath, fileCtx.commitHash, "revision", gitOps);
+        await openDiffAgainstGitRef(
+            fileUri,
+            fileCtx.filePath,
+            fileCtx.commitHash,
+            "revision",
+            gitOps,
+        );
     } catch (error) {
         const message = getErrorMessage(error);
         vscode.window.showErrorMessage(`Compare with local failed: ${message}`);

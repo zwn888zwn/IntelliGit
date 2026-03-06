@@ -87,4 +87,5 @@ export type CommitGraphInbound =
           iconFonts?: ThemeIconFont[];
       }
     | { type: "clearCommitDetail" }
+    | { type: "loadError"; message: string }
     | { type: "error"; message: string };

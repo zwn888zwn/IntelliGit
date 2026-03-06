@@ -119,25 +119,16 @@ export async function getCommitParentHashes(
     return parts.slice(1);
 }
 
-export async function isMergeCommitHash(
-    hash: string,
-    executor: GitExecutor,
-): Promise<boolean> {
+export async function isMergeCommitHash(hash: string, executor: GitExecutor): Promise<boolean> {
     return (await getCommitParentHashes(hash, executor)).length > 1;
 }
 
-export async function isCommitUnpushed(
-    hash: string,
-    gitOps: GitOps,
-): Promise<boolean> {
+export async function isCommitUnpushed(hash: string, gitOps: GitOps): Promise<boolean> {
     const unpushed = await gitOps.getUnpushedCommitHashes();
     return unpushed.some((h) => isHashMatch(h, hash));
 }
 
-export async function getUndoCommitCount(
-    hash: string,
-    executor: GitExecutor,
-): Promise<number> {
+export async function getUndoCommitCount(hash: string, executor: GitExecutor): Promise<number> {
     const raw = (await executor.run(["rev-list", "--count", `${hash}^..HEAD`])).trim();
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
@@ -280,12 +271,7 @@ export async function showDeletedBranchActions(
             await runWithNotificationProgress(
                 `Deleting tracked branch ${tracked.remote}/${tracked.remoteBranch}...`,
                 async () => {
-                    await executor.run([
-                        "push",
-                        tracked.remote,
-                        "--delete",
-                        tracked.remoteBranch,
-                    ]);
+                    await executor.run(["push", tracked.remote, "--delete", tracked.remoteBranch]);
                 },
             );
             vscode.window.showInformationMessage(

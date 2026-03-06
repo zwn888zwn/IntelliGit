@@ -195,6 +195,10 @@ function App(): React.ReactElement {
                     setCommitFolderExpandedIcon(undefined);
                     setCommitFolderIconsByName(undefined);
                     break;
+                case "loadError":
+                    loadingMore.current = false;
+                    console.error("[IntelliGit] Load error:", data.message);
+                    break;
                 case "error":
                     console.error("[IntelliGit] Extension error:", data);
                     break;

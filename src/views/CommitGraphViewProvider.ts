@@ -214,17 +214,21 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 0,
             );
             if (requestId !== this.requestSeq) return;
+            const unpushedHashes = await this.gitOps.getUnpushedCommitHashes();
+            if (requestId !== this.requestSeq) return;
             this.offset = commits.length;
             this.postToWebview({
                 type: "loadCommits",
                 commits,
                 hasMore: commits.length >= this.PAGE_SIZE,
                 append: false,
-                unpushedHashes: await this.gitOps.getUnpushedCommitHashes(),
+                unpushedHashes,
             });
         } catch (err) {
+            if (requestId !== this.requestSeq) return;
             const message = err instanceof Error ? err.message : String(err);
             vscode.window.showErrorMessage(`Git log error: ${message}`);
+            this.postToWebview({ type: "loadError", message });
         }
     }
 
@@ -240,18 +244,21 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 this.offset,
             );
             if (requestId !== this.requestSeq) return;
-            const newCommits = commits;
-            this.offset += newCommits.length;
+            const unpushedHashes = await this.gitOps.getUnpushedCommitHashes();
+            if (requestId !== this.requestSeq) return;
+            this.offset += commits.length;
             this.postToWebview({
                 type: "loadCommits",
-                commits: newCommits,
-                hasMore: newCommits.length >= this.PAGE_SIZE,
+                commits,
+                hasMore: commits.length >= this.PAGE_SIZE,
                 append: true,
-                unpushedHashes: await this.gitOps.getUnpushedCommitHashes(),
+                unpushedHashes,
             });
         } catch (err) {
+            if (requestId !== this.requestSeq) return;
             const message = err instanceof Error ? err.message : String(err);
             vscode.window.showErrorMessage(`Git log error: ${message}`);
+            this.postToWebview({ type: "loadError", message });
         } finally {
             this.loadingMore = false;
         }

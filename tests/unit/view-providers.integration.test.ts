@@ -113,9 +113,13 @@ vi.mock("vscode", () => vscodeMock);
 vi.mock("../../src/views/webviewHtml", () => ({
     buildWebviewShellHtml: vi.fn(() => "<html></html>"),
 }));
-vi.mock("../../src/utils/fileOps", () => ({
-    deleteFileWithFallback,
-}));
+vi.mock("../../src/utils/fileOps", async () => {
+    const actual = await vi.importActual("../../src/utils/fileOps");
+    return {
+        ...actual,
+        deleteFileWithFallback,
+    };
+});
 
 function createWebviewView() {
     let messageHandler: MessageHandler | undefined;
@@ -514,6 +518,28 @@ describe("view providers integration", () => {
         showWarningMessage.mockResolvedValueOnce("Delete");
         await webview.send({ type: "deleteFile", path: "src/a.ts" });
         expect(deleteFileWithFallback).toHaveBeenCalled();
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider rejects malformed array payloads strictly", async () => {
+        const { provider, webview } = await setupCommitPanelProvider();
+        // Mixed array with non-string elements should fail, not silently filter
+        await webview.send({ type: "stageFiles", paths: ["src/a.ts", 42] });
+        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("all elements"));
+        // Non-array should also fail
+        await webview.send({ type: "unstageFiles", paths: "not-an-array" });
+        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Expected string[]"));
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider rejects path traversal in file operations", async () => {
+        const { provider, webview } = await setupCommitPanelProvider();
+        await webview.send({ type: "showDiff", path: "../etc/passwd" });
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            expect.stringContaining("escaping repo root"),
+        );
+        await webview.send({ type: "openFile", path: "/etc/passwd" });
+        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("non-relative"));
         provider.dispose();
     });
 

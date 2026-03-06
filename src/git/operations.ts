@@ -359,51 +359,48 @@ export class GitOps {
             }
         }
 
-        // Get numstat for unstaged changes
-        try {
-            const diffStat = await this.executor.run(["diff", "--numstat"]);
-            for (const line of diffStat.trim().split("\n")) {
-                if (!line.trim()) continue;
-                const cols = line.split("\t");
-                if (cols.length < 3) continue;
-                const add = cols[0];
-                const del = cols[1];
-                const filePath = cols[cols.length - 1];
-                const parsedAdd = add === "-" ? 0 : parseInt(add);
-                const parsedDel = del === "-" ? 0 : parseInt(del);
-                for (const file of files) {
-                    if (file.path === filePath && !file.staged) {
-                        file.additions = Number.isNaN(parsedAdd) ? 0 : parsedAdd;
-                        file.deletions = Number.isNaN(parsedDel) ? 0 : parsedDel;
-                    }
-                }
-            }
-        } catch (err) {
-            logGitOpsWarning("Failed to get unstaged numstat", err, { notifyUser: true });
+        // Build keyed lookup for O(1) numstat matching
+        const filesByKey = new Map<string, WorkingFile>();
+        for (const file of files) {
+            filesByKey.set(`${file.path}:${file.staged}`, file);
         }
 
-        // Get numstat for staged changes
-        try {
-            const stagedStat = await this.executor.run(["diff", "--cached", "--numstat"]);
-            for (const line of stagedStat.trim().split("\n")) {
-                if (!line.trim()) continue;
-                const cols = line.split("\t");
-                if (cols.length < 3) continue;
-                const add = cols[0];
-                const del = cols[1];
-                const filePath = cols[cols.length - 1];
-                const parsedAdd = add === "-" ? 0 : parseInt(add);
-                const parsedDel = del === "-" ? 0 : parseInt(del);
-                for (const file of files) {
-                    if (file.path === filePath && file.staged) {
+        const applyNumstat = (output: string, staged: boolean, label: string): void => {
+            try {
+                for (const line of output.trim().split("\n")) {
+                    if (!line.trim()) continue;
+                    const cols = line.split("\t");
+                    if (cols.length < 3) continue;
+                    const add = cols[0];
+                    const del = cols[1];
+                    const filePath = cols[cols.length - 1];
+                    const parsedAdd = add === "-" ? 0 : parseInt(add);
+                    const parsedDel = del === "-" ? 0 : parseInt(del);
+                    const file = filesByKey.get(`${filePath}:${staged}`);
+                    if (file) {
                         file.additions = Number.isNaN(parsedAdd) ? 0 : parsedAdd;
                         file.deletions = Number.isNaN(parsedDel) ? 0 : parsedDel;
                     }
                 }
+            } catch (err) {
+                logGitOpsWarning(`Failed to get ${label} numstat`, err, { notifyUser: true });
             }
-        } catch (err) {
-            logGitOpsWarning("Failed to get staged numstat", err, { notifyUser: true });
-        }
+        };
+
+        // Fetch unstaged and staged numstat in parallel
+        const [unstagedStat, stagedStat] = await Promise.all([
+            this.executor.run(["diff", "--numstat"]).catch((err) => {
+                logGitOpsWarning("Failed to get unstaged numstat", err, { notifyUser: true });
+                return "";
+            }),
+            this.executor.run(["diff", "--cached", "--numstat"]).catch((err) => {
+                logGitOpsWarning("Failed to get staged numstat", err, { notifyUser: true });
+                return "";
+            }),
+        ]);
+
+        applyNumstat(unstagedStat, false, "unstaged");
+        applyNumstat(stagedStat, true, "staged");
 
         return files;
     }

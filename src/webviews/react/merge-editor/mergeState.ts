@@ -1,12 +1,7 @@
 // State management and resolution helpers for the merge editor.
 // Contains the reducer, conflict resolution logic, and result builder.
 
-import type {
-    MergeEditorData,
-    MergeSegment,
-    ConflictSegment,
-    HunkResolution,
-} from "./types";
+import type { MergeEditorData, MergeSegment, ConflictSegment, HunkResolution } from "./types";
 
 export interface State {
     data: MergeEditorData | null;

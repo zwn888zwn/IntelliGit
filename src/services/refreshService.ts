@@ -102,10 +102,8 @@ export class RefreshService implements vscode.Disposable {
         }
 
         try {
-            const refsWatcher = fs.watch(
-                path.join(gitDir, "refs"),
-                { recursive: true },
-                () => this.debouncedFullRefresh(),
+            const refsWatcher = fs.watch(path.join(gitDir, "refs"), { recursive: true }, () =>
+                this.debouncedFullRefresh(),
             );
             this.fsWatchers.push(refsWatcher);
         } catch {

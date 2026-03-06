@@ -12,6 +12,7 @@ import {
     checkoutBranch,
     getCheckedOutBranchName,
     getLocalBranchMergeStatusForDelete,
+    isValidBranchName,
     resolveRemoteDeleteTarget,
     resolveRemoteName,
     resolveTrackedRemoteBranch,
@@ -23,7 +24,10 @@ export interface BranchCommandDeps {
     gitOps: GitOps;
     getCurrentBranchName: () => string | undefined;
     getCurrentBranches: () => Branch[];
-    openConflictSession: (labels?: { sourceBranch?: string; targetBranch?: string }) => Promise<void>;
+    openConflictSession: (labels?: {
+        sourceBranch?: string;
+        targetBranch?: string;
+    }) => Promise<void>;
     refreshConflictUi: () => Promise<void>;
 }
 
@@ -33,7 +37,14 @@ export interface BranchCommandEntry {
 }
 
 export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntry[] {
-    const { executor, gitOps, getCurrentBranchName, getCurrentBranches, openConflictSession, refreshConflictUi } = deps;
+    const {
+        executor,
+        gitOps,
+        getCurrentBranchName,
+        getCurrentBranches,
+        openConflictSession,
+        refreshConflictUi,
+    } = deps;
 
     return [
         {
@@ -61,6 +72,12 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     placeHolder: "branch-name",
                 });
                 if (!newName) return;
+                if (!isValidBranchName(newName)) {
+                    vscode.window.showErrorMessage(
+                        `Invalid branch name '${newName}'. Names must contain only alphanumeric characters, dots, dashes, underscores, or slashes, and must not start with a dash.`,
+                    );
+                    return;
+                }
                 try {
                     await executor.run(["checkout", "-b", newName, base]);
                     vscode.window.showInformationMessage(`Created and checked out ${newName}`);
@@ -237,6 +254,12 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     value: name,
                 });
                 if (!newName || newName === name) return;
+                if (!isValidBranchName(newName)) {
+                    vscode.window.showErrorMessage(
+                        `Invalid branch name '${newName}'. Names must contain only alphanumeric characters, dots, dashes, underscores, or slashes, and must not start with a dash.`,
+                    );
+                    return;
+                }
                 try {
                     await executor.run(["branch", "-m", name, newName]);
                     vscode.window.showInformationMessage(`Renamed ${name} to ${newName}`);
