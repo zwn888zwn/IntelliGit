@@ -517,7 +517,7 @@ export class GitOps {
     // --- Shelf operations (implemented via git stash) ---
 
     async shelveSave(paths?: string[], message: string = "Shelved changes"): Promise<string> {
-        const args = ["stash", "push", "-m", message];
+        const args = ["stash", "push", "--include-untracked", "-m", message];
         if (paths && paths.length > 0) {
             args.push("--", ...paths);
         }

@@ -23,7 +23,9 @@ describe("GitOps", () => {
 
         it("returns false when rev-parse throws", async () => {
             const executor = {
-                run: vi.fn(async () => { throw new Error("not a repo"); }),
+                run: vi.fn(async () => {
+                    throw new Error("not a repo");
+                }),
             } as unknown as GitExecutor;
             const ops = new GitOps(executor);
             expect(await ops.isRepository()).toBe(false);
@@ -38,7 +40,7 @@ describe("GitOps", () => {
                 "refs/remotes/origin/main\torigin/main\tabc1234\t\t\t ",
             ].join("\n");
 
-            const executor = createMockExecutor({ "branch": output });
+            const executor = createMockExecutor({ branch: output });
             const ops = new GitOps(executor);
             const branches = await ops.getBranches();
 
@@ -61,7 +63,7 @@ describe("GitOps", () => {
 
         it("skips symbolic HEAD refs", async () => {
             const output = "refs/remotes/origin/HEAD\torigin\tabc1234\t\t\t \n";
-            const executor = createMockExecutor({ "branch": output });
+            const executor = createMockExecutor({ branch: output });
             const ops = new GitOps(executor);
             const branches = await ops.getBranches();
             expect(branches).toHaveLength(0);
@@ -69,7 +71,7 @@ describe("GitOps", () => {
 
         it("parses behind count", async () => {
             const output = "refs/heads/main\tmain\tabc1234\torigin/main\tbehind 3\t*\n";
-            const executor = createMockExecutor({ "branch": output });
+            const executor = createMockExecutor({ branch: output });
             const ops = new GitOps(executor);
             const branches = await ops.getBranches();
             expect(branches[0].behind).toBe(3);
@@ -91,16 +93,24 @@ describe("GitOps", () => {
             parents: string,
             refs: string,
         ): string {
-            return [hash, shortHash, message, author, email, date, parents, refs].join(FIELD_SEP) + RECORD_SEP;
+            return (
+                [hash, shortHash, message, author, email, date, parents, refs].join(FIELD_SEP) +
+                RECORD_SEP
+            );
         }
 
         it("parses commit records", async () => {
             const output = makeCommitRecord(
-                "abc123full", "abc123", "Initial commit",
-                "John", "john@test.com", "2024-01-01T00:00:00Z",
-                "", "HEAD -> main",
+                "abc123full",
+                "abc123",
+                "Initial commit",
+                "John",
+                "john@test.com",
+                "2024-01-01T00:00:00Z",
+                "",
+                "HEAD -> main",
             );
-            const executor = createMockExecutor({ "log": output });
+            const executor = createMockExecutor({ log: output });
             const ops = new GitOps(executor);
             const commits = await ops.getLog();
 
@@ -115,17 +125,23 @@ describe("GitOps", () => {
 
         it("parses parent hashes", async () => {
             const output = makeCommitRecord(
-                "abc123", "abc", "Merge", "A", "a@b.com", "2024-01-01T00:00:00Z",
-                "parent1 parent2", "",
+                "abc123",
+                "abc",
+                "Merge",
+                "A",
+                "a@b.com",
+                "2024-01-01T00:00:00Z",
+                "parent1 parent2",
+                "",
             );
-            const executor = createMockExecutor({ "log": output });
+            const executor = createMockExecutor({ log: output });
             const ops = new GitOps(executor);
             const commits = await ops.getLog();
             expect(commits[0].parentHashes).toEqual(["parent1", "parent2"]);
         });
 
         it("passes branch filter argument", async () => {
-            const executor = createMockExecutor({ "log": "" });
+            const executor = createMockExecutor({ log: "" });
             const ops = new GitOps(executor);
             await ops.getLog(100, "feature");
 
@@ -135,7 +151,7 @@ describe("GitOps", () => {
         });
 
         it("passes filter text argument", async () => {
-            const executor = createMockExecutor({ "log": "" });
+            const executor = createMockExecutor({ log: "" });
             const ops = new GitOps(executor);
             await ops.getLog(100, undefined, "fix bug");
 
@@ -145,7 +161,7 @@ describe("GitOps", () => {
         });
 
         it("passes skip argument for pagination", async () => {
-            const executor = createMockExecutor({ "log": "" });
+            const executor = createMockExecutor({ log: "" });
             const ops = new GitOps(executor);
             await ops.getLog(100, undefined, undefined, 200);
 
@@ -159,9 +175,15 @@ describe("GitOps", () => {
 
         it("parses commit detail with files", async () => {
             const showOutput = [
-                "abc123full", "abc123", "Fix bug", "Body text",
-                "John", "john@test.com", "2024-01-01T00:00:00Z",
-                "parent1", "HEAD -> main",
+                "abc123full",
+                "abc123",
+                "Fix bug",
+                "Body text",
+                "John",
+                "john@test.com",
+                "2024-01-01T00:00:00Z",
+                "parent1",
+                "HEAD -> main",
             ].join(FIELD_SEP);
 
             const nameStatusOutput = "M\tsrc/foo.ts\nA\tsrc/bar.ts\n";
@@ -211,12 +233,12 @@ describe("GitOps", () => {
             const ops = new GitOps(executor);
             const files = await ops.getStatus();
 
-            const unstaged = files.filter(f => !f.staged);
-            const staged = files.filter(f => f.staged);
+            const unstaged = files.filter((f) => !f.staged);
+            const staged = files.filter((f) => f.staged);
 
-            expect(unstaged.some(f => f.path === "src/foo.ts" && f.status === "M")).toBe(true);
-            expect(unstaged.some(f => f.path === "src/new.ts" && f.status === "?")).toBe(true);
-            expect(staged.some(f => f.path === "src/added.ts" && f.status === "A")).toBe(true);
+            expect(unstaged.some((f) => f.path === "src/foo.ts" && f.status === "M")).toBe(true);
+            expect(unstaged.some((f) => f.path === "src/new.ts" && f.status === "?")).toBe(true);
+            expect(staged.some((f) => f.path === "src/added.ts" && f.status === "A")).toBe(true);
         });
 
         it("emits two entries for files with both staged and unstaged changes", async () => {
@@ -232,10 +254,10 @@ describe("GitOps", () => {
             const ops = new GitOps(executor);
             const files = await ops.getStatus();
 
-            const bothEntries = files.filter(f => f.path === "src/both.ts");
+            const bothEntries = files.filter((f) => f.path === "src/both.ts");
             expect(bothEntries).toHaveLength(2);
-            expect(bothEntries.some(f => f.staged)).toBe(true);
-            expect(bothEntries.some(f => !f.staged)).toBe(true);
+            expect(bothEntries.some((f) => f.staged)).toBe(true);
+            expect(bothEntries.some((f) => !f.staged)).toBe(true);
         });
 
         it("parses rename entries from porcelain -z output", async () => {
@@ -442,7 +464,7 @@ describe("GitOps", () => {
 
     describe("getLastCommitMessage", () => {
         it("returns last commit message", async () => {
-            const executor = createMockExecutor({ "log": "Previous commit message\n" });
+            const executor = createMockExecutor({ log: "Previous commit message\n" });
             const ops = new GitOps(executor);
             const msg = await ops.getLastCommitMessage();
             expect(msg).toBe("Previous commit message");
@@ -450,7 +472,9 @@ describe("GitOps", () => {
 
         it("returns empty string on error", async () => {
             const executor = {
-                run: vi.fn(async () => { throw new Error("no commits"); }),
+                run: vi.fn(async () => {
+                    throw new Error("no commits");
+                }),
             } as unknown as GitExecutor;
             const ops = new GitOps(executor);
             const msg = await ops.getLastCommitMessage();
@@ -524,7 +548,9 @@ describe("GitOps", () => {
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
             expect(calls).toContainEqual(["checkout", "--ours", "--", "src/conflicted.ts"]);
             expect(calls).toContainEqual(["checkout", "--theirs", "--", "src/conflicted.ts"]);
-            expect(calls.filter((args) => args.join(" ") === "add -- src/conflicted.ts")).toHaveLength(2);
+            expect(
+                calls.filter((args) => args.join(" ") === "add -- src/conflicted.ts"),
+            ).toHaveLength(2);
         });
     });
 
@@ -535,7 +561,7 @@ describe("GitOps", () => {
             await ops.stashSave("my stash");
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "push", "-m", "my stash"]);
+            expect(call).toEqual(["stash", "push", "--include-untracked", "-m", "my stash"]);
         });
 
         it("includes paths when provided", async () => {
@@ -544,7 +570,16 @@ describe("GitOps", () => {
             await ops.stashSave("partial", ["src/a.ts", "src/b.ts"]);
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "push", "-m", "partial", "--", "src/a.ts", "src/b.ts"]);
+            expect(call).toEqual([
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                "partial",
+                "--",
+                "src/a.ts",
+                "src/b.ts",
+            ]);
         });
     });
 
@@ -577,7 +612,7 @@ describe("GitOps", () => {
                 "bbb222\tstash@{1}\tOn main: Feature work\t2024-01-14T09:00:00Z",
             ].join("\n");
 
-            const executor = createMockExecutor({ "stash": output });
+            const executor = createMockExecutor({ stash: output });
             const ops = new GitOps(executor);
             const stashes = await ops.stashList();
 
@@ -591,7 +626,9 @@ describe("GitOps", () => {
 
         it("returns empty array on error", async () => {
             const executor = {
-                run: vi.fn(async () => { throw new Error("no stashes"); }),
+                run: vi.fn(async () => {
+                    throw new Error("no stashes");
+                }),
             } as unknown as GitExecutor;
             const ops = new GitOps(executor);
             const stashes = await ops.stashList();
@@ -616,10 +653,7 @@ describe("GitOps", () => {
                 "rev-list --branches --not --remotes": "a1b2c3d4\nfeed1234\n",
             });
             const ops = new GitOps(executor);
-            await expect(ops.getUnpushedCommitHashes()).resolves.toEqual([
-                "a1b2c3d4",
-                "feed1234",
-            ]);
+            await expect(ops.getUnpushedCommitHashes()).resolves.toEqual(["a1b2c3d4", "feed1234"]);
         });
 
         it("returns empty array when rev-list fails", async () => {
