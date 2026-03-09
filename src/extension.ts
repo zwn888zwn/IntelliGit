@@ -1166,17 +1166,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     return;
                 }
 
-                const currentBranch =
-                    currentBranches.find(
-                        (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
-                    ) ?? {
-                        name: checkedOutBranchName,
-                        hash: "",
-                        isRemote: false,
-                        isCurrent: true,
-                        ahead: 0,
-                        behind: 0,
-                    };
+                const currentBranch = currentBranches.find(
+                    (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
+                ) ?? {
+                    name: checkedOutBranchName,
+                    hash: "",
+                    isRemote: false,
+                    isCurrent: true,
+                    ahead: 0,
+                    behind: 0,
+                };
 
                 let target = resolveTrackedRemoteBranch(currentBranch);
                 let setUpstream = false;

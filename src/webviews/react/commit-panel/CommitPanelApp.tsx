@@ -1,7 +1,7 @@
 // Entry point for the commit panel React webview. Wraps the app in
 // ChakraProvider with the VS Code theme and composes all panels.
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChakraProvider, Box } from "@chakra-ui/react";
 import theme from "./theme";
@@ -11,6 +11,7 @@ import { ShelfTab } from "./components/ShelfTab";
 import { useExtensionMessages } from "./hooks/useExtensionMessages";
 import { useCheckedFiles } from "./hooks/useCheckedFiles";
 import { getVsCodeApi } from "./hooks/useVsCodeApi";
+import { useDragResize } from "./hooks/useDragResize";
 import { ThemeIconFontFaces } from "../shared/components";
 
 function App(): React.ReactElement {
@@ -68,46 +69,73 @@ function App(): React.ReactElement {
         stageCheckedAndCommit(true);
     }, [stageCheckedAndCommit]);
 
+    const containerRef = useRef<HTMLDivElement>(null);
+    const { height: bottomHeight, onMouseDown } = useDragResize(120, 40, containerRef, {
+        maxReservedHeight: 120,
+    });
+
     return (
-        <Box display="flex" flexDirection="column" h="100%">
+        <Box ref={containerRef} display="flex" flexDirection="column" h="100%">
             <ThemeIconFontFaces fonts={state.iconFonts} />
-            <TabBar
-                stashCount={state.stashes.length}
-                commitContent={
-                    <CommitTab
-                        files={state.files}
-                        commitMessage={state.commitMessage}
-                        isAmend={state.isAmend}
-                        isRefreshing={state.isRefreshing}
-                        checkedPaths={checkedPaths}
-                        onToggleFile={toggleFile}
-                        onToggleFolder={toggleFolder}
-                        onToggleSection={toggleSection}
-                        isAllChecked={isAllChecked}
-                        isSomeChecked={isSomeChecked}
-                        onMessageChange={handleMessageChange}
-                        onAmendChange={handleAmendChange}
-                        onCommit={handleCommit}
-                        onCommitAndPush={handleCommitAndPush}
-                        folderIcon={state.folderIcon}
-                        folderExpandedIcon={state.folderExpandedIcon}
-                        folderIconsByName={state.folderIconsByName}
-                        groupByDir={groupByDir}
-                        onToggleGroupBy={() => setGroupByDir((g) => !g)}
-                    />
-                }
-                shelfContent={
-                    <ShelfTab
-                        stashes={state.stashes}
-                        shelfFiles={state.shelfFiles}
-                        selectedIndex={state.selectedShelfIndex}
-                        folderIcon={state.folderIcon}
-                        folderExpandedIcon={state.folderExpandedIcon}
-                        folderIconsByName={state.folderIconsByName}
-                        groupByDir={groupByDir}
-                    />
-                }
+            <Box flex={1} overflow="hidden" display="flex" flexDirection="column">
+                <TabBar
+                    stashCount={state.stashes.length}
+                    commitContent={
+                        <CommitTab
+                            files={state.files}
+                            commitMessage={state.commitMessage}
+                            isAmend={state.isAmend}
+                            isRefreshing={state.isRefreshing}
+                            checkedPaths={checkedPaths}
+                            onToggleFile={toggleFile}
+                            onToggleFolder={toggleFolder}
+                            onToggleSection={toggleSection}
+                            isAllChecked={isAllChecked}
+                            isSomeChecked={isSomeChecked}
+                            onMessageChange={handleMessageChange}
+                            onAmendChange={handleAmendChange}
+                            onCommit={handleCommit}
+                            onCommitAndPush={handleCommitAndPush}
+                            folderIcon={state.folderIcon}
+                            folderExpandedIcon={state.folderExpandedIcon}
+                            folderIconsByName={state.folderIconsByName}
+                            groupByDir={groupByDir}
+                            onToggleGroupBy={() => setGroupByDir((g) => !g)}
+                        />
+                    }
+                    shelfContent={
+                        <ShelfTab
+                            stashes={state.stashes}
+                            shelfFiles={state.shelfFiles}
+                            selectedIndex={state.selectedShelfIndex}
+                            folderIcon={state.folderIcon}
+                            folderExpandedIcon={state.folderExpandedIcon}
+                            folderIconsByName={state.folderIconsByName}
+                            groupByDir={groupByDir}
+                        />
+                    }
+                />
+            </Box>
+            <Box
+                h="5px"
+                flexShrink={0}
+                cursor="row-resize"
+                bg="var(--vscode-panel-border)"
+                onMouseDown={onMouseDown}
+                _hover={{ bg: "var(--vscode-focusBorder, #007acc)" }}
             />
+            <Box
+                h={`${bottomHeight}px`}
+                flexShrink={0}
+                overflow="auto"
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+            >
+                <Box color="var(--vscode-descriptionForeground)" fontSize="13px" fontStyle="italic">
+                    Coming...
+                </Box>
+            </Box>
         </Box>
     );
 }

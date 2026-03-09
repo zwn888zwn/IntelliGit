@@ -1,7 +1,7 @@
 // Shelf tab with selectable shelved entries, changed-file preview, and
 // bottom Apply/Pop/Delete actions.
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Flex, Box, Button } from "@chakra-ui/react";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 import { FileTypeIcon } from "./FileTypeIcon";
@@ -36,12 +36,23 @@ export function ShelfTab({
     const vscode = getVsCodeApi();
     const tree = useFileTree(shelfFiles, groupByDir);
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+    const [expandedIndex, setExpandedIndex] = useState<number | null>(selectedIndex);
 
-    const handleSelect = useCallback(
+    // Sync local expanded state when parent selection changes (e.g. after apply/pop/delete)
+    useEffect(() => {
+        setExpandedIndex(selectedIndex);
+    }, [selectedIndex]);
+
+    const handleStashClick = useCallback(
         (index: number) => {
-            vscode.postMessage({ type: "shelfSelect", index });
+            if (expandedIndex === index) {
+                setExpandedIndex(null);
+            } else {
+                setExpandedIndex(index);
+                vscode.postMessage({ type: "shelfSelect", index });
+            }
         },
-        [vscode],
+        [expandedIndex, vscode],
     );
 
     const handleShelfAction = useCallback(
@@ -79,20 +90,9 @@ export function ShelfTab({
         setExpandedDirs(new Set(collectAllDirPaths(tree)));
     }, [tree]);
 
-    const selectedEntry = useMemo(
-        () => stashes.find((entry) => entry.index === selectedIndex) ?? null,
-        [stashes, selectedIndex],
-    );
-
     return (
         <Flex direction="column" flex={1} overflow="hidden">
-            <Box
-                flexShrink={0}
-                maxH="100px"
-                overflowY="auto"
-                borderBottom="1px solid var(--vscode-panel-border)"
-                pt="1px"
-            >
+            <Box flex="1 1 auto" overflowY="auto" pt="1px">
                 {stashes.length === 0 ? (
                     <Box
                         color="var(--vscode-descriptionForeground)"
@@ -105,104 +105,121 @@ export function ShelfTab({
                 ) : (
                     stashes.map((stash) => {
                         const parsed = parseShelfMessage(stash.message);
-                        const isSelected = selectedIndex === stash.index;
+                        const isExpanded = expandedIndex === stash.index;
+                        const hasFiles = isExpanded && selectedIndex === stash.index;
                         return (
-                            <Flex
-                                key={stash.index}
-                                align="center"
-                                px="9px"
-                                py="2px"
-                                minH="24px"
-                                fontSize="12px"
-                                fontFamily={SYSTEM_FONT_STACK}
-                                cursor="pointer"
-                                bg={
-                                    isSelected
-                                        ? "var(--vscode-list-activeSelectionBackground)"
-                                        : "transparent"
-                                }
-                                color={
-                                    isSelected
-                                        ? "var(--vscode-list-activeSelectionForeground)"
-                                        : "var(--vscode-foreground)"
-                                }
-                                _hover={{
-                                    bg: isSelected
-                                        ? "var(--vscode-list-activeSelectionBackground)"
-                                        : "var(--vscode-list-hoverBackground)",
-                                }}
-                                onClick={() => handleSelect(stash.index)}
-                                title={stash.message}
-                            >
-                                <Box
-                                    as="span"
-                                    flex={1}
-                                    minW={0}
-                                    overflow="hidden"
-                                    textOverflow="ellipsis"
-                                    whiteSpace="nowrap"
+                            <React.Fragment key={stash.index}>
+                                <Flex
+                                    align="center"
+                                    px="9px"
+                                    py="2px"
+                                    minH="24px"
+                                    fontSize="12px"
+                                    fontFamily={SYSTEM_FONT_STACK}
+                                    cursor="pointer"
+                                    bg={
+                                        isExpanded
+                                            ? "var(--vscode-list-activeSelectionBackground)"
+                                            : "transparent"
+                                    }
+                                    color={
+                                        isExpanded
+                                            ? "var(--vscode-list-activeSelectionForeground)"
+                                            : "var(--vscode-foreground)"
+                                    }
+                                    _hover={{
+                                        bg: isExpanded
+                                            ? "var(--vscode-list-activeSelectionBackground)"
+                                            : "var(--vscode-list-hoverBackground)",
+                                    }}
+                                    onClick={() => handleStashClick(stash.index)}
+                                    title={stash.message}
                                 >
-                                    {parsed.title}
-                                </Box>
-                                {parsed.branch && (
                                     <Box
                                         as="span"
-                                        ml="10px"
-                                        display="inline-flex"
-                                        alignItems="center"
-                                        fontSize="10.5px"
-                                        gap="4px"
-                                        color="#d8ca64"
+                                        w="14px"
+                                        textAlign="center"
+                                        fontSize="10px"
+                                        opacity={0.7}
                                         flexShrink={0}
+                                        transform={isExpanded ? "rotate(90deg)" : undefined}
+                                        transition="transform 0.15s"
                                     >
+                                        &#9654;
+                                    </Box>
+                                    <Box
+                                        as="span"
+                                        flex={1}
+                                        minW={0}
+                                        overflow="hidden"
+                                        textOverflow="ellipsis"
+                                        whiteSpace="nowrap"
+                                    >
+                                        {parsed.title}
+                                    </Box>
+                                    {parsed.branch && (
                                         <Box
-                                            as="svg"
-                                            w="12px"
-                                            h="12px"
-                                            viewBox="0 0 16 16"
-                                            opacity={0.95}
+                                            as="span"
+                                            ml="10px"
+                                            display="inline-flex"
+                                            alignItems="center"
+                                            fontSize="10.5px"
+                                            gap="4px"
+                                            color="#d8ca64"
+                                            flexShrink={0}
                                         >
-                                            <path
-                                                fill="currentColor"
-                                                d="M9.28 1.5H5.5A2.5 2.5 0 0 0 3 4v8a2.5 2.5 0 0 0 2.5 2.5h3.78a1.5 1.5 0 0 0 1.06-.44l3.72-3.72a1.5 1.5 0 0 0 0-2.12L10.34 1.94a1.5 1.5 0 0 0-1.06-.44zM5.5 3h3.78l3.72 3.72-3.72 3.72H5.5A1 1 0 0 1 4.5 9.44V4A1 1 0 0 1 5.5 3zm1.25 2a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5z"
+                                            <Box
+                                                as="svg"
+                                                w="12px"
+                                                h="12px"
+                                                viewBox="0 0 16 16"
+                                                opacity={0.95}
+                                            >
+                                                <path
+                                                    fill="currentColor"
+                                                    d="M9.28 1.5H5.5A2.5 2.5 0 0 0 3 4v8a2.5 2.5 0 0 0 2.5 2.5h3.78a1.5 1.5 0 0 0 1.06-.44l3.72-3.72a1.5 1.5 0 0 0 0-2.12L10.34 1.94a1.5 1.5 0 0 0-1.06-.44zM5.5 3h3.78l3.72 3.72-3.72 3.72H5.5A1 1 0 0 1 4.5 9.44V4A1 1 0 0 1 5.5 3zm1.25 2a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5z"
+                                                />
+                                            </Box>
+                                            {parsed.branch}
+                                        </Box>
+                                    )}
+                                </Flex>
+                                {hasFiles &&
+                                    (shelfFiles.length > 0 ? (
+                                        <Box
+                                            borderBottom="1px solid var(--vscode-panel-border)"
+                                            pb="2px"
+                                        >
+                                            <ShelfFileTree
+                                                entries={tree}
+                                                expandedDirs={expandedDirs}
+                                                folderIcon={folderIcon}
+                                                folderExpandedIcon={folderExpandedIcon}
+                                                folderIconsByName={folderIconsByName}
+                                                onToggleDir={toggleDir}
+                                                onFileClick={(path) =>
+                                                    vscode.postMessage({
+                                                        type: "showShelfDiff",
+                                                        index: stash.index,
+                                                        path,
+                                                    })
+                                                }
+                                                depth={1}
                                             />
                                         </Box>
-                                        {parsed.branch}
-                                    </Box>
-                                )}
-                            </Flex>
+                                    ) : (
+                                        <Box
+                                            pl="28px"
+                                            py="2px"
+                                            fontSize="12px"
+                                            color="var(--vscode-descriptionForeground)"
+                                        >
+                                            No files in this shelved change.
+                                        </Box>
+                                    ))}
+                            </React.Fragment>
                         );
                     })
-                )}
-            </Box>
-
-            <Box flex="1 1 auto" overflowY="auto">
-                {selectedEntry ? (
-                    shelfFiles.length > 0 ? (
-                        <ShelfFileTree
-                            entries={tree}
-                            expandedDirs={expandedDirs}
-                            folderIcon={folderIcon}
-                            folderExpandedIcon={folderExpandedIcon}
-                            folderIconsByName={folderIconsByName}
-                            onToggleDir={toggleDir}
-                            onFileClick={(path) =>
-                                vscode.postMessage({
-                                    type: "showShelfDiff",
-                                    index: selectedEntry.index,
-                                    path,
-                                })
-                            }
-                        />
-                    ) : (
-                        <Box p="10px" fontSize="12px" color="var(--vscode-descriptionForeground)">
-                            No files in this shelved change.
-                        </Box>
-                    )
-                ) : (
-                    <Box p="10px" fontSize="12px" color="var(--vscode-descriptionForeground)">
-                        Select a shelved change.
-                    </Box>
                 )}
             </Box>
 
