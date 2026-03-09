@@ -70,9 +70,19 @@ function App(): React.ReactElement {
     }, [stageCheckedAndCommit]);
 
     const containerRef = useRef<HTMLDivElement>(null);
-    const { height: bottomHeight, onMouseDown } = useDragResize(120, 40, containerRef, {
-        maxReservedHeight: 120,
-    });
+    const savedBottomHeight = vscode.getState?.()?.bottomPanelHeight;
+    const { height: bottomHeight, onMouseDown } = useDragResize(
+        typeof savedBottomHeight === "number" ? savedBottomHeight : 120,
+        40,
+        containerRef,
+        {
+            maxReservedHeight: 120,
+            onResize: (h: number) => {
+                const prev = vscode.getState?.() ?? {};
+                vscode.setState({ ...prev, bottomPanelHeight: h });
+            },
+        },
+    );
 
     return (
         <Box ref={containerRef} display="flex" flexDirection="column" h="100%">
