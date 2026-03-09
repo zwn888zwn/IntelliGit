@@ -33,6 +33,19 @@ export function isValidBranchName(value: string): boolean {
     }
 }
 
+export function isValidTagName(value: string): boolean {
+    if (!value) return false;
+    try {
+        const result = spawnSync("git", ["check-ref-format", `refs/tags/${value}`], {
+            encoding: "utf8",
+            timeout: 5000,
+        });
+        return result.status === 0;
+    } catch {
+        return false;
+    }
+}
+
 export function isHashMatch(a: string, b: string): boolean {
     return a.startsWith(b) || b.startsWith(a);
 }

@@ -43,13 +43,20 @@ describe("computeTokenLcsPairs", () => {
 
     it("finds LCS pairs for simple case", () => {
         const pairs = computeTokenLcsPairs(["a", "b", "c"], ["a", "c"]);
-        expect(pairs).toEqual([[0, 0], [2, 1]]);
+        expect(pairs).toEqual([
+            [0, 0],
+            [2, 1],
+        ]);
     });
 
     it("returns full match for identical arrays", () => {
         const arr = ["x", "y", "z"];
         const pairs = computeTokenLcsPairs(arr, arr);
-        expect(pairs).toEqual([[0, 0], [1, 1], [2, 2]]);
+        expect(pairs).toEqual([
+            [0, 0],
+            [1, 1],
+            [2, 2],
+        ]);
     });
 
     it("handles no common elements", () => {
@@ -99,6 +106,7 @@ describe("alignCompareLinesForWordDiff", () => {
         );
         expect(result).toHaveLength(2);
         expect(result[0]).toBe("const x = 1;");
+        expect(result[1]).toBe("");
     });
 });
 

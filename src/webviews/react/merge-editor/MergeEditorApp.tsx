@@ -272,12 +272,12 @@ function App() {
             if (tag === "INPUT" || tag === "TEXTAREA") return;
             const normalizedKey = event.key.toLowerCase();
 
-            if (normalizedKey === "n" || event.key === "F7") {
-                event.preventDefault();
-                moveActiveConflict(1);
-            } else if (normalizedKey === "p" || (event.shiftKey && event.key === "F7")) {
+            if (normalizedKey === "p" || (event.shiftKey && event.key === "F7")) {
                 event.preventDefault();
                 moveActiveConflict(-1);
+            } else if (normalizedKey === "n" || event.key === "F7") {
+                event.preventDefault();
+                moveActiveConflict(1);
             } else if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
                 if (!state.data) return;
                 if (!allResolved(state.data.segments, state.resolutions)) return;
@@ -326,6 +326,7 @@ function App() {
         )
         .map((item) => ({
             id: item.segment.id,
+            ordinal: item.conflictOrdinal ?? 0,
             topPct: ((item.startLine - 1) / totalVisualLines) * 100,
             heightPct: Math.min(Math.max((item.lineCount / totalVisualLines) * 100, 1), 30),
             changeKind: item.segment.changeKind,
@@ -337,8 +338,15 @@ function App() {
     const unresolvedTrueConflictIds = trueConflicts
         .filter((seg) => state.resolutions[seg.id] === undefined)
         .map((seg) => seg.id);
-    const nextUnresolvedId =
-        unresolvedTrueConflictIds.length > 0 ? unresolvedTrueConflictIds[0] : null;
+    const nextUnresolvedId = (() => {
+        if (unresolvedTrueConflictIds.length === 0) return null;
+        if (activeConflictId === null) return unresolvedTrueConflictIds[0];
+        const activeIdx = unresolvedTrueConflictIds.indexOf(activeConflictId);
+        const nextIdx = activeIdx + 1;
+        return nextIdx < unresolvedTrueConflictIds.length
+            ? unresolvedTrueConflictIds[nextIdx]
+            : unresolvedTrueConflictIds[0];
+    })();
 
     return (
         <div
@@ -363,6 +371,7 @@ function App() {
                             className="toolbar-icon-btn"
                             onClick={() => moveActiveConflict(-1)}
                             title="Previous conflict (P / Shift+F7)"
+                            aria-label="Previous conflict"
                             disabled={total === 0}
                         >
                             <IconChevronUp />
@@ -371,6 +380,7 @@ function App() {
                             className="toolbar-icon-btn"
                             onClick={() => moveActiveConflict(1)}
                             title="Next conflict (N / F7)"
+                            aria-label="Next conflict"
                             disabled={total === 0}
                         >
                             <IconChevronDown />

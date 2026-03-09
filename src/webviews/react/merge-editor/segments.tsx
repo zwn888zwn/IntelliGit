@@ -356,7 +356,7 @@ export function ConflictSection({
                     <span className="hunk-kind-label">{kindLabel}</span>
                     {showDetails ? (
                         <span className="hunk-detail-lines">
-                            L:{segment.oursLines.length} R:{segment.theirsLines.length} Result:
+                            L:{segment.oursLines.length} R:{segment.theirsLines.length} Result:{" "}
                             {resultLines.length}
                         </span>
                     ) : null}
@@ -493,6 +493,7 @@ export function ConflictSection({
 
 export interface OverviewMarker {
     id: number;
+    ordinal: number;
     topPct: number;
     heightPct: number;
     changeKind: ConflictSegment["changeKind"];
@@ -526,8 +527,8 @@ export function OverviewRail({
                             top: `${marker.topPct}%`,
                             height: `${marker.heightPct}%`,
                         }}
-                        title={`Jump to hunk #${marker.id + 1}`}
-                        aria-label={`Jump to hunk #${marker.id + 1}`}
+                        title={`Jump to hunk #${marker.ordinal}`}
+                        aria-label={`Jump to hunk #${marker.ordinal}`}
                         aria-current={activeConflictId === marker.id ? "true" : undefined}
                         onClick={() => onJump(marker.id)}
                     />

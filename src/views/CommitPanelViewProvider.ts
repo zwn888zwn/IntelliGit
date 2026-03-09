@@ -337,13 +337,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
             case "shelfSelect": {
                 this.selectedShelfIndex = this.assertNumber(msg.index, "index");
-                if (this.selectedShelfIndex !== null) {
-                    this.shelfFiles = await this.iconTheme.decorateWorkingFiles(
-                        await this.gitOps.getShelvedFiles(this.selectedShelfIndex),
-                    );
-                } else {
-                    this.shelfFiles = [];
-                }
+                this.shelfFiles = await this.iconTheme.decorateWorkingFiles(
+                    await this.gitOps.getShelvedFiles(this.selectedShelfIndex),
+                );
                 this.folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
                     ...this.files,
                     ...this.shelfFiles,
@@ -462,6 +458,5 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
     private disposeThemeChangeDisposables(): void {
         disposeAll(this.themeChangeDisposables);
-        this.themeChangeDisposables = [];
     }
 }

@@ -1114,7 +1114,7 @@ describe("extension integration", () => {
 
         showInputBox.mockResolvedValueOnce("-bad-branch-name");
         await emitCommitAction({ action: "newBranch", hash: "a1b2c3d4" });
-        showInputBox.mockResolvedValueOnce("-bad-tag-name");
+        showInputBox.mockResolvedValueOnce("bad..tag");
         await emitCommitAction({ action: "newTag", hash: "a1b2c3d4" });
 
         gitOpsState.getUnpushedCommitHashes.mockResolvedValueOnce([]);
@@ -1149,7 +1149,7 @@ describe("extension integration", () => {
             expect.stringContaining("Invalid branch name '-bad-branch-name'"),
         );
         expect(showErrorMessage).toHaveBeenCalledWith(
-            expect.stringContaining("Invalid tag name '-bad-tag-name'"),
+            expect.stringContaining("Invalid tag name 'bad..tag'"),
         );
         expect(showErrorMessage).toHaveBeenCalledWith(
             "Push All up to Here is available only for unpushed commits.",

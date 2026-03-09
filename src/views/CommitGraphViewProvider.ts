@@ -347,6 +347,5 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     private disposeThemeChangeDisposables(): void {
         disposeAll(this.themeChangeDisposables);
-        this.themeChangeDisposables = [];
     }
 }

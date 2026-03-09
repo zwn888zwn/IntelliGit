@@ -10,9 +10,11 @@ import { runWithNotificationProgress } from "../utils/notifications";
 import {
     isValidGitHash,
     isValidBranchName,
+    isValidTagName,
     isHashMatch,
     isCommitUnpushed,
     isMergeCommitHash,
+    getCommitParentHashes,
     getUndoCommitCount,
     getCheckedOutBranchName,
     pickMainlineParent,
@@ -57,11 +59,21 @@ export async function handleCommitContextAction(params: {
                 filters: { Patch: ["patch", "diff"] },
             });
             if (!targetUri) return;
-            const patchText = await executor.run(["format-patch", "-1", "--stdout", validatedHash]);
-            await vscode.workspace.fs.writeFile(targetUri, Buffer.from(patchText, "utf8"));
-            vscode.window.showInformationMessage(
-                `Patch created: ${path.basename(targetUri.fsPath)}`,
-            );
+            try {
+                const patchText = await executor.run([
+                    "format-patch",
+                    "-1",
+                    "--stdout",
+                    validatedHash,
+                ]);
+                await vscode.workspace.fs.writeFile(targetUri, Buffer.from(patchText, "utf8"));
+                vscode.window.showInformationMessage(
+                    `Patch created: ${path.basename(targetUri.fsPath)}`,
+                );
+            } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Failed to create patch: ${message}`);
+            }
             return;
         }
         case "cherryPick": {
@@ -242,9 +254,9 @@ export async function handleCommitContextAction(params: {
                 placeHolder: "v1.0.0",
             });
             if (!tagName) return;
-            if (!isValidBranchName(tagName)) {
+            if (!isValidTagName(tagName)) {
                 vscode.window.showErrorMessage(
-                    `Invalid tag name '${tagName}'. Names must contain only alphanumeric characters, dots, dashes, underscores, or slashes, and must not start with a dash.`,
+                    `Invalid tag name '${tagName}'. Tag names must be valid git ref names.`,
                 );
                 return;
             }
@@ -270,6 +282,11 @@ export async function handleCommitContextAction(params: {
                 vscode.window.showErrorMessage(
                     `Commit ${short} is not in the current branch history.`,
                 );
+                return;
+            }
+            const undoParents = await getCommitParentHashes(validatedHash, executor);
+            if (undoParents.length === 0) {
+                vscode.window.showErrorMessage("Cannot undo the initial commit of the repository.");
                 return;
             }
             const undoCount = await getUndoCommitCount(validatedHash, executor);
@@ -312,6 +329,13 @@ export async function handleCommitContextAction(params: {
                 return;
             }
 
+            const rewordParents = await getCommitParentHashes(validatedHash, executor);
+            if (rewordParents.length === 0) {
+                vscode.window.showErrorMessage(
+                    "Edit Commit Message is not available for the initial commit.",
+                );
+                return;
+            }
             const terminal = vscode.window.createTerminal({
                 name: "IntelliGit Reword Commit",
                 cwd: repoRoot,
@@ -342,6 +366,11 @@ export async function handleCommitContextAction(params: {
                 );
                 return;
             }
+            const dropParents = await getCommitParentHashes(validatedHash, executor);
+            if (dropParents.length === 0) {
+                vscode.window.showErrorMessage("Cannot drop the initial commit of the repository.");
+                return;
+            }
             const confirm = await vscode.window.showWarningMessage(
                 `Drop commit ${short} from current branch history?`,
                 { modal: true },
@@ -363,6 +392,21 @@ export async function handleCommitContextAction(params: {
             if (await isMergeCommitHash(validatedHash, executor)) {
                 vscode.window.showErrorMessage(
                     "Interactive Rebase from Here is not available for merge commits.",
+                );
+                return;
+            }
+            try {
+                await executor.run(["merge-base", "--is-ancestor", validatedHash, "HEAD"]);
+            } catch {
+                vscode.window.showErrorMessage(
+                    `Commit ${short} is not in the current branch history.`,
+                );
+                return;
+            }
+            const rebaseParents = await getCommitParentHashes(validatedHash, executor);
+            if (rebaseParents.length === 0) {
+                vscode.window.showErrorMessage(
+                    "Interactive Rebase from Here is not available for the initial commit.",
                 );
                 return;
             }

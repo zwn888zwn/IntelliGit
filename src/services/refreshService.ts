@@ -112,12 +112,17 @@ export class RefreshService implements vscode.Disposable {
             "packed-refs",
             "MERGE_HEAD",
             "REBASE_HEAD",
+            "index",
         ]);
 
         try {
             const dirWatcher = fs.watch(gitDir, (_event, filename) => {
                 if (filename && gitStateFiles.has(filename)) {
-                    this.debouncedFullRefresh();
+                    if (filename === "index") {
+                        this.debouncedLightRefresh();
+                    } else {
+                        this.debouncedFullRefresh();
+                    }
                 }
             });
             this.fsWatchers.push(dirWatcher);

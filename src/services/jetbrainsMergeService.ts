@@ -7,6 +7,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { GitOps } from "../git/operations";
 import { getErrorMessage } from "../utils/errors";
+import { assertRepoRelativePath } from "../utils/fileOps";
 import {
     containsConflictMarkers,
     detectInstalledJetBrainsMergeToolCandidates,
@@ -180,6 +181,7 @@ export async function openJetBrainsMergeToolForFile(
     refreshConflictUi: () => Promise<void>,
     openBuiltInMergeEditorForFile: (filePath: string) => Promise<void>,
 ): Promise<boolean> {
+    const safePath = assertRepoRelativePath(filePath);
     let jetBrainsPath = getJetBrainsMergeToolPath();
     if (!jetBrainsPath) {
         const action = await vscode.window.showInformationMessage(
@@ -189,7 +191,7 @@ export async function openJetBrainsMergeToolForFile(
         );
         if (action === "Open VS Code Merge Editor") {
             try {
-                await openBuiltInMergeEditorForFile(filePath);
+                await openBuiltInMergeEditorForFile(safePath);
                 return true;
             } catch (error) {
                 const msg = getErrorMessage(error);
@@ -204,19 +206,19 @@ export async function openJetBrainsMergeToolForFile(
     }
 
     try {
-        const versions = await gitOps.getConflictFileVersions(filePath);
-        const outputFileFsPath = path.join(repoRoot, filePath);
+        const versions = await gitOps.getConflictFileVersions(safePath);
+        const outputFileFsPath = path.join(repoRoot, safePath);
         const beforeMergeText = await fs.promises
             .readFile(outputFileFsPath, "utf8")
             .catch(() => null);
 
         await runWithNotificationProgress(
-            `Opening JetBrains merge tool for ${filePath}...`,
+            `Opening JetBrains merge tool for ${safePath}...`,
             async () => {
                 await launchJetBrainsMergeTool({
                     binaryPath: jetBrainsPath,
                     repoRootFsPath: repoRoot,
-                    relativeFilePath: filePath,
+                    relativeFilePath: safePath,
                     outputFileFsPath,
                     baseContent: versions.base,
                     oursContent: versions.ours,
@@ -228,17 +230,17 @@ export async function openJetBrainsMergeToolForFile(
         try {
             const mergedText = await readMergedFileWithRetry(outputFileFsPath, beforeMergeText);
             if (!containsConflictMarkers(mergedText)) {
-                await gitOps.stageFile(filePath);
-                vscode.window.showInformationMessage(`Merged and staged: ${filePath}`);
+                await gitOps.stageFile(safePath);
+                vscode.window.showInformationMessage(`Merged and staged: ${safePath}`);
             } else {
                 vscode.window.showInformationMessage(
-                    `Merge tool closed, but conflict markers remain in ${filePath}`,
+                    `Merge tool closed, but conflict markers remain in ${safePath}`,
                 );
             }
         } catch (readErr) {
             const msg = getErrorMessage(readErr);
             vscode.window.showWarningMessage(
-                `Could not inspect merged file '${filePath}' after JetBrains merge: ${msg}`,
+                `Could not inspect merged file '${safePath}' after JetBrains merge: ${msg}`,
             );
         }
 
