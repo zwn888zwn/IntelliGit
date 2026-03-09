@@ -244,6 +244,61 @@ describe("app logic coverage", () => {
         );
     });
 
+    it("CommitPanelApp defaults groupByDir to true when getState returns undefined", async () => {
+        const postMessage = vi.fn();
+        let capturedGroupByDir: boolean | undefined;
+
+        vi.doMock("../../src/webviews/react/commit-panel/hooks/useExtensionMessages", () => ({
+            useExtensionMessages: () => [
+                {
+                    files: [],
+                    stashes: [],
+                    shelfFiles: [],
+                    selectedShelfIndex: null,
+                    commitMessage: "",
+                    isAmend: false,
+                    error: null,
+                },
+                vi.fn(),
+            ],
+        }));
+        vi.doMock("../../src/webviews/react/commit-panel/hooks/useCheckedFiles", () => ({
+            useCheckedFiles: () => ({
+                checkedPaths: new Set<string>(),
+                toggleFile: vi.fn(),
+                toggleFolder: vi.fn(),
+                toggleSection: vi.fn(),
+                isAllChecked: () => false,
+                isSomeChecked: () => false,
+            }),
+        }));
+        vi.doMock("../../src/webviews/react/commit-panel/hooks/useVsCodeApi", () => ({
+            getVsCodeApi: () => ({ postMessage, getState: () => undefined, setState: vi.fn() }),
+        }));
+        vi.doMock("../../src/webviews/react/commit-panel/components/CommitTab", () => ({
+            CommitTab: (props: { groupByDir: boolean }) => {
+                capturedGroupByDir = props.groupByDir;
+                return <div>CommitTab</div>;
+            },
+        }));
+        vi.doMock("../../src/webviews/react/commit-panel/components/ShelfTab", () => ({
+            ShelfTab: () => <div>Shelf</div>,
+        }));
+        vi.doMock("../../src/webviews/react/commit-panel/components/TabBar", () => ({
+            TabBar: (props: { commitContent: React.ReactNode; shelfContent: React.ReactNode }) => (
+                <div>
+                    <div>{props.commitContent}</div>
+                    <div>{props.shelfContent}</div>
+                </div>
+            ),
+        }));
+
+        await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+        await flush();
+
+        expect(capturedGroupByDir).toBe(true);
+    });
+
     it("CommitPanelApp forwards empty commit attempts for extension-side validation", async () => {
         const postMessage = vi.fn();
 

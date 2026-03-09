@@ -204,11 +204,7 @@ describe("CommitPanelApp integration", () => {
                 b.textContent?.includes("Stash"),
             ),
         );
-        fireClick(
-            Array.from(document.querySelectorAll("*")).find((el) =>
-                el.textContent?.includes("shelf-work"),
-            ),
-        );
+        fireClick(document.querySelector('[title="On main: shelf-work"]'));
         fireClick(
             Array.from(document.querySelectorAll("button")).find(
                 (b) => b.textContent?.trim() === "Apply",
@@ -476,16 +472,10 @@ describe("CommitInfoApp integration", () => {
         expect(document.body.textContent).toContain("Tags");
         expect(document.body.textContent).toContain("HEAD -> main");
 
-        fireClick(
-            Array.from(document.querySelectorAll("*")).find((el) =>
-                el.textContent?.includes("Commit Details"),
-            ),
-        );
-        fireClick(
-            Array.from(document.querySelectorAll("*")).find((el) =>
-                el.textContent?.includes("Commit Details"),
-            ),
-        );
+        // Toggle "Commit Details" collapse/expand via its role="button" element
+        const detailsToggle = document.querySelector('[role="button"][aria-expanded]');
+        fireClick(detailsToggle);
+        fireClick(detailsToggle);
 
         act(() => {
             window.dispatchEvent(new MessageEvent("message", { data: { type: "clear" } }));
