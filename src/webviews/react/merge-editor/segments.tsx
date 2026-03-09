@@ -4,7 +4,7 @@
 // OverviewRail provides a minimap of conflict locations for quick navigation.
 
 import React, { useMemo } from "react";
-import type { CommonSegment, ConflictSegment, HunkResolution, MergeSegment } from "./types";
+import type { CommonSegment, ConflictSegment, HunkResolution } from "./types";
 import {
     IconArrowRight,
     IconArrowLeft,

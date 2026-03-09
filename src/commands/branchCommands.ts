@@ -15,7 +15,6 @@ import {
     isValidBranchName,
     resolveRemoteDeleteTarget,
     resolveRemoteName,
-    resolveTrackedRemoteBranch,
     showDeletedBranchActions,
 } from "../services/gitHelpers";
 

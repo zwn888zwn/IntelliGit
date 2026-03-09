@@ -12,7 +12,6 @@ import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
 import { MergeConflictSessionPanel } from "./views/MergeConflictSessionPanel";
 import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
 import type { Branch } from "./types";
-import type { CommitAction } from "./webviews/react/commitGraphTypes";
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
