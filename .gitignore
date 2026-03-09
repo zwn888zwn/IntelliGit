@@ -16,4 +16,5 @@ coverage/
 .vexp/
 
 CLAUDE.md
-.github/copilot-instructions.md
+
+.agents/

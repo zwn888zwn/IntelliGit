@@ -116,11 +116,6 @@ Helpful command:
 
 If no JetBrains IDE path is configured, IntelliGit falls back to the VS Code internal merge editor.
 
-## Keyboard Shortcut
-
-| Key | Command |
-|-----|---------|
-| `Alt+9` | Focus IntelliGit commit graph panel |
 
 ## Requirements
 
@@ -136,13 +131,8 @@ Search for **IntelliGit** in VS Code Extensions, or install from:
 - [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=MaheshKok.intelligit)
 - [Open VSX Registry](https://open-vsx.org/extension/MaheshKok/intelligit)
 
-### From VSIX
 
-```bash
-bun install
-bun run package
-code --install-extension intelligit-*.vsix
-```
+
 
 ## Development
 
@@ -167,6 +157,31 @@ bun run test
 
 # Format code
 bun run format
+```
+
+### Manually test the changes 
+
+```bash
+bun install
+bun run build
+bun run package
+code --install-extension intelligit-*.vsix
+```
+
+### Running the Test Suite
+
+```bash
+# Run all unit and integration tests
+bun run test
+
+# Run tests in watch mode (re-runs on file changes)
+bun run test -- --watch
+
+# Run a specific test file
+bun run test -- tests/unit/gitops.test.ts
+
+# Run tests matching a pattern
+bun run test -- -t "CommitPanelApp"
 ```
 
 ## Architecture (High Level)

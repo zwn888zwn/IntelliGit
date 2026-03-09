@@ -1166,17 +1166,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     return;
                 }
 
-                const currentBranch =
-                    currentBranches.find(
+                let currentBranch = currentBranches.find(
+                    (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
+                );
+                if (!currentBranch) {
+                    // Stale cache — refresh branch metadata and retry
+                    currentBranches = await gitOps.getBranches();
+                    currentBranch = currentBranches.find(
                         (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
-                    ) ?? {
-                        name: checkedOutBranchName,
-                        hash: "",
-                        isRemote: false,
-                        isCurrent: true,
-                        ahead: 0,
-                        behind: 0,
-                    };
+                    );
+                }
+                if (!currentBranch) {
+                    vscode.window.showErrorMessage(
+                        `Could not resolve branch metadata for '${checkedOutBranchName}'.`,
+                    );
+                    return;
+                }
 
                 let target = resolveTrackedRemoteBranch(currentBranch);
                 let setUpstream = false;

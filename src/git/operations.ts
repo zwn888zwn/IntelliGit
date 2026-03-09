@@ -331,7 +331,11 @@ export class GitOps {
                         deletions: 0,
                     });
                 }
-                if (unstagedStatus) {
+                // Skip only unstaged "M" for newly added files (index === 'A').
+                // A new file edited after staging is still just a new file —
+                // the duplicate "M" row is misleading. Other unstaged statuses
+                // (e.g. "D" for a staged-add then deleted) must still be shown.
+                if (unstagedStatus && !(index === "A" && unstagedStatus === "M")) {
                     files.push({
                         path,
                         status: unstagedStatus,
@@ -513,7 +517,7 @@ export class GitOps {
     // --- Shelf operations (implemented via git stash) ---
 
     async shelveSave(paths?: string[], message: string = "Shelved changes"): Promise<string> {
-        const args = ["stash", "push", "-m", message];
+        const args = ["stash", "push", "--include-untracked", "-m", message];
         if (paths && paths.length > 0) {
             args.push("--", ...paths);
         }
