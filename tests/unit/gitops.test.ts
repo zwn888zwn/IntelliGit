@@ -561,7 +561,7 @@ describe("GitOps", () => {
             await ops.shelveSave(undefined, "my stash");
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "push", "-m", "my stash"]);
+            expect(call).toEqual(["stash", "push", "--include-untracked", "-m", "my stash"]);
         });
 
         it("includes paths when provided", async () => {
@@ -570,7 +570,16 @@ describe("GitOps", () => {
             await ops.shelveSave(["src/a.ts", "src/b.ts"], "partial");
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "push", "-m", "partial", "--", "src/a.ts", "src/b.ts"]);
+            expect(call).toEqual([
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                "partial",
+                "--",
+                "src/a.ts",
+                "src/b.ts",
+            ]);
         });
     });
 

@@ -199,13 +199,31 @@ describe("CommitPanelApp integration", () => {
         });
         await flush();
 
-        fireClick(Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("Shelf")));
-        fireClick(Array.from(document.querySelectorAll("*")).find((el) => el.textContent?.includes("shelf-work")));
-        fireClick(Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Apply"));
-        fireClick(Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Pop"));
-        fireClick(Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Delete"));
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find((b) =>
+                b.textContent?.includes("Stash"),
+            ),
+        );
+        fireClick(document.querySelector('[title="On main: shelf-work"]'));
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find(
+                (b) => b.textContent?.trim() === "Apply",
+            ),
+        );
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find(
+                (b) => b.textContent?.trim() === "Pop",
+            ),
+        );
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find(
+                (b) => b.textContent?.trim() === "Delete",
+            ),
+        );
 
-        expect(vscode.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "refresh" }));
+        expect(vscode.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "refresh" }),
+        );
         expect(vscode.postMessage).toHaveBeenCalledWith({ type: "getLastCommitMessage" });
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "shelfApply", index: 0 }),
@@ -454,8 +472,10 @@ describe("CommitInfoApp integration", () => {
         expect(document.body.textContent).toContain("Tags");
         expect(document.body.textContent).toContain("HEAD -> main");
 
-        fireClick(Array.from(document.querySelectorAll("*")).find((el) => el.textContent?.includes("Commit Details")));
-        fireClick(Array.from(document.querySelectorAll("*")).find((el) => el.textContent?.includes("Commit Details")));
+        // Toggle "Commit Details" collapse/expand via its role="button" element
+        const detailsToggle = document.querySelector('[role="button"][aria-expanded]');
+        fireClick(detailsToggle);
+        fireClick(detailsToggle);
 
         act(() => {
             window.dispatchEvent(new MessageEvent("message", { data: { type: "clear" } }));

@@ -5,6 +5,26 @@ All notable changes to IntelliGit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-03-09
+
+### Added
+
+- Shared "Group by Directory" toggle across Commit and Stash tabs: the toggle state is now lifted to the top-level app so both tabs respect the same setting. (PR #18 by sivertillia)
+- Stash tab label renamed from "Shelf" to "Stash" for consistency with standard Git terminology.
+
+### Fixed
+
+- Fixed duplicate "M" (Modified) status row appearing for newly staged files that were edited after staging. Only unstaged modifications are now suppressed for staged-add files; unstaged deletions (`AD` status) are still shown.
+- Fixed `vscode.getState()` TypeError in test environments by using optional chaining (`vscode.getState?.()`) in the state initializer and effect.
+- Fixed `useEffect` dependency array for `groupByDir` persistence to include `vscode` for React exhaustive-deps compliance.
+
+### Tests
+
+- Added test case verifying `groupByDir` defaults to `true` when `getState()` returns `undefined`.
+- Updated VS Code API mocks to include `getState`/`setState` for `CommitPanelApp` test coverage.
+- Narrowed overly broad DOM selectors (`querySelectorAll("*")`) in integration tests to use precise `title` attribute and `role="button"` selectors.
+- Updated "Shelf" assertions and selectors to "Stash" across all test files.
+
 ## [0.5.4] - 2026-03-04
 
 ### Fixed

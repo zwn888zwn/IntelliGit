@@ -10,7 +10,13 @@ import { renderHighlightedLabel } from "../../src/webviews/react/branch-column/h
 import { BranchSearchBar } from "../../src/webviews/react/branch-column/components/BranchSearchBar";
 import { BranchSectionHeader } from "../../src/webviews/react/branch-column/components/BranchSectionHeader";
 import { BranchTreeNodeRow } from "../../src/webviews/react/branch-column/components/BranchTreeNodeRow";
-import { FolderIcon, GitBranchIcon, RepoIcon, StarIcon, TagIcon } from "../../src/webviews/react/branch-column/icons";
+import {
+    FolderIcon,
+    GitBranchIcon,
+    RepoIcon,
+    StarIcon,
+    TagIcon,
+} from "../../src/webviews/react/branch-column/icons";
 import { CommitArea } from "../../src/webviews/react/commit-panel/components/CommitArea";
 import { FileTypeIcon } from "../../src/webviews/react/commit-panel/components/FileTypeIcon";
 import { FolderRow } from "../../src/webviews/react/commit-panel/components/FolderRow";
@@ -54,10 +60,14 @@ describe("webview ui smoke", () => {
         const mountedSection = mount(
             <BranchSectionHeader label="Local" expanded={true} onToggle={onToggle} />,
         );
-        const sectionElement = mountedSection.container.querySelector('[role="button"]') as HTMLElement;
+        const sectionElement = mountedSection.container.querySelector(
+            '[role="button"]',
+        ) as HTMLElement;
         expect(sectionElement.getAttribute("aria-expanded")).toBe("true");
         act(() => {
-            sectionElement.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+            sectionElement.dispatchEvent(
+                new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+            );
             sectionElement.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
         });
         expect(onToggle).toHaveBeenCalledTimes(2);
@@ -82,7 +92,14 @@ describe("webview ui smoke", () => {
 
         const folderNode = {
             label: "features",
-            children: [{ label: "demo", fullName: "features/demo", branch: branch({ name: "features/demo" }), children: [] }],
+            children: [
+                {
+                    label: "demo",
+                    fullName: "features/demo",
+                    branch: branch({ name: "features/demo" }),
+                    children: [],
+                },
+            ],
         };
         const leafNode = {
             label: "main",
@@ -105,9 +122,7 @@ describe("webview ui smoke", () => {
             />,
         );
         expect(folderHtml).toContain("<mark");
-        const highlighted = renderToStaticMarkup(
-            <>{renderHighlightedLabel("features", "fea")}</>,
-        );
+        const highlighted = renderToStaticMarkup(<>{renderHighlightedLabel("features", "fea")}</>);
         const plainText = highlighted.replace(/<[^>]*>/g, "");
         expect(plainText).toContain("features");
         expect(highlighted.toLowerCase()).toContain(">fea<");
@@ -195,13 +210,17 @@ describe("webview ui smoke", () => {
                     onCommit={noop}
                     onCommitAndPush={noop}
                 />
-                <TabBar stashCount={2} commitContent={<div>Commit tab</div>} shelfContent={<div>Shelf tab</div>} />
+                <TabBar
+                    stashCount={2}
+                    commitContent={<div>Commit tab</div>}
+                    shelfContent={<div>Shelf tab</div>}
+                />
             </>,
         );
 
         expect(html).toContain("Changes");
         expect(html).toContain("Apply");
         expect(html).toContain("Commit and Push");
-        expect(html).toContain("Shelf (2)");
+        expect(html).toContain("Stash (2)");
     });
 });

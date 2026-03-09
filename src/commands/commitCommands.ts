@@ -157,16 +157,22 @@ export async function handleCommitContextAction(params: {
                 return;
             }
 
-            const currentBranch = currentBranches.find(
+            let currentBranch = currentBranches.find(
                 (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
-            ) ?? {
-                name: checkedOutBranchName,
-                hash: "",
-                isRemote: false,
-                isCurrent: true,
-                ahead: 0,
-                behind: 0,
-            };
+            );
+            if (!currentBranch) {
+                // Stale cache — refresh branch metadata and retry
+                const freshBranches = await gitOps.getBranches();
+                currentBranch = freshBranches.find(
+                    (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
+                );
+            }
+            if (!currentBranch) {
+                vscode.window.showErrorMessage(
+                    `Could not resolve branch metadata for '${checkedOutBranchName}'.`,
+                );
+                return;
+            }
 
             let target = resolveTrackedRemoteBranch(currentBranch, currentBranches);
             let setUpstream = false;

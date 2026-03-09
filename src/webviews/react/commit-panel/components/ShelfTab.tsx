@@ -1,7 +1,7 @@
 // Shelf tab with selectable shelved entries, changed-file preview, and
 // bottom Apply/Pop/Delete actions.
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Flex, Box, Button } from "@chakra-ui/react";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 import { FileTypeIcon } from "./FileTypeIcon";
@@ -19,6 +19,7 @@ interface Props {
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
+    groupByDir: boolean;
 }
 
 type ShelfActionKind = "apply" | "pop" | "delete";
@@ -30,16 +31,37 @@ export function ShelfTab({
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
+    groupByDir,
 }: Props): React.ReactElement {
     const vscode = getVsCodeApi();
-    const tree = useFileTree(shelfFiles, true);
+    const tree = useFileTree(shelfFiles, groupByDir);
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+    // expandedIndex tracks which stash entry the user has toggled open locally.
+    // It is set optimistically on click (before files arrive from the extension host).
+    // selectedIndex (prop) updates once the host responds with loaded files.
+    // Collapsing only clears local state — no host message needed since no files to load.
+    // The useEffect below re-syncs expandedIndex from selectedIndex on parent-driven
+    // changes (e.g. after apply/pop/delete removes the selected stash).
+    const [expandedIndex, setExpandedIndex] = useState<number | null>(selectedIndex);
+    const [isLoading, setIsLoading] = useState(false);
 
-    const handleSelect = useCallback(
+    useEffect(() => {
+        setExpandedIndex(selectedIndex);
+        setIsLoading(false);
+    }, [selectedIndex]);
+
+    const handleStashClick = useCallback(
         (index: number) => {
-            vscode.postMessage({ type: "shelfSelect", index });
+            if (expandedIndex === index) {
+                setExpandedIndex(null);
+                setIsLoading(false);
+            } else {
+                setExpandedIndex(index);
+                setIsLoading(true);
+                vscode.postMessage({ type: "shelfSelect", index });
+            }
         },
-        [vscode],
+        [expandedIndex, vscode],
     );
 
     const handleShelfAction = useCallback(
@@ -77,20 +99,50 @@ export function ShelfTab({
         setExpandedDirs(new Set(collectAllDirPaths(tree)));
     }, [tree]);
 
-    const selectedEntry = useMemo(
-        () => stashes.find((entry) => entry.index === selectedIndex) ?? null,
-        [stashes, selectedIndex],
-    );
+    const [fileTreeHeight, setFileTreeHeight] = useState(150);
+    const fileTreeHeightRef = useRef(fileTreeHeight);
+    useEffect(() => {
+        fileTreeHeightRef.current = fileTreeHeight;
+    }, [fileTreeHeight]);
+
+    const dragCleanupRef = useRef<(() => void) | null>(null);
+
+    useEffect(() => {
+        return () => {
+            dragCleanupRef.current?.();
+        };
+    }, []);
+
+    const handleFileTreeDragStart = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startH = fileTreeHeightRef.current;
+
+        const onMouseMove = (ev: MouseEvent) => {
+            const delta = ev.clientY - startY;
+            setFileTreeHeight(Math.max(60, startH + delta));
+        };
+        const cleanup = () => {
+            document.removeEventListener("mousemove", onMouseMove);
+            document.removeEventListener("mouseup", onMouseUp);
+            document.body.style.cursor = "";
+            document.body.style.userSelect = "";
+            dragCleanupRef.current = null;
+        };
+        const onMouseUp = () => {
+            cleanup();
+        };
+
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "row-resize";
+        document.body.style.userSelect = "none";
+        dragCleanupRef.current = cleanup;
+    }, []);
 
     return (
         <Flex direction="column" flex={1} overflow="hidden">
-            <Box
-                flexShrink={0}
-                maxH="100px"
-                overflowY="auto"
-                borderBottom="1px solid var(--vscode-panel-border)"
-                pt="1px"
-            >
+            <Box flex="1 1 auto" overflowY="auto" pt="1px">
                 {stashes.length === 0 ? (
                     <Box
                         color="var(--vscode-descriptionForeground)"
@@ -103,104 +155,141 @@ export function ShelfTab({
                 ) : (
                     stashes.map((stash) => {
                         const parsed = parseShelfMessage(stash.message);
-                        const isSelected = selectedIndex === stash.index;
+                        const isExpanded = expandedIndex === stash.index;
+                        const hasFiles = isExpanded && selectedIndex === stash.index;
                         return (
-                            <Flex
-                                key={stash.index}
-                                align="center"
-                                px="9px"
-                                py="2px"
-                                minH="24px"
-                                fontSize="12px"
-                                fontFamily={SYSTEM_FONT_STACK}
-                                cursor="pointer"
-                                bg={
-                                    isSelected
-                                        ? "var(--vscode-list-activeSelectionBackground)"
-                                        : "transparent"
-                                }
-                                color={
-                                    isSelected
-                                        ? "var(--vscode-list-activeSelectionForeground)"
-                                        : "var(--vscode-foreground)"
-                                }
-                                _hover={{
-                                    bg: isSelected
-                                        ? "var(--vscode-list-activeSelectionBackground)"
-                                        : "var(--vscode-list-hoverBackground)",
-                                }}
-                                onClick={() => handleSelect(stash.index)}
-                                title={stash.message}
-                            >
-                                <Box
-                                    as="span"
-                                    flex={1}
-                                    minW={0}
-                                    overflow="hidden"
-                                    textOverflow="ellipsis"
-                                    whiteSpace="nowrap"
+                            <React.Fragment key={stash.index}>
+                                <Flex
+                                    align="center"
+                                    px="9px"
+                                    py="2px"
+                                    minH="24px"
+                                    fontSize="12px"
+                                    fontFamily={SYSTEM_FONT_STACK}
+                                    cursor="pointer"
+                                    bg={
+                                        isExpanded
+                                            ? "var(--vscode-list-activeSelectionBackground)"
+                                            : "transparent"
+                                    }
+                                    color={
+                                        isExpanded
+                                            ? "var(--vscode-list-activeSelectionForeground)"
+                                            : "var(--vscode-foreground)"
+                                    }
+                                    _hover={{
+                                        bg: isExpanded
+                                            ? "var(--vscode-list-activeSelectionBackground)"
+                                            : "var(--vscode-list-hoverBackground)",
+                                    }}
+                                    onClick={() => handleStashClick(stash.index)}
+                                    title={stash.message}
                                 >
-                                    {parsed.title}
-                                </Box>
-                                {parsed.branch && (
                                     <Box
                                         as="span"
-                                        ml="10px"
-                                        display="inline-flex"
-                                        alignItems="center"
-                                        fontSize="10.5px"
-                                        gap="4px"
-                                        color="#d8ca64"
+                                        w="14px"
+                                        textAlign="center"
+                                        fontSize="10px"
+                                        opacity={0.7}
                                         flexShrink={0}
+                                        transform={isExpanded ? "rotate(90deg)" : undefined}
+                                        transition="transform 0.15s"
                                     >
+                                        &#9654;
+                                    </Box>
+                                    <Box
+                                        as="span"
+                                        flex={1}
+                                        minW={0}
+                                        overflow="hidden"
+                                        textOverflow="ellipsis"
+                                        whiteSpace="nowrap"
+                                    >
+                                        {parsed.title}
+                                    </Box>
+                                    {parsed.branch && (
                                         <Box
-                                            as="svg"
-                                            w="12px"
-                                            h="12px"
-                                            viewBox="0 0 16 16"
-                                            opacity={0.95}
+                                            as="span"
+                                            ml="10px"
+                                            display="inline-flex"
+                                            alignItems="center"
+                                            fontSize="10.5px"
+                                            gap="4px"
+                                            color="var(--vscode-gitDecoration-modifiedResourceForeground, #d8ca64)"
+                                            flexShrink={0}
                                         >
-                                            <path
-                                                fill="currentColor"
-                                                d="M9.28 1.5H5.5A2.5 2.5 0 0 0 3 4v8a2.5 2.5 0 0 0 2.5 2.5h3.78a1.5 1.5 0 0 0 1.06-.44l3.72-3.72a1.5 1.5 0 0 0 0-2.12L10.34 1.94a1.5 1.5 0 0 0-1.06-.44zM5.5 3h3.78l3.72 3.72-3.72 3.72H5.5A1 1 0 0 1 4.5 9.44V4A1 1 0 0 1 5.5 3zm1.25 2a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5z"
-                                            />
+                                            <Box
+                                                as="svg"
+                                                w="12px"
+                                                h="12px"
+                                                viewBox="0 0 16 16"
+                                                opacity={0.95}
+                                            >
+                                                <path
+                                                    fill="currentColor"
+                                                    d="M11.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zm-2.25.75a2.25 2.25 0 1 1 3 2.122V6.5a.5.5 0 0 1-.5.5H9.25a1.75 1.75 0 0 0-1.75 1.75v.872a2.25 2.25 0 1 1-1.5 0V4.372a2.25 2.25 0 1 1 1.5 0v3.256A3.25 3.25 0 0 1 9.25 6.5H12V5.372a2.25 2.25 0 0 1-2.5-2.122zM4.25 3.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5zM4.25 14a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5z"
+                                                />
+                                            </Box>
+                                            {parsed.branch}
                                         </Box>
-                                        {parsed.branch}
+                                    )}
+                                </Flex>
+                                {isExpanded && !hasFiles && isLoading && (
+                                    <Box
+                                        pl="28px"
+                                        py="4px"
+                                        fontSize="12px"
+                                        color="var(--vscode-descriptionForeground)"
+                                    >
+                                        Loading...
                                     </Box>
                                 )}
-                            </Flex>
+                                {hasFiles && (
+                                    <>
+                                        <Box h={`${fileTreeHeight}px`} overflowY="auto">
+                                            {shelfFiles.length > 0 ? (
+                                                <ShelfFileTree
+                                                    entries={tree}
+                                                    expandedDirs={expandedDirs}
+                                                    folderIcon={folderIcon}
+                                                    folderExpandedIcon={folderExpandedIcon}
+                                                    folderIconsByName={folderIconsByName}
+                                                    onToggleDir={toggleDir}
+                                                    onFileClick={(path) =>
+                                                        vscode.postMessage({
+                                                            type: "showShelfDiff",
+                                                            index: stash.index,
+                                                            path,
+                                                        })
+                                                    }
+                                                    depth={1}
+                                                />
+                                            ) : (
+                                                <Box
+                                                    pl="28px"
+                                                    py="2px"
+                                                    fontSize="12px"
+                                                    color="var(--vscode-descriptionForeground)"
+                                                >
+                                                    No files in this shelved change.
+                                                </Box>
+                                            )}
+                                        </Box>
+                                        <Box
+                                            h="4px"
+                                            flexShrink={0}
+                                            cursor="row-resize"
+                                            bg="var(--vscode-panel-border)"
+                                            onMouseDown={handleFileTreeDragStart}
+                                            _hover={{
+                                                bg: "var(--vscode-focusBorder, #007acc)",
+                                            }}
+                                        />
+                                    </>
+                                )}
+                            </React.Fragment>
                         );
                     })
-                )}
-            </Box>
-
-            <Box flex="1 1 auto" overflowY="auto">
-                {selectedEntry ? (
-                    shelfFiles.length > 0 ? (
-                        <ShelfFileTree
-                            entries={tree}
-                            expandedDirs={expandedDirs}
-                            folderIcon={folderIcon}
-                            folderExpandedIcon={folderExpandedIcon}
-                            folderIconsByName={folderIconsByName}
-                            onToggleDir={toggleDir}
-                            onFileClick={(path) =>
-                                vscode.postMessage({
-                                    type: "showShelfDiff",
-                                    index: selectedEntry.index,
-                                    path,
-                                })
-                            }
-                        />
-                    ) : (
-                        <Box p="10px" fontSize="12px" color="var(--vscode-descriptionForeground)">
-                            No files in this shelved change.
-                        </Box>
-                    )
-                ) : (
-                    <Box p="10px" fontSize="12px" color="var(--vscode-descriptionForeground)">
-                        Select a shelved change.
-                    </Box>
                 )}
             </Box>
 
