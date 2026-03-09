@@ -5,6 +5,50 @@ All notable changes to IntelliGit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-03-09
+
+### Added
+
+- IntelliJ-style stash accordion layout: each stash entry has a chevron toggle that expands its file tree inline directly below that entry, replacing the previous split list/tree layout.
+- Draggable file tree height within expanded stash entries for resizing the file list area.
+- Bottom "Coming..." placeholder panel below the Commit/Stash tabs with a draggable divider to resize.
+- Bottom panel height persists across webview reloads via `vscode.getState()`.
+- Loading indicator shown when stash entry is expanded but files are still being fetched from the extension host.
+- Branch name validation with strict alphanumeric/dot/dash/underscore/slash rules for new branch and tag operations.
+- Strict relative path assertions for all file operations dispatched from webviews to prevent path traversal.
+- Stash shelving now supports untracked files (`--include-untracked` flag on `git stash push`).
+
+### Changed
+
+- Stash branch badge icon changed from tag icon to git branch icon, matching the branch panel.
+- Stash branch badge color now uses `--vscode-gitDecoration-modifiedResourceForeground` instead of hardcoded `#d8ca64` for theme compatibility.
+
+### Fixed
+
+- Fixed stale branch metadata causing incorrect push-target resolution in "Push All up to Here": now refreshes branch cache on lookup miss instead of fabricating a synthetic branch object.
+- Fixed potential leaked document event listeners and stuck body styles when ShelfTab unmounts mid-drag.
+
+### Refactored
+
+- Extracted `extension.ts` (2,021 lines) into focused modules, reducing it to ~520 lines (75% reduction):
+  - `commands/branchCommands.ts`: 10 branch action handlers
+  - `commands/commitCommands.ts`: 13 commit context actions
+  - `services/diffService.ts`: file comparison and patch operations
+  - `services/gitHelpers.ts`: shared git utilities (validation, resolution)
+  - `services/jetbrainsMergeService.ts`: JetBrains merge tool orchestration
+  - `services/refreshService.ts`: debounced refresh and file watchers
+- Decomposed `MergeEditorApp.tsx` (1,477 lines) into focused modules:
+  - `icons.tsx`: SVG icon components
+  - `wordDiff.ts`: pure word-level diff algorithms
+  - `mergeState.ts`: reducer and resolution helpers
+  - `segments.tsx`: section components, code blocks, overview rail
+- Extracted shared theme change listener utility (`themeListeners.ts`) to replace duplicated listener boilerplate across view providers.
+- Removed duplicate stash/shelf method aliases (`stashSave`, `stashPop`, etc.) that were pure pass-throughs to canonical `shelve*` methods.
+
+### Tests
+
+- Added 65+ unit tests for extracted modules: `gitHelpers`, `wordDiff`, `mergeState` (total: 131 to 200).
+
 ## [0.5.5] - 2026-03-09
 
 ### Added
