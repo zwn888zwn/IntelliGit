@@ -116,11 +116,6 @@ Helpful command:
 
 If no JetBrains IDE path is configured, IntelliGit falls back to the VS Code internal merge editor.
 
-## Keyboard Shortcut
-
-| Key | Command |
-|-----|---------|
-| `Alt+9` | Focus IntelliGit commit graph panel |
 
 ## Requirements
 
@@ -136,13 +131,8 @@ Search for **IntelliGit** in VS Code Extensions, or install from:
 - [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=MaheshKok.intelligit)
 - [Open VSX Registry](https://open-vsx.org/extension/MaheshKok/intelligit)
 
-### From VSIX
 
-```bash
-bun install
-bun run package
-code --install-extension intelligit-*.vsix
-```
+
 
 ## Development
 
@@ -169,7 +159,14 @@ bun run test
 bun run format
 ```
 
-## Testing the Extension
+### Manually test the changes 
+
+```bash
+bun install
+bun run build
+bun run package
+code --install-extension intelligit-*.vsix
+```
 
 ### Running the Test Suite
 
@@ -186,53 +183,6 @@ bun run test -- tests/unit/gitops.test.ts
 # Run tests matching a pattern
 bun run test -- -t "CommitPanelApp"
 ```
-
-### Test Categories
-
-| Category | Files | What It Covers |
-|----------|-------|----------------|
-| Git operations | `gitops.test.ts` | `GitOps` methods: status parsing, staging, commits, shelf/stash, branch operations, numstat |
-| Core utilities | `core-utils.test.ts` | Error helpers, path validation, webview HTML generation, graph computation, date formatting |
-| View providers | `view-providers.integration.test.ts` | Extension host message handling for CommitPanel and CommitGraph providers |
-| Extension commands | `extension.integration.test.ts` | VS Code command registration and execution (branch, commit, file operations) |
-| App logic | `app-logic.coverage.test.tsx` | React app callback wiring, state management, commit/amend/push handler flows |
-| Webview integration | `webview-apps.integration.test.tsx` | Full DOM render of CommitPanelApp, CommitGraphApp, and CommitInfoApp with simulated extension messages |
-| UI smoke | `ui-smoke.test.tsx` | Static render of individual UI components (toolbar, file tree, tab bar, commit area, branch tree) |
-| Merge conflict parser | `merge-conflict-parser.test.ts` | Conflict marker detection and extraction from file content |
-| Component coverage | `low-coverage-components.test.tsx` | Leaf components not covered by integration tests |
-| Extracted modules | `extracted-modules.test.ts` | Decomposed modules from the refactoring branch |
-
-### Manual Testing in VS Code
-
-1. Open the repo in VS Code and press `F5` to launch the Extension Development Host.
-2. In the new window, open any Git repository.
-3. Open IntelliGit from the activity bar (left sidebar).
-
-**Commit panel (sidebar):**
-
-- Toggle "Group by Directory" in the toolbar and verify both the Commit and Stash tabs respect the toggle.
-- Stage files via checkboxes, write a message, and click Commit.
-- Click "Amend" and verify the last commit message is loaded.
-- Use the Stash tab: shelve changes, select a stash entry, and verify Apply/Pop/Delete work.
-
-**Commit graph (bottom panel):**
-
-- Open the IntelliGit bottom panel (or press `Alt+9`).
-- Scroll down to trigger infinite-scroll pagination.
-- Click a commit to see changed files and commit details.
-- Right-click a commit or branch for context menu actions.
-- Use the branch filter and text search.
-
-**Branch management:**
-
-- Right-click branches in the branch column for checkout, rename, delete, merge, rebase operations.
-- Create a new branch from the context menu and verify it appears.
-
-**Edge cases to verify:**
-
-- Open a workspace with no Git repository and confirm graceful error handling.
-- Stage a new file, edit it again after staging, and verify only one row appears (not a duplicate "M" row).
-- Stage a new file then delete it from disk; verify both the staged "A" and unstaged "D" rows appear.
 
 ## Architecture (High Level)
 

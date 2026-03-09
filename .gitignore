@@ -17,3 +17,5 @@ coverage/
 
 CLAUDE.md
 .github/copilot-instructions.md
+
+.agents/
