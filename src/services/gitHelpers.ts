@@ -218,7 +218,6 @@ export async function buildCommitFilePatch(
     if (parents.length > 1) {
         const result = await pickMainlineParent(commitHash, actionLabel, executor, parents);
         if (result.kind === "cancelled") return null;
-        if (result.kind === "notMerge") return null;
         baseRef = `${commitHash}^${result.parentNumber}`;
     } else {
         baseRef = parents.length === 0 ? EMPTY_TREE_HASH : parents[0];

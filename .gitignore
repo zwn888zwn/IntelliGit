@@ -18,3 +18,5 @@ coverage/
 CLAUDE.md
 
 .agents/
+
+.serena/

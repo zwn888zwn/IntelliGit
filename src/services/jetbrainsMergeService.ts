@@ -181,7 +181,15 @@ export async function openJetBrainsMergeToolForFile(
     refreshConflictUi: () => Promise<void>,
     openBuiltInMergeEditorForFile: (filePath: string) => Promise<void>,
 ): Promise<boolean> {
-    const safePath = assertRepoRelativePath(filePath);
+    let safePath: string;
+    try {
+        safePath = assertRepoRelativePath(filePath);
+    } catch (error) {
+        const msg = getErrorMessage(error);
+        vscode.window.showErrorMessage(`Invalid merge file path: ${msg}`);
+        return false;
+    }
+
     let jetBrainsPath = getJetBrainsMergeToolPath();
     if (!jetBrainsPath) {
         const action = await vscode.window.showInformationMessage(
@@ -200,7 +208,14 @@ export async function openJetBrainsMergeToolForFile(
             }
         }
         if (action !== "Configure") return false;
-        const configured = await promptForJetBrainsMergeToolPath();
+        let configured: string | null;
+        try {
+            configured = await promptForJetBrainsMergeToolPath();
+        } catch (error) {
+            const msg = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to configure JetBrains merge tool: ${msg}`);
+            return false;
+        }
         if (!configured) return false;
         jetBrainsPath = configured;
     }
@@ -244,7 +259,12 @@ export async function openJetBrainsMergeToolForFile(
             );
         }
 
-        await refreshConflictUi();
+        try {
+            await refreshConflictUi();
+        } catch (uiError) {
+            const msg = getErrorMessage(uiError);
+            vscode.window.showErrorMessage(`Failed to refresh conflict UI: ${msg}`);
+        }
         return true;
     } catch (error) {
         const message = getErrorMessage(error);

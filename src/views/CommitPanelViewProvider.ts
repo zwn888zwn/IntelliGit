@@ -149,6 +149,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         return value;
     }
 
+    private assertRepoPathArray(value: unknown, field: string): string[] {
+        const strings = this.assertStringArray(value, field);
+        return strings.map((s) => assertRepoRelativePath(s));
+    }
+
     private assertString(value: unknown, field: string): string {
         if (typeof value !== "string") {
             throw new Error(`Expected string for '${field}', got ${typeof value}`);
@@ -174,14 +179,14 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 break;
 
             case "stageFiles": {
-                const paths = this.assertStringArray(msg.paths, "paths");
+                const paths = this.assertRepoPathArray(msg.paths, "paths");
                 await this.gitOps.stageFiles(paths);
                 await this.refreshData();
                 break;
             }
 
             case "unstageFiles": {
-                const paths = this.assertStringArray(msg.paths, "paths");
+                const paths = this.assertRepoPathArray(msg.paths, "paths");
                 await this.gitOps.unstageFiles(paths);
                 await this.refreshData();
                 break;
@@ -262,7 +267,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "rollback": {
-                const paths = this.assertStringArray(msg.paths, "paths");
+                const paths = this.assertRepoPathArray(msg.paths, "paths");
                 if (paths.length === 0) {
                     const confirm = await vscode.window.showWarningMessage(
                         "Rollback all changes?",
@@ -297,7 +302,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 const name = typeof msg.name === "string" ? msg.name : "Shelved changes";
                 let paths: string[] | undefined;
                 if (msg.paths !== undefined) {
-                    paths = this.assertStringArray(msg.paths, "paths");
+                    paths = this.assertRepoPathArray(msg.paths, "paths");
                 }
                 await this.gitOps.shelveSave(paths, name);
                 vscode.window.showInformationMessage("Changes shelved.");

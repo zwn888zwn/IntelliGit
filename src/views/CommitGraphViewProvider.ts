@@ -262,7 +262,9 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             vscode.window.showErrorMessage(`Git log error: ${message}`);
             this.postToWebview({ type: "loadError", message });
         } finally {
-            this.loadingMore = false;
+            if (requestId === this.requestSeq) {
+                this.loadingMore = false;
+            }
         }
     }
 

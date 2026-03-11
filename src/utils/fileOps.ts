@@ -15,6 +15,9 @@ export function assertRepoRelativePath(filePath: string): string {
         throw new Error(`Rejected non-relative path: ${filePath}`);
     }
     const normalized = path.normalize(filePath);
+    if (normalized === ".") {
+        throw new Error(`Rejected repo root path: ${filePath}`);
+    }
     const segments = normalized.split(path.sep);
     if (segments.some((seg) => seg === "..")) {
         throw new Error(`Rejected path escaping repo root: ${filePath}`);

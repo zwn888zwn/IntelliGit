@@ -160,7 +160,7 @@ const gitOpsState = {
     acceptConflictSide: vi.fn(async () => undefined),
     getConflictFileVersions: vi.fn(async () => ({ base: "", ours: "", theirs: "" })),
     stageFile: vi.fn(async () => undefined),
-    push: vi.fn(async () => undefined),
+    push: vi.fn(async () => ""),
 };
 
 const deleteFileWithFallback = vi.fn(async () => true);
@@ -555,61 +555,67 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.conflictAcceptTheirs")).toBe(true);
         expect(registeredCommands.has("intelligit.openConflictSession")).toBe(true);
 
-        await registeredCommands.get("intelligit.refresh")?.();
-        await registeredCommands.get("intelligit.filterByBranch")?.("main");
-        await registeredCommands.get("intelligit.showGitLog")?.();
+        function getCommand(id: string): CommandHandler {
+            const cmd = registeredCommands.get(id);
+            if (!cmd) throw new Error(`Missing command registration: ${id}`);
+            return cmd;
+        }
 
-        await registeredCommands.get("intelligit.checkout")?.({
+        await getCommand("intelligit.refresh")();
+        await getCommand("intelligit.filterByBranch")("main");
+        await getCommand("intelligit.showGitLog")();
+
+        await getCommand("intelligit.checkout")({
             branch: { name: "feature-local", isRemote: false },
         });
-        await registeredCommands.get("intelligit.newBranchFrom")?.({
+        await getCommand("intelligit.newBranchFrom")({
             branch: { name: "feature-local", isRemote: false },
         });
-        await registeredCommands.get("intelligit.checkoutAndRebase")?.({
+        await getCommand("intelligit.checkoutAndRebase")({
             branch: { name: "feature-local", isRemote: false },
         });
-        await registeredCommands.get("intelligit.rebaseCurrentOnto")?.({
+        await getCommand("intelligit.rebaseCurrentOnto")({
             branch: { name: "feature-local", isRemote: false },
         });
-        await registeredCommands.get("intelligit.mergeIntoCurrent")?.({
+        await getCommand("intelligit.mergeIntoCurrent")({
             branch: { name: "feature-local", isRemote: false },
         });
-        await registeredCommands.get("intelligit.updateBranch")?.({
+        await getCommand("intelligit.updateBranch")({
             branch: { name: "main", isRemote: false, isCurrent: true },
         });
-        await registeredCommands.get("intelligit.pushBranch")?.({
+        await getCommand("intelligit.pushBranch")({
             branch: { name: "main", isRemote: false, isCurrent: true, remote: "origin" },
         });
-        await registeredCommands.get("intelligit.renameBranch")?.({
+        await getCommand("intelligit.renameBranch")({
             branch: { name: "feature-local", isRemote: false },
         });
-        await registeredCommands.get("intelligit.deleteBranch")?.({
+        await getCommand("intelligit.deleteBranch")({
             branch: { name: "feature-unmerged", isRemote: false },
         });
-        await registeredCommands.get("intelligit.deleteBranch")?.({
+        await getCommand("intelligit.deleteBranch")({
             branch: { name: "feature-force", isRemote: false },
         });
-        await registeredCommands.get("intelligit.deleteBranch")?.({
+        await getCommand("intelligit.deleteBranch")({
             branch: { name: "origin/feature-remote", isRemote: true, remote: "origin" },
         });
 
-        await registeredCommands.get("intelligit.fileRollback")?.({ filePath: "src/a.ts" });
-        await registeredCommands.get("intelligit.fileJumpToSource")?.({ filePath: "src/a.ts" });
-        await registeredCommands.get("intelligit.fileDelete")?.({ filePath: "src/a.ts" });
-        await registeredCommands.get("intelligit.fileShelve")?.({ filePath: "src/a.ts" });
-        await registeredCommands.get("intelligit.fileShowHistory")?.({ filePath: "src/a.ts" });
-        await registeredCommands.get("intelligit.fileRefresh")?.();
-        await registeredCommands.get("intelligit.openMergeConflict")?.({
+        await getCommand("intelligit.fileRollback")({ filePath: "src/a.ts" });
+        await getCommand("intelligit.fileJumpToSource")({ filePath: "src/a.ts" });
+        await getCommand("intelligit.fileDelete")({ filePath: "src/a.ts" });
+        await getCommand("intelligit.fileShelve")({ filePath: "src/a.ts" });
+        await getCommand("intelligit.fileShowHistory")({ filePath: "src/a.ts" });
+        await getCommand("intelligit.fileRefresh")();
+        await getCommand("intelligit.openMergeConflict")({
             filePath: "src/conflicted.ts",
         });
-        await registeredCommands.get("intelligit.conflictAcceptYours")?.({
+        await getCommand("intelligit.conflictAcceptYours")({
             filePath: "src/conflicted.ts",
         });
-        await registeredCommands.get("intelligit.conflictAcceptTheirs")?.({
+        await getCommand("intelligit.conflictAcceptTheirs")({
             filePath: "src/conflicted.ts",
         });
-        await registeredCommands.get("intelligit.mergeConflictsRefresh")?.();
-        await registeredCommands.get("intelligit.openConflictSession")?.();
+        await getCommand("intelligit.mergeConflictsRefresh")();
+        await getCommand("intelligit.openConflictSession")();
 
         expect(executorRun).toHaveBeenCalled();
         expect(showInformationMessage).toHaveBeenCalled();

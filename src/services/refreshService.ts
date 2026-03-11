@@ -121,7 +121,11 @@ export class RefreshService implements vscode.Disposable {
 
         try {
             const dirWatcher = fs.watch(gitDir, (_event, filename) => {
-                if (filename && gitStateFiles.has(filename)) {
+                if (!filename) {
+                    this.debouncedFullRefresh();
+                    return;
+                }
+                if (gitStateFiles.has(filename)) {
                     if (filename === "index") {
                         this.debouncedLightRefresh();
                     } else {

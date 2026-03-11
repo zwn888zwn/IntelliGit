@@ -2,6 +2,7 @@
 // Each action handles a right-click operation on a commit in the
 // commit graph: cherry-pick, revert, reset, rebase, tag, etc.
 
+import * as path from "path";
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
@@ -52,7 +53,6 @@ export async function handleCommitContextAction(params: {
             return;
         }
         case "createPatch": {
-            const { default: path } = await import("path");
             const defaultUri = vscode.Uri.file(path.join(repoRoot, `${short}.patch`));
             const targetUri = await vscode.window.showSaveDialog({
                 defaultUri,
@@ -359,6 +359,14 @@ export async function handleCommitContextAction(params: {
                 return;
             }
 
+            try {
+                await executor.run(["merge-base", "--is-ancestor", validatedHash, "HEAD"]);
+            } catch {
+                vscode.window.showErrorMessage(
+                    `Commit ${short} is not in the current branch history.`,
+                );
+                return;
+            }
             const rewordParents = await getCommitParentHashes(validatedHash, executor);
             if (rewordParents.length === 0) {
                 vscode.window.showErrorMessage(
