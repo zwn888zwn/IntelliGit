@@ -11,7 +11,7 @@ function parseJsonOutput(output, source) {
         return JSON.parse(output);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to parse ${source} JSON output: ${message}`);
+        throw new Error(`Failed to parse ${source} JSON output: ${message}`, { cause: error });
     }
 }
 
@@ -75,7 +75,7 @@ function lookupPublishStatus({ packageJson, runCommand = defaultRunCommand, cwd 
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (!isMissingMarketplaceExtensionError(message)) {
-            throw new Error(`VS Code Marketplace lookup failed: ${message}`);
+            throw new Error(`VS Code Marketplace lookup failed: ${message}`, { cause: error });
         }
     }
 
@@ -90,7 +90,7 @@ function lookupPublishStatus({ packageJson, runCommand = defaultRunCommand, cwd 
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (!isMissingOpenVsxVersionError(message)) {
-            throw new Error(`Open VSX lookup failed: ${message}`);
+            throw new Error(`Open VSX lookup failed: ${message}`, { cause: error });
         }
     }
 

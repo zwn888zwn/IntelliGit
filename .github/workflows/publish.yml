@@ -118,6 +118,10 @@ jobs:
               with:
                   bun-version: ${{ env.BUN_VERSION }}
 
+            - name: Install release dependencies
+              if: steps.version-check.outputs.version_changed == 'true'
+              run: bun install --frozen-lockfile
+
             - name: Check publish status
               if: steps.version-check.outputs.version_changed == 'true'
               id: publish-status

@@ -100,4 +100,62 @@ describe("lookupPublishStatus", () => {
             ovsxPublished: false,
         });
     });
+
+    it("preserves the parse failure as the cause for marketplace lookup errors", () => {
+        let thrownError;
+
+        try {
+            lookupPublishStatus({
+                packageJson: {
+                    publisher: "MaheshKok",
+                    name: "intelligit",
+                    version: "0.6.0",
+                },
+                runCommand: (_command, args) => {
+                    if (args[0] === "vsce") {
+                        return "{";
+                    }
+                    return "{}";
+                },
+            });
+        } catch (error) {
+            thrownError = error;
+        }
+
+        expect(thrownError).toBeInstanceOf(Error);
+        expect(thrownError.message).toContain("VS Code Marketplace lookup failed");
+        expect(thrownError.cause).toBeInstanceOf(Error);
+        expect(thrownError.cause.message).toContain("Failed to parse vsce JSON output");
+        expect(thrownError.cause.cause).toBeInstanceOf(SyntaxError);
+    });
+
+    it("preserves the original lookup failure as the cause for Open VSX errors", () => {
+        const rootCause = new Error("bunx ovsx not found");
+        let thrownError;
+
+        try {
+            lookupPublishStatus({
+                packageJson: {
+                    publisher: "MaheshKok",
+                    name: "intelligit",
+                    version: "0.6.0",
+                },
+                runCommand: (_command, args) => {
+                    if (args[0] === "vsce") {
+                        return JSON.stringify({
+                            versions: [{ version: "0.6.0" }],
+                        });
+                    }
+
+                    throw rootCause;
+                },
+            });
+        } catch (error) {
+            thrownError = error;
+        }
+
+        expect(thrownError).toBeInstanceOf(Error);
+        expect(thrownError.message).toContain("Open VSX lookup failed");
+        expect(thrownError.cause).toBe(rootCause);
+    });
 });
