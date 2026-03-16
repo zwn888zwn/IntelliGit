@@ -21,7 +21,7 @@ export function isValidGitHash(value: string): boolean {
 
 // Characters forbidden anywhere in a git ref name (excluding control chars
 // which are checked separately to avoid embedding literal control characters).
-const GIT_REF_INVALID_CHARS = /[ ~^:?*[\]\\{]/;
+const GIT_REF_INVALID_CHARS = /[ ~^:?*[\]\\]/;
 
 /**
  * Check whether a string contains ASCII control characters (0x00-0x1f, 0x7f).
@@ -61,7 +61,6 @@ export function isValidBranchName(value: string): boolean {
  * Pure JS implementation — does not spawn a subprocess.
  */
 export function isValidTagName(value: string): boolean {
-    if (!value) return false;
     return isValidBranchName(value);
 }
 

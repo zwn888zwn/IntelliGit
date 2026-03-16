@@ -12,7 +12,7 @@ export function getErrorMessage(error: unknown): string {
  *   https://token@host          (token-only, e.g. GitHub PAT)
  *   https://user:@host          (empty password)
  */
-function sanitizeErrorMessage(message: string): string {
+export function sanitizeErrorMessage(message: string): string {
     // Match any user-info portion: user:pass@, token@, user:@
     return message.replace(/(https?:\/\/)[^\s/@]+(?::[^\s/@]*)?@/g, "$1***@");
 }

@@ -8,7 +8,7 @@ import type {
     StashEntry,
     MergeConflictFile,
 } from "../types";
-import { getErrorMessage } from "../utils/errors";
+import { getErrorMessage, sanitizeErrorMessage } from "../utils/errors";
 
 declare const require: (id: string) => unknown;
 
@@ -47,7 +47,7 @@ function logGitOpsWarning(context: string, err: unknown, options?: { notifyUser?
     const message = getErrorMessage(err);
     channel.appendLine(`[GitOps] ${context}: ${message}`);
     if (err instanceof Error && err.stack) {
-        channel.appendLine(err.stack);
+        channel.appendLine(sanitizeErrorMessage(err.stack));
     }
     if (options?.notifyUser) {
         const vscode = getVsCodeApi();
@@ -245,7 +245,7 @@ export class GitOps {
             const cols = line.split("\t");
             if (cols.length >= 2) {
                 const rawCode = cols[0].charAt(0);
-                const status = (mapStatusCode(rawCode) ?? "M") as CommitFile["status"];
+                const status: CommitFile["status"] = mapCommitFileStatus(rawCode);
                 const isRenameOrCopy = status === "R" || status === "C";
                 const path = isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1];
                 upsertFile(path, status);
@@ -782,6 +782,15 @@ export class GitOps {
         const args = force ? ["rm", "-f", "--", filePath] : ["rm", "--", filePath];
         await this.executor.run(args);
     }
+}
+
+const VALID_COMMIT_FILE_STATUSES = new Set<CommitFile["status"]>(["A", "M", "D", "R", "C", "T"]);
+
+function mapCommitFileStatus(code: string): CommitFile["status"] {
+    if (VALID_COMMIT_FILE_STATUSES.has(code as CommitFile["status"])) {
+        return code as CommitFile["status"];
+    }
+    return "M";
 }
 
 function mapStatusCode(code: string): WorkingFile["status"] | null {
