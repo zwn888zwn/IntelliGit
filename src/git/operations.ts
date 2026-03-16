@@ -8,7 +8,7 @@ import type {
     StashEntry,
     MergeConflictFile,
 } from "../types";
-import { getErrorMessage } from "../utils/errors";
+import { getErrorMessage, sanitizeErrorMessage } from "../utils/errors";
 
 declare const require: (id: string) => unknown;
 
@@ -47,7 +47,7 @@ function logGitOpsWarning(context: string, err: unknown, options?: { notifyUser?
     const message = getErrorMessage(err);
     channel.appendLine(`[GitOps] ${context}: ${message}`);
     if (err instanceof Error && err.stack) {
-        channel.appendLine(err.stack);
+        channel.appendLine(sanitizeErrorMessage(err.stack));
     }
     if (options?.notifyUser) {
         const vscode = getVsCodeApi();
@@ -154,7 +154,9 @@ export class GitOps {
         }
 
         if (filterText) {
-            args.push(`--grep=${filterText}`, "-i");
+            // Use --fixed-strings to treat the filter as a literal string,
+            // preventing ReDoS via git's regex engine on user input.
+            args.push(`--grep=${filterText}`, "-i", "--fixed-strings");
         }
 
         const result = await this.executor.run(args);
@@ -213,7 +215,9 @@ export class GitOps {
             if (existing) {
                 // Prefer more specific status if we already inserted a fallback.
                 if (existing.status === "M" && status !== "M") {
-                    existing.status = status;
+                    const updated = { ...existing, status };
+                    filesByPath.set(path, updated);
+                    return updated;
                 }
                 return existing;
             }
@@ -240,7 +244,8 @@ export class GitOps {
             if (!line.trim()) continue;
             const cols = line.split("\t");
             if (cols.length >= 2) {
-                const status = cols[0].charAt(0) as CommitFile["status"];
+                const rawCode = cols[0].charAt(0);
+                const status: CommitFile["status"] = mapCommitFileStatus(rawCode);
                 const isRenameOrCopy = status === "R" || status === "C";
                 const path = isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1];
                 upsertFile(path, status);
@@ -266,8 +271,12 @@ export class GitOps {
                 const file = upsertFile(filePath, "M");
                 const parsedAdd = add === "-" ? 0 : parseInt(add);
                 const parsedDel = del === "-" ? 0 : parseInt(del);
-                file.additions = Math.max(file.additions, Number.isNaN(parsedAdd) ? 0 : parsedAdd);
-                file.deletions = Math.max(file.deletions, Number.isNaN(parsedDel) ? 0 : parsedDel);
+                const newAdd = Math.max(file.additions, Number.isNaN(parsedAdd) ? 0 : parsedAdd);
+                const newDel = Math.max(file.deletions, Number.isNaN(parsedDel) ? 0 : parsedDel);
+                if (newAdd !== file.additions || newDel !== file.deletions) {
+                    const updated = { ...file, additions: newAdd, deletions: newDel };
+                    filesByPath.set(filePath, updated);
+                }
             }
         } catch (err) {
             logGitOpsWarning("Failed to get commit numstat", err, { notifyUser: true });
@@ -363,10 +372,13 @@ export class GitOps {
             }
         }
 
-        // Build keyed lookup for O(1) numstat matching
+        // Build keyed lookups for O(1) numstat matching (both value and index)
         const filesByKey = new Map<string, WorkingFile>();
-        for (const file of files) {
-            filesByKey.set(`${file.path}:${file.staged}`, file);
+        const filesIndexByKey = new Map<string, number>();
+        for (let i = 0; i < files.length; i++) {
+            const key = `${files[i].path}:${files[i].staged}`;
+            filesByKey.set(key, files[i]);
+            filesIndexByKey.set(key, i);
         }
 
         const applyNumstat = (output: string, staged: boolean, label: string): void => {
@@ -380,10 +392,17 @@ export class GitOps {
                     const filePath = cols[cols.length - 1];
                     const parsedAdd = add === "-" ? 0 : parseInt(add);
                     const parsedDel = del === "-" ? 0 : parseInt(del);
-                    const file = filesByKey.get(`${filePath}:${staged}`);
+                    const key = `${filePath}:${staged}`;
+                    const file = filesByKey.get(key);
                     if (file) {
-                        file.additions = Number.isNaN(parsedAdd) ? 0 : parsedAdd;
-                        file.deletions = Number.isNaN(parsedDel) ? 0 : parsedDel;
+                        const updated = {
+                            ...file,
+                            additions: Number.isNaN(parsedAdd) ? 0 : parsedAdd,
+                            deletions: Number.isNaN(parsedDel) ? 0 : parsedDel,
+                        };
+                        filesByKey.set(key, updated);
+                        const idx = filesIndexByKey.get(key);
+                        if (idx !== undefined) files[idx] = updated;
                     }
                 }
             } catch (err) {
@@ -606,8 +625,8 @@ export class GitOps {
                 const path = parts[2].trim();
                 if (!path) continue;
                 const entry = upsert(path);
-                entry.additions = adds;
-                entry.deletions = dels;
+                const updated = { ...entry, additions: adds, deletions: dels };
+                files.set(path, updated);
             }
         } catch (err) {
             logGitOpsWarning(`Failed stash show --numstat for ${ref}`, err);
@@ -763,6 +782,15 @@ export class GitOps {
         const args = force ? ["rm", "-f", "--", filePath] : ["rm", "--", filePath];
         await this.executor.run(args);
     }
+}
+
+const VALID_COMMIT_FILE_STATUSES = new Set<CommitFile["status"]>(["A", "M", "D", "R", "C", "T"]);
+
+function mapCommitFileStatus(code: string): CommitFile["status"] {
+    if (VALID_COMMIT_FILE_STATUSES.has(code as CommitFile["status"])) {
+        return code as CommitFile["status"];
+    }
+    return "M";
 }
 
 function mapStatusCode(code: string): WorkingFile["status"] | null {

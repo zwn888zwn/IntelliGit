@@ -14,6 +14,9 @@ export function assertRepoRelativePath(filePath: string): string {
     if (!filePath || path.isAbsolute(filePath)) {
         throw new Error(`Rejected non-relative path: ${filePath}`);
     }
+    if (filePath.includes("\0") || filePath.includes("\r") || filePath.includes("\n")) {
+        throw new Error(`Rejected path containing control characters: ${filePath}`);
+    }
     const normalized = path.normalize(filePath);
     if (normalized === ".") {
         throw new Error(`Rejected repo root path: ${filePath}`);

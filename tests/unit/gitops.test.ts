@@ -785,4 +785,42 @@ describe("GitOps", () => {
             await expect(ops.getShelvedFilePatch(-1, "x")).rejects.toThrow("Invalid stash index");
         });
     });
+
+    describe("getLog --fixed-strings (SEC-M2)", () => {
+        it("includes --fixed-strings when filterText is provided", async () => {
+            const run = vi.fn(async () => "");
+            const executor = { run } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+
+            await ops.getLog(10, undefined, "search(term");
+
+            const args = run.mock.calls[0][0] as string[];
+            expect(args).toContain("--fixed-strings");
+            expect(args.some((a: string) => a.startsWith("--grep="))).toBe(true);
+        });
+
+        it("does not include --fixed-strings when no filterText", async () => {
+            const run = vi.fn(async () => "");
+            const executor = { run } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+
+            await ops.getLog(10);
+
+            const args = run.mock.calls[0][0] as string[];
+            expect(args).not.toContain("--fixed-strings");
+        });
+
+        it("passes filterText as literal string (no regex interpretation)", async () => {
+            const run = vi.fn(async () => "");
+            const executor = { run } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+
+            // Regex metacharacters that would cause ReDoS without --fixed-strings
+            await ops.getLog(10, undefined, "(a+)+$");
+
+            const args = run.mock.calls[0][0] as string[];
+            expect(args).toContain("--fixed-strings");
+            expect(args).toContain("--grep=(a+)+$");
+        });
+    });
 });

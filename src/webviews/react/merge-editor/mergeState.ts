@@ -64,6 +64,7 @@ export function buildResultContent(
             lines.push(...getResultLines(seg, resolutions[seg.id]));
         }
     }
+    if (lines.length === 0) return "";
     const eol = data.eol ?? "\n";
     const joined = lines.join(eol);
     return data.hasTrailingNewline ? joined + eol : joined;

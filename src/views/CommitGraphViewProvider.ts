@@ -11,6 +11,7 @@ import type {
     CommitGraphOutbound,
     CommitGraphInbound,
 } from "../webviews/react/commitGraphTypes";
+import { getErrorMessage } from "../utils/errors";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import { buildWebviewShellHtml } from "./webviewHtml";
@@ -136,7 +137,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         break;
                 }
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Commit graph error: ${message}`);
                 this.postToWebview({ type: "error", message });
             }
@@ -146,7 +147,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     setBranches(branches: Branch[]): void {
         this.branches = branches;
         this.sendBranches().catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = getErrorMessage(err);
             vscode.window.showErrorMessage(`Branch update error: ${message}`);
         });
     }
@@ -171,7 +172,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this.postCommitDetailState();
         this.decorateAndStoreCommitDetail(detail, requestId).catch((err) => {
             if (requestId !== this.commitDetailSeq) return;
-            const message = err instanceof Error ? err.message : String(err);
+            const message = getErrorMessage(err);
             vscode.window.showErrorMessage(`Commit detail error: ${message}`);
         });
     }
@@ -227,7 +228,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             });
         } catch (err) {
             if (requestId !== this.requestSeq) return;
-            const message = err instanceof Error ? err.message : String(err);
+            const message = getErrorMessage(err);
             vscode.window.showErrorMessage(`Git log error: ${message}`);
             this.postToWebview({ type: "loadError", message });
         }
@@ -258,7 +259,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             });
         } catch (err) {
             if (requestId !== this.requestSeq) return;
-            const message = err instanceof Error ? err.message : String(err);
+            const message = getErrorMessage(err);
             vscode.window.showErrorMessage(`Git log error: ${message}`);
             this.postToWebview({ type: "loadError", message });
         } finally {
@@ -326,7 +327,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     private refreshThemeDataWithErrorHandling(): void {
         this.refreshThemeData().catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = getErrorMessage(err);
             vscode.window.showErrorMessage(`Commit graph error: ${message}`);
             this.postToWebview({ type: "error", message });
         });
