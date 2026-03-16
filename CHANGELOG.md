@@ -5,6 +5,34 @@ All notable changes to IntelliGit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-03-16
+
+### Security
+
+- Update `simple-git` to `^3.32.3` to close a remote code execution bypass (GHSA-r275-fr43-pm7q) where a malicious `.git/config` in an opened repository could trigger arbitrary code execution.
+- Replace synchronous `spawnSync("git")` branch and tag name validation with a pure JavaScript implementation matching `git check-ref-format` rules, eliminating a 5-second extension host thread block.
+- Quote commit hash refs in `terminal.sendText` calls to prevent PowerShell `^` metacharacter injection on Windows.
+- Add `--fixed-strings` to `git log --grep` to prevent Regular Expression Denial of Service (ReDoS) via user-supplied search text.
+- Add null byte, carriage return, and newline rejection to `assertRepoRelativePath` to close a path injection vector on platforms where null bytes in paths cause ambiguous git behavior.
+- Sanitize embedded credentials from URLs in git error messages before displaying them in VS Code notifications, preventing accidental exposure of `https://user:password@host` patterns.
+- Use exact equality for full-length (40-character) SHA hash comparison in `isHashMatch` to eliminate prefix collision risk in large repositories.
+
+### Fixed
+
+- Fix infinite loop in the merge editor conflict parser when both sides insert new lines at the same base position, causing the UI to hang permanently.
+- Fix in-place mutation of `CommitFile` and `WorkingFile` objects in `getCommitDetail`, `getStatus`, and `getShelvedFiles`, replacing them with immutable spread operations to prevent silent data corruption from any future caching layer.
+- Fix `CommitPanelViewProvider.onDidDispose` unconditionally disposing the icon theme even when a newer webview view has already replaced it, which caused the replacement view to lose its icon theme.
+- Wrap `vscode.commands.executeCommand("setContext")` calls with `Promise.resolve().catch()` to handle `Thenable` rejection, preventing unhandled rejection crashes during extension host startup.
+- Use `vscode.workspace.createFileSystemWatcher` for git refs directory watching on Linux, where `fs.watch` with `recursive: true` silently falls back to non-recursive watching and misses branch/tag changes.
+- Fix `buildResultContent` returning a spurious `"\n"` instead of `""` when all merge segments resolve to empty lines with `hasTrailingNewline` enabled.
+- Replace unsafe `as CommitFile["status"]` type cast in `getCommitDetail` with validated `mapStatusCode()` to correctly handle unknown git status codes instead of producing invalid runtime values.
+- Remove duplicate `EMPTY_TREE_HASH` constant in `diffService.ts` and import from the shared `constants.ts` module.
+- Consolidate 14 inline `err instanceof Error ? err.message : String(err)` patterns in `commitCommands.ts` and `CommitGraphViewProvider.ts` to use the centralized `getErrorMessage()` utility.
+
+### Tests
+
+- Add 60 new unit tests covering branch name validation edge cases (git check-ref-format rules), hash comparison with full-length equality, path traversal with control characters, credential URL sanitization, merge editor empty file handling, conflict parser loop safety, and `--fixed-strings` grep behavior.
+
 ## [0.6.1] - 2026-03-12
 
 ### Fixed

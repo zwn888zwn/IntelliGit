@@ -14,6 +14,7 @@ export function assertRepoRelativePath(filePath: string): string {
     if (!filePath || path.isAbsolute(filePath)) {
         throw new Error(`Rejected non-relative path: ${filePath}`);
     }
+    // eslint-disable-next-line no-control-regex
     if (/[\x00\r\n]/.test(filePath)) {
         throw new Error(`Rejected path containing control characters: ${filePath}`);
     }
