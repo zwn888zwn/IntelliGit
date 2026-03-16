@@ -7,10 +7,14 @@ export function getErrorMessage(error: unknown): string {
 
 /**
  * Strip embedded credentials from URLs in error messages.
- * Git error output may contain remote URLs with user:password@ patterns.
+ * Git error output may contain remote URLs with user-info patterns:
+ *   https://user:password@host  (user + password)
+ *   https://token@host          (token-only, e.g. GitHub PAT)
+ *   https://user:@host          (empty password)
  */
 function sanitizeErrorMessage(message: string): string {
-    return message.replace(/(https?:\/\/)[^:@/\s]+:[^@\s]+@/g, "$1***:***@");
+    // Match any user-info portion: user:pass@, token@, user:@
+    return message.replace(/(https?:\/\/)[^\s/@]+(?::[^\s/@]*)?@/g, "$1***@");
 }
 
 export function isUntrackedPathspecError(error: unknown): boolean {

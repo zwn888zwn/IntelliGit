@@ -372,10 +372,13 @@ export class GitOps {
             }
         }
 
-        // Build keyed lookup for O(1) numstat matching
+        // Build keyed lookups for O(1) numstat matching (both value and index)
         const filesByKey = new Map<string, WorkingFile>();
-        for (const file of files) {
-            filesByKey.set(`${file.path}:${file.staged}`, file);
+        const filesIndexByKey = new Map<string, number>();
+        for (let i = 0; i < files.length; i++) {
+            const key = `${files[i].path}:${files[i].staged}`;
+            filesByKey.set(key, files[i]);
+            filesIndexByKey.set(key, i);
         }
 
         const applyNumstat = (output: string, staged: boolean, label: string): void => {
@@ -389,16 +392,17 @@ export class GitOps {
                     const filePath = cols[cols.length - 1];
                     const parsedAdd = add === "-" ? 0 : parseInt(add);
                     const parsedDel = del === "-" ? 0 : parseInt(del);
-                    const file = filesByKey.get(`${filePath}:${staged}`);
+                    const key = `${filePath}:${staged}`;
+                    const file = filesByKey.get(key);
                     if (file) {
-                        const idx = files.indexOf(file);
                         const updated = {
                             ...file,
                             additions: Number.isNaN(parsedAdd) ? 0 : parsedAdd,
                             deletions: Number.isNaN(parsedDel) ? 0 : parsedDel,
                         };
-                        filesByKey.set(`${filePath}:${staged}`, updated);
-                        if (idx !== -1) files[idx] = updated;
+                        filesByKey.set(key, updated);
+                        const idx = filesIndexByKey.get(key);
+                        if (idx !== undefined) files[idx] = updated;
                     }
                 }
             } catch (err) {

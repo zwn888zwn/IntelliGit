@@ -2,9 +2,9 @@
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "args": ["-y", "@modelcontextprotocol/server-memory@2026.1.26"],
       "env": {
-        "MEMORY_FILE_PATH": "/Users/maheshkokare/PycharmProjects/pycharm-git-for-vscode/.memory/memory.jsonl"
+        "MEMORY_FILE_PATH": "./.memory/memory.jsonl"
       }
     }
   }

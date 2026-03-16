@@ -79,8 +79,13 @@ describe("isValidBranchName — git check-ref-format rules (SEC-H1)", () => {
         expect(isValidBranchName("a//b")).toBe(false);
     });
 
-    it("rejects the bare @ symbol", () => {
-        expect(isValidBranchName("@")).toBe(false);
+    it("accepts the bare @ symbol (valid per git check-ref-format)", () => {
+        expect(isValidBranchName("@")).toBe(true);
+    });
+
+    it("accepts @ within a ref component", () => {
+        expect(isValidBranchName("feature/user@2")).toBe(true);
+        expect(isValidBranchName("release/@team")).toBe(true);
     });
 
     it("rejects names containing space", () => {
@@ -261,23 +266,35 @@ describe("getErrorMessage — credential sanitization (SEC-M3)", () => {
         getErrorMessage = mod.getErrorMessage;
     });
 
-    it("strips http credentials from error messages", () => {
+    it("strips user:password credentials from error messages", () => {
         const err = new Error("fatal: https://user:s3cret@github.com/repo.git not found");
         const result = getErrorMessage(err);
         expect(result).not.toContain("s3cret");
         expect(result).not.toContain("user:");
-        expect(result).toContain("***:***@");
+        expect(result).toContain("***@github.com");
     });
 
-    it("strips https credentials", () => {
-        const msg = "failed: https://admin:password123@gitlab.com/project.git";
+    it("strips token-only credentials (e.g. GitHub PAT)", () => {
+        const msg = "fatal: https://ghp_abc123token@github.com/repo.git not found";
         const result = getErrorMessage(new Error(msg));
-        expect(result).not.toContain("password123");
-        expect(result).toContain("***:***@gitlab.com");
+        expect(result).not.toContain("ghp_abc123token");
+        expect(result).toContain("***@github.com");
+    });
+
+    it("strips empty-password credentials (user:@host)", () => {
+        const msg = "failed: https://admin:@gitlab.com/project.git";
+        const result = getErrorMessage(new Error(msg));
+        expect(result).not.toContain("admin:");
+        expect(result).toContain("***@gitlab.com");
     });
 
     it("preserves messages without credentials", () => {
         const msg = "fatal: repository not found";
+        expect(getErrorMessage(new Error(msg))).toBe(msg);
+    });
+
+    it("preserves URLs without user-info", () => {
+        const msg = "fatal: https://github.com/repo.git not found";
         expect(getErrorMessage(new Error(msg))).toBe(msg);
     });
 

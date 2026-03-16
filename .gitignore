@@ -20,6 +20,7 @@ CLAUDE.md
 .agents/
 
 .serena/
-.env
+.env*
+!.env.example
 .memory/
 .gitnexus
