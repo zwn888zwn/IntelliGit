@@ -154,7 +154,9 @@ export class GitOps {
         }
 
         if (filterText) {
-            args.push(`--grep=${filterText}`, "-i");
+            // Use --fixed-strings to treat the filter as a literal string,
+            // preventing ReDoS via git's regex engine on user input.
+            args.push(`--grep=${filterText}`, "-i", "--fixed-strings");
         }
 
         const result = await this.executor.run(args);
@@ -213,7 +215,9 @@ export class GitOps {
             if (existing) {
                 // Prefer more specific status if we already inserted a fallback.
                 if (existing.status === "M" && status !== "M") {
-                    existing.status = status;
+                    const updated = { ...existing, status };
+                    filesByPath.set(path, updated);
+                    return updated;
                 }
                 return existing;
             }
@@ -240,7 +244,8 @@ export class GitOps {
             if (!line.trim()) continue;
             const cols = line.split("\t");
             if (cols.length >= 2) {
-                const status = cols[0].charAt(0) as CommitFile["status"];
+                const rawCode = cols[0].charAt(0);
+                const status = (mapStatusCode(rawCode) ?? "M") as CommitFile["status"];
                 const isRenameOrCopy = status === "R" || status === "C";
                 const path = isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1];
                 upsertFile(path, status);
@@ -266,8 +271,12 @@ export class GitOps {
                 const file = upsertFile(filePath, "M");
                 const parsedAdd = add === "-" ? 0 : parseInt(add);
                 const parsedDel = del === "-" ? 0 : parseInt(del);
-                file.additions = Math.max(file.additions, Number.isNaN(parsedAdd) ? 0 : parsedAdd);
-                file.deletions = Math.max(file.deletions, Number.isNaN(parsedDel) ? 0 : parsedDel);
+                const newAdd = Math.max(file.additions, Number.isNaN(parsedAdd) ? 0 : parsedAdd);
+                const newDel = Math.max(file.deletions, Number.isNaN(parsedDel) ? 0 : parsedDel);
+                if (newAdd !== file.additions || newDel !== file.deletions) {
+                    const updated = { ...file, additions: newAdd, deletions: newDel };
+                    filesByPath.set(filePath, updated);
+                }
             }
         } catch (err) {
             logGitOpsWarning("Failed to get commit numstat", err, { notifyUser: true });
@@ -382,8 +391,14 @@ export class GitOps {
                     const parsedDel = del === "-" ? 0 : parseInt(del);
                     const file = filesByKey.get(`${filePath}:${staged}`);
                     if (file) {
-                        file.additions = Number.isNaN(parsedAdd) ? 0 : parsedAdd;
-                        file.deletions = Number.isNaN(parsedDel) ? 0 : parsedDel;
+                        const idx = files.indexOf(file);
+                        const updated = {
+                            ...file,
+                            additions: Number.isNaN(parsedAdd) ? 0 : parsedAdd,
+                            deletions: Number.isNaN(parsedDel) ? 0 : parsedDel,
+                        };
+                        filesByKey.set(`${filePath}:${staged}`, updated);
+                        if (idx !== -1) files[idx] = updated;
                     }
                 }
             } catch (err) {
@@ -606,8 +621,8 @@ export class GitOps {
                 const path = parts[2].trim();
                 if (!path) continue;
                 const entry = upsert(path);
-                entry.additions = adds;
-                entry.deletions = dels;
+                const updated = { ...entry, additions: adds, deletions: dels };
+                files.set(path, updated);
             }
         } catch (err) {
             logGitOpsWarning(`Failed stash show --numstat for ${ref}`, err);

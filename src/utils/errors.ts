@@ -1,7 +1,16 @@
 // Shared error handling utilities used by extension host and view providers.
 
 export function getErrorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
+    const raw = error instanceof Error ? error.message : String(error);
+    return sanitizeErrorMessage(raw);
+}
+
+/**
+ * Strip embedded credentials from URLs in error messages.
+ * Git error output may contain remote URLs with user:password@ patterns.
+ */
+function sanitizeErrorMessage(message: string): string {
+    return message.replace(/(https?:\/\/)[^:@/\s]+:[^@\s]+@/g, "$1***:***@");
 }
 
 export function isUntrackedPathspecError(error: unknown): boolean {

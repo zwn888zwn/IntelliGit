@@ -139,12 +139,28 @@ export class RefreshService implements vscode.Disposable {
         }
 
         try {
-            const refsWatcher = fs.watch(path.join(gitDir, "refs"), { recursive: true }, () =>
-                this.debouncedFullRefresh(),
-            );
-            this.fsWatchers.push(refsWatcher);
+            // fs.watch with recursive: true is only supported on macOS and Windows.
+            // On Linux, use vscode.workspace.createFileSystemWatcher for cross-platform
+            // recursive watching of the refs directory.
+            const refsPath = path.join(gitDir, "refs");
+            if (process.platform === "linux") {
+                const pattern = new vscode.RelativePattern(vscode.Uri.file(refsPath), "**/*");
+                const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+                const handler = () => this.debouncedFullRefresh();
+                this.disposables.push(
+                    watcher.onDidChange(handler),
+                    watcher.onDidCreate(handler),
+                    watcher.onDidDelete(handler),
+                    watcher,
+                );
+            } else {
+                const refsWatcher = fs.watch(refsPath, { recursive: true }, () =>
+                    this.debouncedFullRefresh(),
+                );
+                this.fsWatchers.push(refsWatcher);
+            }
         } catch {
-            /* refs dir may not exist yet */
+            /* refs dir may not exist yet or may not be watchable */
         }
     }
 

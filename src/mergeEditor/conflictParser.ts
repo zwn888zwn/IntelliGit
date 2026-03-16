@@ -281,8 +281,11 @@ function buildSegments(
             // processed so the loop can continue with the same base cursor.
             for (const edit of overlappingOurs) oursMap.delete(edit.baseStart);
             for (const edit of overlappingTheirs) theirsMap.delete(edit.baseStart);
-            if (overlappingOurs.length === 0) oursMap.delete(cursor);
-            if (overlappingTheirs.length === 0) theirsMap.delete(cursor);
+            // Unconditionally delete the cursor key to guarantee forward progress.
+            // Without this, when both sides have pure-insertion hunks at the same
+            // base position, the while loop could spin indefinitely.
+            oursMap.delete(cursor);
+            theirsMap.delete(cursor);
         } else {
             for (const edit of overlappingOurs) oursMap.delete(edit.baseStart);
             for (const edit of overlappingTheirs) theirsMap.delete(edit.baseStart);

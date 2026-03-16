@@ -12,6 +12,7 @@ import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
 import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from "./gitHelpers";
 import { assertRepoRelativePath } from "../utils/fileOps";
+import { EMPTY_TREE_HASH } from "../utils/constants";
 
 export function normalizeGitPath(fsPathValue: string): string {
     return fsPathValue.split(path.sep).join("/");
@@ -112,7 +113,6 @@ export async function openCommitFileDiff(
         parentRef = `${commitHash}^${result.parentNumber}`;
         parentDisplayHash = parents[result.parentNumber! - 1] ?? parentRef;
     } else {
-        const EMPTY_TREE_HASH = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
         parentRef = parents.length === 0 ? EMPTY_TREE_HASH : parents[0];
         parentDisplayHash = parentRef;
     }

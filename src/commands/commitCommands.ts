@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
 import type { CommitAction } from "../webviews/react/commitGraphTypes";
+import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
 import {
     isValidGitHash,
@@ -71,7 +72,7 @@ export async function handleCommitContextAction(params: {
                     `Patch created: ${path.basename(targetUri.fsPath)}`,
                 );
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Failed to create patch: ${message}`);
             }
             return;
@@ -94,7 +95,7 @@ export async function handleCommitContextAction(params: {
                 await executor.run(args);
                 vscode.window.showInformationMessage(`Cherry-picked ${short}.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Cherry-pick failed: ${message}`);
             }
             await refreshAll();
@@ -111,7 +112,7 @@ export async function handleCommitContextAction(params: {
                 await executor.run(["checkout", validatedHash]);
                 vscode.window.showInformationMessage(`Checked out revision ${short}.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Checkout failed: ${message}`);
             }
             await refreshAll();
@@ -128,7 +129,7 @@ export async function handleCommitContextAction(params: {
                 await executor.run(["reset", "--hard", validatedHash]);
                 vscode.window.showInformationMessage(`Reset current branch to ${short}.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Reset failed: ${message}`);
             }
             await refreshAll();
@@ -157,7 +158,7 @@ export async function handleCommitContextAction(params: {
                 await executor.run(args);
                 vscode.window.showInformationMessage(`Reverted ${short}.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Revert failed: ${message}`);
             }
             await refreshAll();
@@ -267,7 +268,7 @@ export async function handleCommitContextAction(params: {
                 await executor.run(["branch", branchName, validatedHash]);
                 vscode.window.showInformationMessage(`Created branch ${branchName} at ${short}.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Failed to create branch: ${message}`);
             }
             await refreshAll();
@@ -289,7 +290,7 @@ export async function handleCommitContextAction(params: {
                 await executor.run(["tag", tagName, validatedHash]);
                 vscode.window.showInformationMessage(`Created tag ${tagName}.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Failed to create tag: ${message}`);
             }
             await refreshAll();
@@ -379,7 +380,7 @@ export async function handleCommitContextAction(params: {
                 cwd: repoRoot,
             });
             terminal.show();
-            terminal.sendText(`git rebase -i ${validatedHash}^`);
+            terminal.sendText(`git rebase -i "${validatedHash}^"`, true);
             vscode.window.showInformationMessage(
                 "Interactive rebase opened. Mark the commit as 'reword' in the todo list.",
             );
@@ -425,7 +426,7 @@ export async function handleCommitContextAction(params: {
                 ]);
                 vscode.window.showInformationMessage(`Dropped ${short} from history.`);
             } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
+                const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(
                     `Failed to drop commit: ${message}. Run 'git rebase --abort' to recover.`,
                 );
@@ -466,7 +467,7 @@ export async function handleCommitContextAction(params: {
                 cwd: repoRoot,
             });
             terminal.show();
-            terminal.sendText(`git rebase -i ${validatedHash}^`);
+            terminal.sendText(`git rebase -i "${validatedHash}^"`, true);
             vscode.window.showInformationMessage(`Opened interactive rebase from ${short}.`);
             return;
         }
