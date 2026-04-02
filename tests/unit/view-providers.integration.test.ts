@@ -176,6 +176,18 @@ function makeGitOpsMock() {
             },
         ]),
         getUnpushedCommitHashes: vi.fn(async () => ["abc1234"]),
+        getCommitDetail: vi.fn(async (hash: string) => ({
+            hash,
+            shortHash: hash.slice(0, 7),
+            message: `detail:${hash}`,
+            body: "",
+            author: "Mahesh",
+            email: "m@example.com",
+            date: "2026-02-19T00:00:00Z",
+            parentHashes: [],
+            refs: [],
+            files: [],
+        })),
         getStatus: vi.fn(async () => [
             { path: "src/a.ts", status: "M", staged: false, additions: 1, deletions: 0 },
         ]),
@@ -263,6 +275,64 @@ describe("view providers integration", () => {
         expect(postMessageSpy).toHaveBeenCalledWith({ type: "clear" });
 
         webview.dispose();
+        provider.dispose();
+    });
+
+    it("CommitGraphViewProvider reveals a commit by resetting filters and posting a reveal message", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getLog
+            .mockResolvedValueOnce([
+                {
+                    hash: "old1111",
+                    shortHash: "old1111",
+                    message: "older",
+                    author: "Mahesh",
+                    email: "m@example.com",
+                    date: "2026-02-18T00:00:00Z",
+                    parentHashes: [],
+                    refs: [],
+                },
+            ])
+            .mockResolvedValueOnce([
+                {
+                    hash: "target123",
+                    shortHash: "target12",
+                    message: "target",
+                    author: "Mahesh",
+                    email: "m@example.com",
+                    date: "2026-02-19T00:00:00Z",
+                    parentHashes: [],
+                    refs: [],
+                },
+            ]);
+        const provider = new CommitGraphViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+        );
+        const webview = createWebviewView();
+
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+        postMessageSpy.mockClear();
+
+        await provider.revealCommit("target123");
+
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "setSelectedBranch", branch: null });
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "setFilterText", text: "" });
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "loadCommits",
+                append: false,
+                commits: expect.arrayContaining([expect.objectContaining({ hash: "target123" })]),
+            }),
+        );
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "revealCommit", hash: "target123" });
+        expect(gitOps.getCommitDetail).toHaveBeenCalledWith("target123");
         provider.dispose();
     });
 

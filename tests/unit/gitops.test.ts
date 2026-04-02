@@ -282,6 +282,82 @@ describe("GitOps", () => {
         });
     });
 
+    describe("getBlame", () => {
+        it("parses porcelain blame output into line records", async () => {
+            const output = [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 2",
+                "author Alice",
+                "author-time 1711065600",
+                "author-tz +0800",
+                "filename src/a.ts",
+                "\tfirst line",
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 2 2",
+                "author Alice",
+                "author-time 1711065600",
+                "author-tz +0800",
+                "filename src/a.ts",
+                "\tsecond line",
+                "0000000000000000000000000000000000000000 3 3 1",
+                "author Not Committed Yet",
+                "author-time 1711152000",
+                "author-tz +0800",
+                "filename src/a.ts",
+                "\tthird line",
+            ].join("\n");
+            const executor = createMockExecutor({ "blame --line-porcelain": output });
+            const ops = new GitOps(executor);
+
+            const blame = await ops.getBlame("src/a.ts");
+
+            expect(blame).toEqual([
+                {
+                    line: 0,
+                    commitHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    shortHash: "aaaaaaaa",
+                    author: "Alice",
+                    date: "2024/3/22",
+                    summary: "",
+                    isUncommitted: false,
+                },
+                {
+                    line: 1,
+                    commitHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    shortHash: "aaaaaaaa",
+                    author: "Alice",
+                    date: "2024/3/22",
+                    summary: "",
+                    isUncommitted: false,
+                },
+                {
+                    line: 2,
+                    commitHash: "0000000000000000000000000000000000000000",
+                    shortHash: "00000000",
+                    author: "Not Committed Yet",
+                    date: "2024/3/23",
+                    summary: "",
+                    isUncommitted: true,
+                },
+            ]);
+        });
+
+        it("captures blame summary for hover details", async () => {
+            const output = [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 1 1 1",
+                "author Alice",
+                "author-time 1711065600",
+                "author-tz +0800",
+                "summary Fix hover message",
+                "filename src/a.ts",
+                "\tfirst line",
+            ].join("\n");
+            const executor = createMockExecutor({ "blame --line-porcelain": output });
+            const ops = new GitOps(executor);
+
+            const [line] = await ops.getBlame("src/a.ts");
+            expect(line?.summary).toBe("Fix hover message");
+        });
+    });
+
     describe("stageFiles", () => {
         it("calls git add with paths", async () => {
             const executor = createMockExecutor({});

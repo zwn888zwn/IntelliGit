@@ -82,6 +82,16 @@ export interface StashEntry {
     hash: string;
 }
 
+export interface GitBlameLine {
+    line: number;
+    commitHash: string;
+    shortHash: string;
+    author: string;
+    date: string;
+    summary: string;
+    isUncommitted: boolean;
+}
+
 export type MergeConflictSideState = "Modified" | "Added" | "Deleted";
 
 export interface MergeConflictFile {

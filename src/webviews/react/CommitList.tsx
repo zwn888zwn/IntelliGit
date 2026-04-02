@@ -34,6 +34,7 @@ const MAX_GRAPH_WIDTH = 200;
 interface Props {
     commits: Commit[];
     selectedHash: string | null;
+    revealHash: string | null;
     filterText: string;
     hasMore: boolean;
     unpushedHashes: Set<string>;
@@ -47,6 +48,7 @@ interface Props {
 export function CommitList({
     commits,
     selectedHash,
+    revealHash,
     filterText,
     hasMore,
     unpushedHashes,
@@ -172,6 +174,18 @@ export function CommitList({
         () => commits.slice(visibleRange.start, visibleRange.end),
         [commits, visibleRange.end, visibleRange.start],
     );
+
+    useEffect(() => {
+        if (!revealHash) return;
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        const index = commits.findIndex((commit) => commit.hash === revealHash);
+        if (index < 0) return;
+
+        const centeredTop = Math.max(0, index * ROW_HEIGHT - (viewport.clientHeight - ROW_HEIGHT) / 2);
+        viewport.scrollTop = centeredTop;
+        setScrollTop(centeredTop);
+    }, [commits, revealHash]);
 
     return (
         <div style={ROOT_STYLE}>

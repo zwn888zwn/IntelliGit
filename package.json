@@ -185,6 +185,16 @@
                 "icon": "$(git-branch)"
             },
             {
+                "command": "intelligit.annotateWithGitBlame",
+                "title": "Annotate with Git Blame",
+                "category": "IntelliGit"
+            },
+            {
+                "command": "intelligit.clearGitBlame",
+                "title": "Close Git Blame",
+                "category": "IntelliGit"
+            },
+            {
                 "command": "intelligit.commitFileCompareWithLocal",
                 "title": "Compare with Local",
                 "category": "IntelliGit",
@@ -273,7 +283,29 @@
                     "group": "navigation@9"
                 }
             ],
+            "editor/lineNumber/context": [
+                {
+                    "command": "intelligit.annotateWithGitBlame",
+                    "when": "resourceScheme == file && intelligit.blameSupportedFile && !intelligit.blameActive",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "intelligit.clearGitBlame",
+                    "when": "resourceScheme == file && intelligit.blameSupportedFile && intelligit.blameActive",
+                    "group": "navigation@1"
+                }
+            ],
             "intelligit.editorContext": [
+                {
+                    "command": "intelligit.annotateWithGitBlame",
+                    "when": "resourceScheme == file && intelligit.blameSupportedFile && !intelligit.blameActive",
+                    "group": "1_compare@0"
+                },
+                {
+                    "command": "intelligit.clearGitBlame",
+                    "when": "resourceScheme == file && intelligit.blameSupportedFile && intelligit.blameActive",
+                    "group": "1_compare@0"
+                },
                 {
                     "command": "intelligit.compareWithRevision",
                     "when": "resourceScheme == file",

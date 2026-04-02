@@ -97,6 +97,7 @@ function App(): React.ReactElement {
     const [commits, setCommits] = useState<Commit[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
+    const [revealHash, setRevealHash] = useState<string | null>(null);
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const [filterText, setFilterText] = useState("");
@@ -182,6 +183,9 @@ function App(): React.ReactElement {
                 case "setSelectedBranch":
                     setSelectedBranch(data.branch ?? null);
                     break;
+                case "setFilterText":
+                    setFilterText(data.text);
+                    break;
                 case "setCommitDetail":
                     setSelectedDetail(data.detail);
                     setCommitFolderIcon(data.folderIcon);
@@ -194,6 +198,10 @@ function App(): React.ReactElement {
                     setCommitFolderIcon(undefined);
                     setCommitFolderExpandedIcon(undefined);
                     setCommitFolderIconsByName(undefined);
+                    break;
+                case "revealCommit":
+                    setSelectedHash(data.hash);
+                    setRevealHash(data.hash);
                     break;
                 case "loadError":
                     if (!loadingMore.current) {
@@ -224,6 +232,7 @@ function App(): React.ReactElement {
 
     const handleSelectCommit = useCallback((hash: string) => {
         setSelectedHash(hash);
+        setRevealHash(null);
         vscode.postMessage({ type: "selectCommit", hash });
     }, []);
 
@@ -294,6 +303,7 @@ function App(): React.ReactElement {
                         <CommitList
                             commits={commits}
                             selectedHash={selectedHash}
+                            revealHash={revealHash}
                             filterText={filterText}
                             hasMore={hasMore}
                             unpushedHashes={unpushedHashes}

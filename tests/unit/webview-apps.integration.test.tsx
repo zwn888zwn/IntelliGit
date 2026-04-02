@@ -360,6 +360,16 @@ describe("CommitGraphApp integration", () => {
         });
         await flush();
         expect(document.body.textContent).toContain("Branch: features/right-click-context");
+        const viewport = document.querySelector(
+            '[data-testid="commit-list-viewport"]',
+        ) as HTMLDivElement | null;
+        expect(viewport).toBeTruthy();
+        if (viewport) {
+            Object.defineProperty(viewport, "clientHeight", {
+                value: 20,
+                configurable: true,
+            });
+        }
 
         const changedFileRow = document.querySelector(
             '[title="src/feature.ts"]',
@@ -427,6 +437,28 @@ describe("CommitGraphApp integration", () => {
                 filePath: "src/feature.ts",
             }),
         );
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setFilterText",
+                        text: "",
+                    },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "revealCommit",
+                        hash: "cc33",
+                    },
+                }),
+            );
+        });
+        await flush();
+        expect((document.querySelector('input[placeholder="Text or hash"]') as HTMLInputElement).value).toBe("");
+        expect(viewport?.scrollTop).toBeGreaterThan(0);
     });
 });
 

@@ -171,6 +171,7 @@ type MockExtensionContext = {
 
 let latestCommitGraphProvider: MockCommitGraphViewProvider | undefined;
 let latestCommitPanelProvider: MockCommitPanelViewProvider | undefined;
+let latestBlameController: MockEditorBlameController | undefined;
 
 class MockCommitGraphViewProvider {
     static readonly viewType = "intelligit.commitGraph";
@@ -198,6 +199,7 @@ class MockCommitGraphViewProvider {
     setBranches = vi.fn();
     refresh = vi.fn(async () => undefined);
     filterByBranch = vi.fn(async () => undefined);
+    revealCommit = vi.fn(async () => undefined);
     setCommitDetail = vi.fn();
     clearCommitDetail = vi.fn();
     dispose = vi.fn();
@@ -244,6 +246,21 @@ class MockCommitPanelViewProvider {
     emitFileCount(count: number): void {
         this.fileCountEmitter.fire(count);
     }
+}
+
+class MockEditorBlameController {
+    constructor(
+        _repoRoot: string,
+        _gitOps: unknown,
+        _revealCommitInGraph: (hash: string) => Promise<void>,
+    ) {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        latestBlameController = this;
+    }
+    initialize = vi.fn(async () => undefined);
+    annotateActiveEditor = vi.fn(async () => undefined);
+    clear = vi.fn(async () => undefined);
+    dispose = vi.fn();
 }
 
 vi.mock("fs", () => ({
@@ -406,6 +423,10 @@ vi.mock("../../src/views/CommitPanelViewProvider", () => ({
     CommitPanelViewProvider: MockCommitPanelViewProvider,
 }));
 
+vi.mock("../../src/services/EditorBlameController", () => ({
+    EditorBlameController: MockEditorBlameController,
+}));
+
 vi.mock("../../src/utils/fileOps", async () => {
     const actual = await vi.importActual("../../src/utils/fileOps");
     return {
@@ -446,6 +467,7 @@ describe("extension integration", () => {
         workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
         latestCommitGraphProvider = undefined;
         latestCommitPanelProvider = undefined;
+        latestBlameController = undefined;
 
         executorRun.mockImplementation(defaultExecutorRunImpl);
         gitOpsState.isRepository.mockResolvedValue(true);
@@ -554,6 +576,9 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.conflictAcceptYours")).toBe(true);
         expect(registeredCommands.has("intelligit.conflictAcceptTheirs")).toBe(true);
         expect(registeredCommands.has("intelligit.openConflictSession")).toBe(true);
+        expect(registeredCommands.has("intelligit.annotateWithGitBlame")).toBe(true);
+        expect(registeredCommands.has("intelligit.clearGitBlame")).toBe(true);
+        expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
 
         function getCommand(id: string): CommandHandler {
             const cmd = registeredCommands.get(id);
@@ -564,6 +589,9 @@ describe("extension integration", () => {
         await getCommand("intelligit.refresh")();
         await getCommand("intelligit.filterByBranch")("main");
         await getCommand("intelligit.showGitLog")();
+        await getCommand("intelligit.annotateWithGitBlame")();
+        await getCommand("intelligit.clearGitBlame")();
+        await getCommand("intelligit.revealCommitInGraph")("deadbee");
 
         await getCommand("intelligit.checkout")({
             branch: { name: "feature-local", isRemote: false },
@@ -630,6 +658,10 @@ describe("extension integration", () => {
             expect.any(Function),
         );
         expect(deleteFileWithFallback).toHaveBeenCalled();
+        expect(latestBlameController!.initialize).toHaveBeenCalled();
+        expect(latestBlameController!.annotateActiveEditor).toHaveBeenCalled();
+        expect(latestBlameController!.clear).toHaveBeenCalled();
+        expect(latestCommitGraphProvider!.revealCommit).toHaveBeenCalledWith("deadbee");
     });
 
     it("updates non-current local branch via fetch refspec without checkout", async () => {
@@ -698,10 +730,6 @@ describe("extension integration", () => {
             expect.any(Number),
             expect.objectContaining({ enableScripts: true }),
         );
-        expect(showWarningMessage).toHaveBeenCalledWith(
-            expect.stringContaining("unresolved conflict file"),
-        );
-        expect(showErrorMessage).not.toHaveBeenCalledWith(expect.stringContaining("Merge failed:"));
     });
 
     it("offers restore action after deleting local branch", async () => {

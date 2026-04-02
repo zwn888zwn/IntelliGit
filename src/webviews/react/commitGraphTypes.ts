@@ -78,6 +78,7 @@ export type CommitGraphInbound =
           iconFonts?: ThemeIconFont[];
       }
     | { type: "setSelectedBranch"; branch: string | null }
+    | { type: "setFilterText"; text: string }
     | {
           type: "setCommitDetail";
           detail: CommitDetail;
@@ -86,6 +87,7 @@ export type CommitGraphInbound =
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
       }
+    | { type: "revealCommit"; hash: string }
     | { type: "clearCommitDetail" }
     | { type: "loadError"; message: string }
     | { type: "error"; message: string };

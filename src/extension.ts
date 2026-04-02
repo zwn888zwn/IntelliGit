@@ -30,6 +30,7 @@ import {
     applySelectedCommitFileChange,
     openCommitFileDiff,
 } from "./services/diffService";
+import { EditorBlameController } from "./services/EditorBlameController";
 import { runWithNotificationProgress } from "./utils/notifications";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -57,6 +58,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const commitInfo = new CommitInfoViewProvider(context.extensionUri);
     const commitPanel = new CommitPanelViewProvider(context.extensionUri, gitOps);
     const mergeConflicts = new MergeConflictsTreeProvider(gitOps, workspaceFolder.uri);
+    const blameController = new EditorBlameController(repoRoot, gitOps, async (hash) => {
+        await vscode.commands.executeCommand("intelligit.revealCommitInGraph", hash);
+    });
 
     // --- Register views ---
 
@@ -258,6 +262,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         vscode.commands.registerCommand("intelligit.showGitLog", async () => {
             await vscode.commands.executeCommand("intelligit.commitGraph.focus");
+        }),
+
+        vscode.commands.registerCommand("intelligit.revealCommitInGraph", async (hash: unknown) => {
+            if (typeof hash !== "string" || !hash.trim()) return;
+            await vscode.commands.executeCommand("intelligit.commitGraph.focus");
+            await commitGraph.revealCommit(hash.trim());
+        }),
+
+        vscode.commands.registerCommand("intelligit.annotateWithGitBlame", async () => {
+            await blameController.annotateActiveEditor();
+        }),
+
+        vscode.commands.registerCommand("intelligit.clearGitBlame", async () => {
+            await blameController.clear();
         }),
 
         vscode.commands.registerCommand("intelligit.mergeConflictsRefresh", async () => {
@@ -496,6 +514,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     currentBranches = await gitOps.getBranches();
     commitGraph.setBranches(currentBranches);
+    await blameController.initialize();
 
     // Eagerly fetch file count so the activity bar badge shows immediately.
     commitPanel.refresh().catch((err) => {
@@ -513,6 +532,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         refreshService,
+        blameController,
         commitGraph,
         commitInfo,
         commitPanel,

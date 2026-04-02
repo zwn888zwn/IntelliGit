@@ -4,6 +4,7 @@ import type {
     Commit,
     CommitDetail,
     CommitFile,
+    GitBlameLine,
     WorkingFile,
     StashEntry,
     MergeConflictFile,
@@ -428,6 +429,71 @@ export class GitOps {
         return files;
     }
 
+    async getBlame(filePath: string): Promise<GitBlameLine[]> {
+        const output = await this.executor.run([
+            "blame",
+            "--line-porcelain",
+            "--date=short",
+            "--",
+            filePath,
+        ]);
+        const blameLines: GitBlameLine[] = [];
+        const lines = output.split("\n");
+
+        for (let i = 0; i < lines.length; ) {
+            const header = lines[i]?.trim();
+            if (!header) {
+                i += 1;
+                continue;
+            }
+
+            const headerMatch = header.match(/^([0-9a-f]{40}|0{40})\s+\d+\s+(\d+)(?:\s+\d+)?$/i);
+            if (!headerMatch) {
+                i += 1;
+                continue;
+            }
+
+            const commitHash = headerMatch[1];
+            const finalLine = Number.parseInt(headerMatch[2] ?? "0", 10);
+            let author = "";
+            let authorTime = 0;
+            let authorTz = "+0000";
+            let summary = "";
+            i += 1;
+
+            while (i < lines.length && !lines[i].startsWith("\t")) {
+                const line = lines[i];
+                if (line.startsWith("author ")) {
+                    author = line.slice("author ".length).trim();
+                } else if (line.startsWith("author-time ")) {
+                    authorTime = Number.parseInt(line.slice("author-time ".length).trim(), 10) || 0;
+                } else if (line.startsWith("author-tz ")) {
+                    authorTz = line.slice("author-tz ".length).trim() || "+0000";
+                } else if (line.startsWith("summary ")) {
+                    summary = line.slice("summary ".length).trim();
+                }
+                i += 1;
+            }
+
+            if (i < lines.length && lines[i].startsWith("\t")) {
+                i += 1;
+            }
+
+            const isUncommitted = /^0+$/.test(commitHash);
+            blameLines.push({
+                line: Math.max(0, finalLine - 1),
+                commitHash,
+                shortHash: commitHash.slice(0, 8),
+                author: author || (isUncommitted ? "Not Committed Yet" : "Unknown"),
+                date: formatBlameDate(authorTime, authorTz),
+                summary,
+                isUncommitted,
+            });
+        }
+
+        return blameLines.sort((a, b) => a.line - b.line);
+    }
+
     async stageFiles(paths: string[]): Promise<void> {
         if (paths.length === 0) return;
         await this.executor.run(["add", "--", ...paths]);
@@ -844,4 +910,14 @@ function parseSetUpstreamPushSuggestion(err: unknown): { remote: string; branch:
     const branch = match[2]?.trim();
     if (!remote || !branch) return null;
     return { remote, branch };
+}
+
+function formatBlameDate(authorTime: number, authorTz: string): string {
+    if (!Number.isFinite(authorTime) || authorTime <= 0) return "";
+    const sign = authorTz.startsWith("-") ? -1 : 1;
+    const hours = Number.parseInt(authorTz.slice(1, 3), 10) || 0;
+    const minutes = Number.parseInt(authorTz.slice(3, 5), 10) || 0;
+    const offsetSeconds = sign * (hours * 60 + minutes) * 60;
+    const date = new Date((authorTime + offsetSeconds) * 1000);
+    return `${date.getUTCFullYear()}/${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
 }
