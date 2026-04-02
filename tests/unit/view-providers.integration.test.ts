@@ -384,6 +384,8 @@ describe("view providers integration", () => {
         await webview.send({ type: "commitAndPush", message: "feat: push", amend: false });
         expect(gitOps.commit).toHaveBeenCalled();
         expect(gitOps.commitAndPush).toHaveBeenCalled();
+        expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(gitOps.commitAndPush).toHaveBeenCalledWith("feat: selected", false, ["src/a.ts"]);
         expect(withProgress).toHaveBeenCalled();
 
         await webview.send({ type: "getLastCommitMessage" });
@@ -391,6 +393,22 @@ describe("view providers integration", () => {
             type: "lastCommitMessage",
             message: "last message",
         });
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider commits only checked paths even when other files are already staged", async () => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+
+        await webview.send({
+            type: "commitSelected",
+            message: "feat: selected only",
+            amend: false,
+            push: false,
+            paths: ["src/a.ts"],
+        });
+
+        expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
+        expect(gitOps.commit).toHaveBeenCalledWith("feat: selected only", false, ["src/a.ts"]);
         provider.dispose();
     });
 

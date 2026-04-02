@@ -438,9 +438,12 @@ export class GitOps {
         await this.executor.run(["reset", "HEAD", "--", ...paths]);
     }
 
-    async commit(message: string, amend: boolean = false): Promise<string> {
+    async commit(message: string, amend: boolean = false, paths?: string[]): Promise<string> {
         const args = ["commit", "-m", message];
         if (amend) args.push("--amend");
+        if (paths && paths.length > 0) {
+            args.push("--only", "--", ...paths);
+        }
         return this.executor.run(args);
     }
 
@@ -464,8 +467,8 @@ export class GitOps {
         }
     }
 
-    async commitAndPush(message: string, amend: boolean = false): Promise<string> {
-        await this.commit(message, amend);
+    async commitAndPush(message: string, amend: boolean = false, paths?: string[]): Promise<string> {
+        await this.commit(message, amend, paths);
         return this.push();
     }
 

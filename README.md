@@ -121,6 +121,7 @@ If no JetBrains IDE path is configured, IntelliGit falls back to the VS Code int
 
 - VS Code `1.96.0` or later
 - Git installed and available on `PATH`
+- Node.js `20+` recommended for packaging with `vsce`
 
 ## Installation
 
@@ -162,10 +163,37 @@ bun run format
 ### Manually test the changes 
 
 ```bash
-bun install
-bun run build
-bun run package
+# Use Node 20+ (Node 22 recommended)
+nvm use 22
+
+# Install dependencies
+pnpm install
+
+# Build production bundles
+node scripts/build.js --production
+
+# Package VSIX
+pnpm exec vsce package --no-dependencies
+
+# Install locally
 code --install-extension intelligit-*.vsix
+```
+
+### Packaging
+
+```bash
+# Use Node 20+ (Node 22 recommended)
+nvm use 22
+
+pnpm install
+node scripts/build.js --production
+pnpm exec vsce package --no-dependencies
+```
+
+The packaged VSIX is written to the repository root, for example:
+
+```bash
+/Users/wnz/goProject/IntelliGit/intelligit-0.6.2.vsix
 ```
 
 ### Running the Test Suite
@@ -212,7 +240,7 @@ Data flow highlights:
 | Webviews | React 18 |
 | Graph rendering | HTML5 Canvas |
 | Bundler | esbuild |
-| Package manager | Bun |
+| Package manager | pnpm / Bun |
 | Testing | Vitest |
 | Linting | ESLint |
 | Formatting | Prettier |

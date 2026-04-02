@@ -336,6 +336,23 @@ describe("GitOps", () => {
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
             expect(call).toContain("--amend");
         });
+
+        it("limits commit to selected paths when provided", async () => {
+            const executor = createMockExecutor({});
+            const ops = new GitOps(executor);
+            await ops.commit("selected message", false, ["src/a.ts", "src/b.ts"]);
+
+            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
+            expect(call).toEqual([
+                "commit",
+                "-m",
+                "selected message",
+                "--only",
+                "--",
+                "src/a.ts",
+                "src/b.ts",
+            ]);
+        });
     });
 
     describe("push", () => {
@@ -458,6 +475,16 @@ describe("GitOps", () => {
 
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
             expect(calls[0][0]).toEqual(["commit", "-m", "msg"]);
+            expect(calls[1][0]).toEqual(["push"]);
+        });
+
+        it("passes selected paths through to commit before push", async () => {
+            const executor = createMockExecutor({});
+            const ops = new GitOps(executor);
+            await ops.commitAndPush("msg", false, ["src/a.ts"]);
+
+            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
+            expect(calls[0][0]).toEqual(["commit", "-m", "msg", "--only", "--", "src/a.ts"]);
             expect(calls[1][0]).toEqual(["push"]);
         });
     });

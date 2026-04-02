@@ -218,9 +218,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     push ? "Committing and pushing..." : "Committing...",
                     async () => {
                         if (push) {
-                            await this.gitOps.commitAndPush(message, amend);
+                            await this.gitOps.commitAndPush(message, amend, paths);
                         } else {
-                            await this.gitOps.commit(message, amend);
+                            await this.gitOps.commit(message, amend, paths);
                         }
                     },
                 );
