@@ -8,6 +8,7 @@ const BLAME_ACTIVE_CONTEXT = "intelligit.blameActive";
 const BLAME_SUPPORTED_CONTEXT = "intelligit.blameSupportedFile";
 
 type BlameStyle = {
+    color: vscode.ThemeColor;
     borderColor: string;
     backgroundColor: string;
 };
@@ -15,15 +16,13 @@ type BlameStyle = {
 type BlameSession = {
     uri: string;
     filePath: string;
+    blameLines: GitBlameLine[];
     decorationType: vscode.TextEditorDecorationType;
     decorations: vscode.DecorationOptions[];
     linesByNumber: Map<number, GitBlameLine>;
 };
 
-const UNCOMMITTED_STYLE: BlameStyle = {
-    borderColor: "rgba(126, 132, 146, 0.9)",
-    backgroundColor: "rgba(126, 132, 146, 0.16)",
-};
+const BLAME_TEXT_COLOR = new vscode.ThemeColor("editor.foreground");
 
 export class EditorBlameController implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
@@ -40,6 +39,9 @@ export class EditorBlameController implements vscode.Disposable {
             }),
             vscode.window.onDidChangeTextEditorSelection((event) => {
                 void this.handleSelectionChanged(event);
+            }),
+            vscode.window.onDidChangeActiveColorTheme(() => {
+                this.handleThemeChanged();
             }),
         );
     }
@@ -74,6 +76,7 @@ export class EditorBlameController implements vscode.Disposable {
             this.session = {
                 uri: editor.document.uri.toString(),
                 filePath,
+                blameLines,
                 decorationType,
                 decorations,
                 linesByNumber: new Map(blameLines.map((line) => [line.line, line])),
@@ -141,6 +144,15 @@ export class EditorBlameController implements vscode.Disposable {
         this.session = null;
     }
 
+    private handleThemeChanged(): void {
+        if (!this.session) return;
+        this.session.decorations = buildBlameDecorations(this.session.blameLines);
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.uri.toString() === this.session.uri) {
+            this.applySessionToEditor(editor);
+        }
+    }
+
     private getRepoRelativeFilePath(editor: vscode.TextEditor | undefined): string | null {
         if (!editor || editor.document.uri.scheme !== "file") return null;
         return getRepoRelativeFilePathFromUri(editor.document.uri, this.repoRoot);
@@ -159,17 +171,20 @@ export class EditorBlameController implements vscode.Disposable {
 function buildBlameDecorations(lines: GitBlameLine[]): vscode.DecorationOptions[] {
     const labels = lines.map((line) => formatBlameLabel(line));
     const maxLabelLength = labels.reduce((max, label) => Math.max(max, label.length), 0);
+    const themeKind = vscode.window.activeColorTheme.kind;
 
     return lines.map((line, index) => {
         const label = labels[index].padEnd(maxLabelLength, " ");
-        const style = line.isUncommitted ? UNCOMMITTED_STYLE : resolveCommitStyle(line.commitHash);
+        const style = line.isUncommitted
+            ? resolveUncommittedStyle(themeKind)
+            : resolveCommitStyle(line.commitHash, themeKind);
         return {
             range: new vscode.Range(line.line, 0, line.line, 0),
             hoverMessage: buildHoverMessage(line),
             renderOptions: {
                 before: {
                     contentText: ` ${label} `,
-                    color: "rgba(188, 194, 205, 0.94)",
+                    color: style.color,
                     backgroundColor: style.backgroundColor,
                     margin: "0 1.2em 0 0",
                     borderRadius: "3px 0 0 3px",
@@ -216,22 +231,34 @@ function buildHoverMessage(line: GitBlameLine): vscode.MarkdownString {
 }
 
 function escapeMarkdown(value: string): string {
-    return value.replace(/([\\`*_{}\[\]()#+\-.!|>])/g, "\\$1");
+    return value.replace(/[[\]\\`*_{}()#+\-.!|>]/g, "\\$&");
 }
 
-function resolveCommitStyle(commitHash: string): BlameStyle {
+function resolveCommitStyle(commitHash: string, themeKind: vscode.ColorThemeKind): BlameStyle {
     let hash = 0;
     for (let i = 0; i < commitHash.length; i += 1) {
         hash = (hash * 33 + commitHash.charCodeAt(i)) >>> 0;
     }
     const hue = hash % 360;
-    const saturation = 52 + (hash % 14);
-    const lightness = 56 + (hash % 8);
+    const isLightTheme = themeKind === vscode.ColorThemeKind.Light ||
+        themeKind === vscode.ColorThemeKind.HighContrastLight;
+    const saturation = isLightTheme ? 46 + (hash % 12) : 52 + (hash % 14);
+    const borderLightness = isLightTheme ? 34 + (hash % 8) : 56 + (hash % 8);
+    const backgroundLightness = isLightTheme ? 42 + (hash % 6) : Math.min(78, borderLightness + 10);
+    const backgroundAlpha = isLightTheme ? 0.10 : 0.14;
     return {
-        borderColor: `hsla(${hue}, ${saturation}%, ${lightness}%, 0.95)`,
-        backgroundColor: `hsla(${hue}, ${Math.max(38, saturation - 8)}%, ${Math.min(
-            78,
-            lightness + 10,
-        )}%, 0.14)`,
+        color: BLAME_TEXT_COLOR,
+        borderColor: `hsla(${hue}, ${saturation}%, ${borderLightness}%, 0.95)`,
+        backgroundColor: `hsla(${hue}, ${Math.max(36, saturation - 6)}%, ${backgroundLightness}%, ${backgroundAlpha})`,
+    };
+}
+
+function resolveUncommittedStyle(themeKind: vscode.ColorThemeKind): BlameStyle {
+    const isLightTheme = themeKind === vscode.ColorThemeKind.Light ||
+        themeKind === vscode.ColorThemeKind.HighContrastLight;
+    return {
+        color: BLAME_TEXT_COLOR,
+        borderColor: isLightTheme ? "rgba(105, 112, 125, 0.92)" : "rgba(126, 132, 146, 0.9)",
+        backgroundColor: isLightTheme ? "rgba(105, 112, 125, 0.10)" : "rgba(126, 132, 146, 0.16)",
     };
 }

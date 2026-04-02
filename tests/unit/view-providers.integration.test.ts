@@ -336,6 +336,44 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("CommitGraphViewProvider reveals the commit even if detail loading fails", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getLog.mockResolvedValue([
+            {
+                hash: "target123",
+                shortHash: "target12",
+                message: "target",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-02-19T00:00:00Z",
+                parentHashes: [],
+                refs: [],
+            },
+        ]);
+        gitOps.getCommitDetail.mockRejectedValueOnce(new Error("detail failed"));
+        const provider = new CommitGraphViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+        );
+        const webview = createWebviewView();
+
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+        postMessageSpy.mockClear();
+        showErrorMessage.mockClear();
+
+        await provider.revealCommit("target123");
+
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "revealCommit", hash: "target123" });
+        expect(showErrorMessage).toHaveBeenCalledWith("Commit graph error: detail failed");
+        provider.dispose();
+    });
+
     it("CommitGraphViewProvider handles webview events and refresh/load flows", async () => {
         const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
         const gitOps = makeGitOpsMock();
