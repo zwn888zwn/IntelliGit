@@ -234,12 +234,20 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
-            const detail = await this.gitOps.getCommitDetail(hash);
-            if (requestId !== this.requestSeq) return;
-            this.setCommitDetail(detail);
             this.postToWebview({ type: "revealCommit", hash });
             if (this.pendingRevealHash === hash) {
                 this.pendingRevealHash = null;
+            }
+
+            try {
+                const detail = await this.gitOps.getCommitDetail(hash);
+                if (requestId !== this.requestSeq) return;
+                this.setCommitDetail(detail);
+            } catch (err) {
+                if (requestId !== this.requestSeq) return;
+                const message = getErrorMessage(err);
+                vscode.window.showErrorMessage(`Commit graph error: ${message}`);
+                this.postToWebview({ type: "error", message });
             }
         } catch (err) {
             if (requestId !== this.requestSeq) return;

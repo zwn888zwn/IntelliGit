@@ -6,6 +6,7 @@ type SelectionListener = (event: {
     selections: Array<{ active: { line: number; character: number } }>;
     kind?: number;
 }) => void;
+type ThemeListener = () => void;
 
 type MockTextEditor = {
     document: {
@@ -26,6 +27,8 @@ const createTextEditorDecorationType = vi.fn(() => ({ dispose: vi.fn() }));
 let activeEditor: MockTextEditor | undefined;
 const activeEditorListeners: ActiveEditorListener[] = [];
 const selectionListeners: SelectionListener[] = [];
+const themeListeners: ThemeListener[] = [];
+let activeThemeKind = 2;
 
 vi.mock("vscode", () => ({
     Range: class {
@@ -36,6 +39,9 @@ vi.mock("vscode", () => ({
             public endCharacter: number,
         ) {}
     },
+    ThemeColor: class {
+        constructor(public readonly id: string) {}
+    },
     MarkdownString: class {
         value = "";
         constructor(_value?: string, _supportThemeIcons?: boolean) {}
@@ -44,6 +50,12 @@ vi.mock("vscode", () => ({
             return this;
         }
     },
+    ColorThemeKind: {
+        Light: 1,
+        Dark: 2,
+        HighContrast: 3,
+        HighContrastLight: 4,
+    },
     TextEditorSelectionChangeKind: {
         Mouse: 1,
         Keyboard: 2,
@@ -51,6 +63,9 @@ vi.mock("vscode", () => ({
     window: {
         get activeTextEditor() {
             return activeEditor;
+        },
+        get activeColorTheme() {
+            return { kind: activeThemeKind };
         },
         createTextEditorDecorationType,
         showWarningMessage,
@@ -61,6 +76,10 @@ vi.mock("vscode", () => ({
         }),
         onDidChangeTextEditorSelection: vi.fn((listener: SelectionListener) => {
             selectionListeners.push(listener);
+            return { dispose: vi.fn() };
+        }),
+        onDidChangeActiveColorTheme: vi.fn((listener: ThemeListener) => {
+            themeListeners.push(listener);
             return { dispose: vi.fn() };
         }),
     },
@@ -104,12 +123,21 @@ async function emitSelectionChanged(
     }
 }
 
+async function emitThemeChanged(kind: number): Promise<void> {
+    activeThemeKind = kind;
+    for (const listener of themeListeners) {
+        await listener();
+    }
+}
+
 describe("EditorBlameController", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         activeEditor = undefined;
+        activeThemeKind = 2;
         activeEditorListeners.length = 0;
         selectionListeners.length = 0;
+        themeListeners.length = 0;
     });
 
     it("annotates the active repo file and keeps same-commit colors stable", async () => {
@@ -170,6 +198,45 @@ describe("EditorBlameController", () => {
         );
         expect(String((decorations[0] as { hoverMessage?: { value?: string } }).hoverMessage?.value)).toContain(
             "First summary",
+        );
+        expect((decorations[0]?.renderOptions?.before as { color?: { id?: string } } | undefined)?.color?.id).toBe(
+            "editor.foreground",
+        );
+    });
+
+    it("recomputes blame colors when the active theme changes", async () => {
+        const vscode = await import("vscode");
+        const { EditorBlameController } = await import("../../src/services/EditorBlameController");
+        const gitOps = {
+            getBlame: vi.fn(async () => [
+                {
+                    line: 0,
+                    commitHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    shortHash: "aaaaaaaa",
+                    author: "Alice",
+                    date: "2026/3/18",
+                    summary: "First summary",
+                    isUncommitted: false,
+                },
+            ]),
+        };
+        const controller = new EditorBlameController("/repo", gitOps as never, vi.fn(async () => undefined));
+        const editor = makeEditor("/repo/src/a.ts");
+        activeEditor = editor;
+
+        await controller.annotateActiveEditor();
+        const firstDecorations = editor.setDecorations.mock.calls[0]?.[1] as Array<{
+            renderOptions?: { before?: { backgroundColor?: string } };
+        }>;
+
+        await emitThemeChanged(vscode.ColorThemeKind.Light);
+
+        expect(editor.setDecorations).toHaveBeenCalledTimes(2);
+        const secondDecorations = editor.setDecorations.mock.calls[1]?.[1] as Array<{
+            renderOptions?: { before?: { backgroundColor?: string } };
+        }>;
+        expect(firstDecorations[0]?.renderOptions?.before?.backgroundColor).not.toBe(
+            secondDecorations[0]?.renderOptions?.before?.backgroundColor,
         );
     });
 
