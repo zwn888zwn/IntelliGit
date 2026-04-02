@@ -14,6 +14,178 @@ import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from 
 import { assertRepoRelativePath } from "../utils/fileOps";
 import { EMPTY_TREE_HASH } from "../utils/constants";
 
+const DIFF_DOCUMENT_SCHEME = "intelligit-diff";
+const DIFF_EDITABLE_SCHEME = "intelligit-diff-editable";
+
+class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
+    private readonly contents = new Map<string, string>();
+    private readonly changeEmitter = new vscode.EventEmitter<vscode.Uri>();
+    private nextId = 1;
+
+    readonly onDidChange = this.changeEmitter.event;
+
+    createUri(filePath: string, ref: string, content: string): vscode.Uri {
+        const uri = vscode.Uri.from({
+            scheme: DIFF_DOCUMENT_SCHEME,
+            path: `/${normalizeGitPath(filePath)}`,
+            query: new URLSearchParams({
+                ref,
+                id: String(this.nextId++),
+            }).toString(),
+        });
+        this.contents.set(uri.toString(), content);
+        return uri;
+    }
+
+    provideTextDocumentContent(uri: vscode.Uri): string {
+        return this.contents.get(uri.toString()) ?? "";
+    }
+
+    release(uri: vscode.Uri): void {
+        this.contents.delete(uri.toString());
+    }
+
+    dispose(): void {
+        this.contents.clear();
+        this.changeEmitter.dispose();
+    }
+}
+
+class IntelliGitEditableDiffFileSystemProvider
+    implements vscode.FileSystemProvider, vscode.Disposable
+{
+    private readonly files = new Map<string, Uint8Array>();
+    private readonly changeEmitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+    private nextId = 1;
+
+    readonly onDidChangeFile = this.changeEmitter.event;
+
+    createUri(filePath: string, ref: string, content: string): vscode.Uri {
+        const uri = vscode.Uri.from({
+            scheme: DIFF_EDITABLE_SCHEME,
+            path: `/${normalizeGitPath(filePath)}`,
+            query: new URLSearchParams({
+                ref,
+                id: String(this.nextId++),
+            }).toString(),
+        });
+        this.files.set(uri.toString(), Buffer.from(content, "utf8"));
+        return uri;
+    }
+
+    watch(): vscode.Disposable {
+        return new vscode.Disposable(() => {});
+    }
+
+    stat(uri: vscode.Uri): vscode.FileStat {
+        const content = this.files.get(uri.toString());
+        if (!content) {
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+        const now = Date.now();
+        return {
+            type: vscode.FileType.File,
+            ctime: now,
+            mtime: now,
+            size: content.byteLength,
+        };
+    }
+
+    readDirectory(): [string, vscode.FileType][] {
+        return [];
+    }
+
+    createDirectory(): void {
+        throw vscode.FileSystemError.NoPermissions("Directory operations are not supported.");
+    }
+
+    readFile(uri: vscode.Uri): Uint8Array {
+        const content = this.files.get(uri.toString());
+        if (!content) {
+            throw vscode.FileSystemError.FileNotFound(uri);
+        }
+        return content;
+    }
+
+    writeFile(uri: vscode.Uri, content: Uint8Array): void {
+        this.files.set(uri.toString(), content);
+        this.changeEmitter.fire([{ type: vscode.FileChangeType.Changed, uri }]);
+    }
+
+    delete(uri: vscode.Uri): void {
+        this.files.delete(uri.toString());
+        this.changeEmitter.fire([{ type: vscode.FileChangeType.Deleted, uri }]);
+    }
+
+    rename(oldUri: vscode.Uri, newUri: vscode.Uri): void {
+        const content = this.files.get(oldUri.toString());
+        if (!content) {
+            throw vscode.FileSystemError.FileNotFound(oldUri);
+        }
+        this.files.delete(oldUri.toString());
+        this.files.set(newUri.toString(), content);
+        this.changeEmitter.fire([
+            { type: vscode.FileChangeType.Deleted, uri: oldUri },
+            { type: vscode.FileChangeType.Created, uri: newUri },
+        ]);
+    }
+
+    release(uri: vscode.Uri): void {
+        this.files.delete(uri.toString());
+    }
+
+    dispose(): void {
+        this.files.clear();
+        this.changeEmitter.dispose();
+    }
+}
+
+let diffContentProvider: IntelliGitDiffContentProvider | null = null;
+let editableDiffProvider: IntelliGitEditableDiffFileSystemProvider | null = null;
+
+export function registerDiffContentProvider(subscriptions: vscode.Disposable[]): void {
+    if (diffContentProvider && editableDiffProvider) return;
+
+    diffContentProvider = new IntelliGitDiffContentProvider();
+    editableDiffProvider = new IntelliGitEditableDiffFileSystemProvider();
+    subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider(
+            DIFF_DOCUMENT_SCHEME,
+            diffContentProvider,
+        ),
+        vscode.workspace.registerFileSystemProvider(
+            DIFF_EDITABLE_SCHEME,
+            editableDiffProvider,
+            { isCaseSensitive: true },
+        ),
+        vscode.workspace.onDidCloseTextDocument((document) => {
+            if (document.uri.scheme === DIFF_DOCUMENT_SCHEME) {
+                diffContentProvider?.release(document.uri);
+                return;
+            }
+            if (document.uri.scheme === DIFF_EDITABLE_SCHEME) {
+                editableDiffProvider?.release(document.uri);
+            }
+        }),
+        diffContentProvider,
+        editableDiffProvider,
+    );
+}
+
+function getDiffContentProvider(): IntelliGitDiffContentProvider {
+    if (!diffContentProvider) {
+        throw new Error("IntelliGit diff content provider is not registered.");
+    }
+    return diffContentProvider;
+}
+
+function getEditableDiffProvider(): IntelliGitEditableDiffFileSystemProvider {
+    if (!editableDiffProvider) {
+        throw new Error("IntelliGit editable diff provider is not registered.");
+    }
+    return editableDiffProvider;
+}
+
 export function normalizeGitPath(fsPathValue: string): string {
     return fsPathValue.split(path.sep).join("/");
 }
@@ -53,21 +225,6 @@ export function getCommitInfoFileContext(value: unknown): CommitInfoFileContext 
     return { filePath, commitHash, commitShortHash };
 }
 
-async function closeTemporaryDiffSourceTab(uri: vscode.Uri): Promise<void> {
-    const matchingTab = vscode.window.tabGroups.all
-        .flatMap((group) => group.tabs)
-        .find((tab) => {
-            const input = tab.input;
-            return input instanceof vscode.TabInputText && input.uri.toString() === uri.toString();
-        });
-    if (!matchingTab) return;
-    try {
-        await vscode.window.tabGroups.close(matchingTab, true);
-    } catch {
-        // Best-effort cleanup only; diff view is already open.
-    }
-}
-
 export async function openDiffAgainstGitRef(
     fileUri: vscode.Uri,
     repoRelativeFilePath: string,
@@ -78,15 +235,12 @@ export async function openDiffAgainstGitRef(
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
 
-    const currentDoc = await vscode.workspace.openTextDocument(fileUri);
     const refContent = await gitOps.getFileContentAtRef(repoRelativeFilePath, trimmedRef);
-    const leftDoc = await vscode.workspace.openTextDocument({
-        content: refContent,
-        language: currentDoc.languageId,
-    });
+    const leftDoc = await vscode.workspace.openTextDocument(
+        getDiffContentProvider().createUri(repoRelativeFilePath, trimmedRef, refContent),
+    );
     const title = `${repoRelativeFilePath} (${sourceLabel}: ${trimmedRef}) <-> Working Tree`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, fileUri, title);
-    await closeTemporaryDiffSourceTab(leftDoc.uri);
 }
 
 export async function openCommitFileDiff(
@@ -131,27 +285,17 @@ export async function openCommitFileDiff(
         rightContent = "";
     }
 
-    // Detect language from the working tree file if it exists on disk.
-    let language: string | undefined;
-    const diskPath = path.join(repoRoot, safePath);
-    try {
-        const diskDoc = await vscode.workspace.openTextDocument(vscode.Uri.file(diskPath));
-        language = diskDoc.languageId;
-    } catch {
-        // File may not exist on disk (deleted or only in history).
-    }
-
-    const leftDoc = await vscode.workspace.openTextDocument({ content: leftContent, language });
-    const rightDoc = await vscode.workspace.openTextDocument({
-        content: rightContent,
-        language,
-    });
+    const diffProvider = getDiffContentProvider();
+    const leftDoc = await vscode.workspace.openTextDocument(
+        diffProvider.createUri(safePath, parentRef, leftContent),
+    );
+    const rightDoc = await vscode.workspace.openTextDocument(
+        getEditableDiffProvider().createUri(safePath, commitHash, rightContent),
+    );
     const shortParent = parentDisplayHash.slice(0, 8);
     const shortCommit = commitHash.slice(0, 8);
     const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightDoc.uri, title);
-    await closeTemporaryDiffSourceTab(leftDoc.uri);
-    await closeTemporaryDiffSourceTab(rightDoc.uri);
 }
 
 export async function applyPatchTextToRepo(
