@@ -448,10 +448,10 @@
         }
     },
     "scripts": {
-        "vscode:prepublish": "node scripts/build.js --production",
-        "build": "node scripts/build.js",
-        "build:prod": "node scripts/build.js --production",
-        "watch": "node scripts/watch.js",
+        "vscode:prepublish": "bun scripts/build.js --production",
+        "build": "bun scripts/build.js",
+        "build:prod": "bun scripts/build.js --production",
+        "watch": "bun scripts/watch.js",
         "format": "prettier --write \"src/**/*.{ts,tsx}\" \"scripts/**/*.js\"",
         "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"scripts/**/*.js\"",
         "lint": "eslint src",
