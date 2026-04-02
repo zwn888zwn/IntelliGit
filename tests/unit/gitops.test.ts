@@ -519,6 +519,30 @@ describe("GitOps", () => {
             expect(confirmSetUpstream).toHaveBeenCalledWith("origin", "feature/no-upstream");
         });
 
+        it("retries with --set-upstream when git reports a localized upstream error", async () => {
+            const noUpstreamError = new Error(
+                [
+                    "fatal: 当前分支 feature/no-upstream 没有对应的上游分支。",
+                    "为推送当前分支并建立与远程上游的跟踪，使用",
+                    "",
+                    "    git push --set-upstream origin feature/no-upstream",
+                ].join("\n"),
+            );
+            const executor = {
+                run: vi.fn(async (args: string[]) => {
+                    const key = args.join(" ");
+                    if (key === "push") throw noUpstreamError;
+                    if (key === "push --set-upstream origin feature/no-upstream") return "ok";
+                    return "";
+                }),
+            } as unknown as GitExecutor;
+            const confirmSetUpstream = vi.fn(async () => true);
+            const ops = new GitOps(executor, confirmSetUpstream);
+
+            await expect(ops.push()).resolves.toBe("ok");
+            expect(confirmSetUpstream).toHaveBeenCalledWith("origin", "feature/no-upstream");
+        });
+
         it("throws UpstreamPushDeclinedError when upstream setup is declined", async () => {
             const noUpstreamError = new Error(
                 [

@@ -29,6 +29,7 @@ import {
     compareCommitInfoFileWithLocal,
     applySelectedCommitFileChange,
     openCommitFileDiff,
+    registerDiffContentProvider,
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
 import { runWithNotificationProgress } from "./utils/notifications";
@@ -40,6 +41,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const repoRoot = workspaceFolder.uri.fsPath;
     const executor = new GitExecutor(repoRoot);
     const gitOps = new GitOps(executor);
+    registerDiffContentProvider(context.subscriptions);
 
     try {
         const isRepo = await gitOps.isRepository();

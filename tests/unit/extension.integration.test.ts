@@ -44,6 +44,7 @@ const withProgress = vi.fn(
 const registerWebviewViewProvider = vi.fn(() => ({ dispose: vi.fn() }));
 const createTerminal = vi.fn(() => ({ show: vi.fn(), sendText: vi.fn() }));
 const textDocListeners: Array<() => void> = [];
+const closeDocListeners: Array<(document: { uri: { scheme?: string; toString?: () => string } }) => void> = [];
 const saveDocListeners: Array<() => void> = [];
 const createFileListeners: Array<() => void> = [];
 const deleteFileListeners: Array<() => void> = [];
@@ -286,8 +287,29 @@ vi.mock("vscode", () => ({
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     ViewColumn: { Active: -1, One: 1, Two: 2, Three: 3 },
     ProgressLocation: { Notification: 15 },
+    FileType: { File: 1 },
+    FileChangeType: { Changed: 1, Created: 2, Deleted: 3 },
+    FileSystemError: {
+        FileNotFound: (uri: unknown) => new Error(`File not found: ${String(uri)}`),
+        NoPermissions: (message: string) => new Error(message),
+    },
     Uri: {
         file: (value: string) => ({ fsPath: value, path: value }),
+        from: ({
+            scheme,
+            path,
+            query,
+        }: {
+            scheme: string;
+            path: string;
+            query?: string;
+        }) => ({
+            scheme,
+            path,
+            query,
+            fsPath: path,
+            toString: () => `${scheme}:${path}${query ? `?${query}` : ""}`,
+        }),
         joinPath: (base: { fsPath?: string; path?: string }, ...parts: string[]) => {
             const prefix = base.fsPath ?? base.path ?? "";
             const joined = [prefix, ...parts].join("/").replace(/\/+/g, "/");
@@ -353,8 +375,14 @@ vi.mock("vscode", () => ({
         },
         fs: { writeFile },
         openTextDocument,
+        registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
+        registerFileSystemProvider: vi.fn(() => ({ dispose: vi.fn() })),
         onDidChangeTextDocument: vi.fn((listener: () => void) => {
             textDocListeners.push(listener);
+            return { dispose: vi.fn() };
+        }),
+        onDidCloseTextDocument: vi.fn((listener: (document: { uri: { scheme?: string; toString?: () => string } }) => void) => {
+            closeDocListeners.push(listener);
             return { dispose: vi.fn() };
         }),
         onDidSaveTextDocument: vi.fn((listener: () => void) => {
@@ -459,6 +487,7 @@ describe("extension integration", () => {
         registeredCommands.clear();
         mockDisposables.length = 0;
         textDocListeners.length = 0;
+        closeDocListeners.length = 0;
         saveDocListeners.length = 0;
         createFileListeners.length = 0;
         deleteFileListeners.length = 0;
@@ -468,6 +497,10 @@ describe("extension integration", () => {
         latestCommitGraphProvider = undefined;
         latestCommitPanelProvider = undefined;
         latestBlameController = undefined;
+        openTextDocument.mockImplementation(async (arg: unknown) => ({
+            uri: arg,
+            languageId: "typescript",
+        }));
 
         executorRun.mockImplementation(defaultExecutorRunImpl);
         gitOpsState.isRepository.mockResolvedValue(true);
@@ -945,24 +978,6 @@ describe("extension integration", () => {
             subscriptions: [],
         } as unknown as MockExtensionContext;
 
-        openTextDocument.mockImplementation(async (arg: unknown) => {
-            if (arg && typeof arg === "object" && "content" in (arg as Record<string, unknown>)) {
-                const contentDoc = arg as { content: string };
-                return {
-                    uri: {
-                        toString: () => `untitled:${contentDoc.content}`,
-                    },
-                    languageId: "typescript",
-                };
-            }
-            return {
-                uri: {
-                    toString: () => JSON.stringify(arg),
-                },
-                languageId: "typescript",
-            };
-        });
-
         await activate(context);
 
         executeCommandFallback.mockClear();
@@ -982,12 +997,13 @@ describe("extension integration", () => {
             "src/feature.ts",
             "a1b2c3d4",
         );
-        expect(executeCommandFallback).toHaveBeenCalledWith(
-            "vscode.diff",
-            expect.anything(),
-            expect.anything(),
-            "src/feature.ts (parent1 ↔ a1b2c3d4)",
+        const diffCall = executeCommandFallback.mock.calls.find(
+            (call) => call[0] === "vscode.diff",
         );
+        expect(diffCall).toBeDefined();
+        expect(diffCall?.[1]).toMatchObject({ scheme: "intelligit-diff" });
+        expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff-editable" });
+        expect(diffCall?.[3]).toBe("src/feature.ts (parent1 ↔ a1b2c3d4)");
     });
 
     it("prompts merge parent selection before opening commit file diff", async () => {
@@ -998,24 +1014,6 @@ describe("extension integration", () => {
         } as unknown as MockExtensionContext;
 
         showQuickPick.mockResolvedValueOnce({ parentNumber: 2 });
-        openTextDocument.mockImplementation(async (arg: unknown) => {
-            if (arg && typeof arg === "object" && "content" in (arg as Record<string, unknown>)) {
-                const contentDoc = arg as { content: string };
-                return {
-                    uri: {
-                        toString: () => `untitled:${contentDoc.content}`,
-                    },
-                    languageId: "typescript",
-                };
-            }
-            return {
-                uri: {
-                    toString: () => JSON.stringify(arg),
-                },
-                languageId: "typescript",
-            };
-        });
-
         await activate(context);
 
         executeCommandFallback.mockClear();
@@ -1036,12 +1034,13 @@ describe("extension integration", () => {
             "src/feature.ts",
             "deadbee",
         );
-        expect(executeCommandFallback).toHaveBeenCalledWith(
-            "vscode.diff",
-            expect.anything(),
-            expect.anything(),
-            "src/feature.ts (parent2 ↔ deadbee)",
+        const diffCall = executeCommandFallback.mock.calls.find(
+            (call) => call[0] === "vscode.diff",
         );
+        expect(diffCall).toBeDefined();
+        expect(diffCall?.[1]).toMatchObject({ scheme: "intelligit-diff" });
+        expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff-editable" });
+        expect(diffCall?.[3]).toBe("src/feature.ts (parent2 ↔ deadbee)");
     });
 
     it("covers activation guards and debounced refresh sources", async () => {
