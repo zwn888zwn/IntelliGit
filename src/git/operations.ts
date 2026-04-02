@@ -898,8 +898,9 @@ function mapConflictSideState(code: string): MergeConflictFile["ours"] {
 }
 
 function isNoUpstreamPushError(err: unknown): boolean {
-    const message = getErrorMessage(err).toLowerCase();
-    return message.includes("has no upstream branch");
+    const message = getErrorMessage(err);
+    const lower = message.toLowerCase();
+    return lower.includes("has no upstream branch") || parseSetUpstreamPushSuggestion(err) !== null;
 }
 
 function parseSetUpstreamPushSuggestion(err: unknown): { remote: string; branch: string } | null {
