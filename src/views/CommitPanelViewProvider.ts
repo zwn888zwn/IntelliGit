@@ -5,7 +5,12 @@
 
 import * as vscode from "vscode";
 import { GitOps } from "../git/operations";
-import type { ThemeFolderIconMap, WorkingFile, StashEntry } from "../types";
+import type {
+    RepositoryContextInfo,
+    ThemeFolderIconMap,
+    WorkingFile,
+    StashEntry,
+} from "../types";
 import { buildWebviewShellHtml } from "./webviewHtml";
 import { getErrorMessage } from "../utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "../utils/fileOps";
@@ -26,6 +31,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private lastFileCount = 0;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
+    private repository: RepositoryContextInfo | null = null;
 
     private readonly _onDidChangeFileCount = new vscode.EventEmitter<number>();
     readonly onDidChangeFileCount = this._onDidChangeFileCount.event;
@@ -33,6 +39,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly gitOps: GitOps,
+        private readonly getRepoRootUri: () => vscode.Uri | undefined = () =>
+            vscode.workspace.workspaceFolders?.[0]?.uri,
     ) {
         this.iconTheme = new IconThemeService(this.extensionUri);
     }
@@ -71,6 +79,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         });
 
         webviewView.webview.html = this.getHtml(webviewView.webview);
+        this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.updateViewCount(this.lastFileCount);
         this.refreshDataWithErrorHandling();
     }
@@ -79,7 +88,32 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         await this.refreshData();
     }
 
+    setRepositoryContext(repository: RepositoryContextInfo | null): void {
+        this.repository = repository;
+        this.postToWebview({ type: "setRepositoryContext", repository });
+        if (!repository) {
+            this.files = [];
+            this.stashes = [];
+            this.selectedShelfIndex = null;
+            this.shelfFiles = [];
+            this.folderIconsByName = {};
+            this._onDidChangeFileCount.fire(0);
+            this.updateViewCount(0);
+            this.postToWebview({
+                type: "update",
+                files: [],
+                stashes: [],
+                shelfFiles: [],
+                selectedShelfIndex: null,
+            });
+        }
+    }
+
     private async refreshData(): Promise<void> {
+        if (!this.repository) {
+            this.setRepositoryContext(null);
+            return;
+        }
         this.postToWebview({ type: "refreshing", active: true });
         void Promise.resolve(
             vscode.commands.executeCommand("setContext", "intelligit.commitPanel.refreshing", true),
@@ -296,8 +330,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
             case "showDiff": {
                 const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
-                const workspaceRoot = this.getWorkspaceRoot();
-                const uri = vscode.Uri.joinPath(workspaceRoot, filePath);
+                const repoRoot = this.getRepositoryRoot();
+                const uri = vscode.Uri.joinPath(repoRoot, filePath);
                 await vscode.commands.executeCommand("git.openChange", uri);
                 break;
             }
@@ -382,8 +416,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
             case "openFile": {
                 const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
-                const workspaceRoot = this.getWorkspaceRoot();
-                const uri = vscode.Uri.joinPath(workspaceRoot, filePath);
+                const repoRoot = this.getRepositoryRoot();
+                const uri = vscode.Uri.joinPath(repoRoot, filePath);
                 await vscode.window.showTextDocument(uri);
                 break;
             }
@@ -396,8 +430,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     "Delete",
                 );
                 if (confirm !== "Delete") return;
-                const workspaceRoot = this.getWorkspaceRoot();
-                const deleted = await deleteFileWithFallback(this.gitOps, workspaceRoot, filePath);
+                const repoRoot = this.getRepositoryRoot();
+                const deleted = await deleteFileWithFallback(this.gitOps, repoRoot, filePath);
                 if (!deleted) return;
                 vscode.window.showInformationMessage(`Deleted ${filePath}`);
                 await this.refreshData();
@@ -427,12 +461,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage(msg);
     }
 
-    private getWorkspaceRoot(): vscode.Uri {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
-        if (!workspaceRoot) {
-            throw new Error("No workspace folder is open.");
+    private getRepositoryRoot(): vscode.Uri {
+        const repoRoot = this.getRepoRootUri();
+        if (!repoRoot) {
+            throw new Error("No IntelliGit repository is selected.");
         }
-        return workspaceRoot;
+        return repoRoot;
     }
 
     private getHtml(webview: vscode.Webview): string {

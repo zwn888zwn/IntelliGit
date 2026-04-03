@@ -11,6 +11,7 @@ import type {
     Branch,
     Commit,
     CommitDetail,
+    RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
     ThemeTreeIcon,
@@ -96,6 +97,7 @@ function useColumnDrag(
 function App(): React.ReactElement {
     const [commits, setCommits] = useState<Commit[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
+    const [repository, setRepository] = useState<RepositoryContextInfo | null>(null);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
     const [revealHash, setRevealHash] = useState<string | null>(null);
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
@@ -179,6 +181,9 @@ function App(): React.ReactElement {
                     setBranchFolderExpandedIcon(data.folderExpandedIcon);
                     setBranchFolderIconsByName(data.folderIconsByName);
                     if (data.iconFonts) setIconFonts(data.iconFonts);
+                    break;
+                case "setRepositoryContext":
+                    setRepository(data.repository);
                     break;
                 case "setSelectedBranch":
                     setSelectedBranch(data.branch ?? null);
@@ -302,6 +307,7 @@ function App(): React.ReactElement {
                     <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
                         <CommitList
                             commits={commits}
+                            repository={repository}
                             selectedHash={selectedHash}
                             revealHash={revealHash}
                             filterText={filterText}

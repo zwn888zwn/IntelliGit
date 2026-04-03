@@ -19,7 +19,7 @@ const showInputBox = vi.fn(async (opts?: { prompt?: string; value?: string }) =>
     return "input";
 });
 const showSaveDialog = vi.fn(async () => ({ fsPath: "/tmp/patch.diff", path: "/tmp/patch.diff" }));
-const showQuickPick = vi.fn(async (items: Array<{ parentNumber: number }>) => items[0]);
+const showQuickPick = vi.fn(async (items: Array<Record<string, unknown>>) => items[0]);
 const showTextDocument = vi.fn(async () => undefined);
 const openTextDocument = vi.fn(async (arg: unknown) => arg);
 const writeFile = vi.fn(async () => undefined);
@@ -49,12 +49,21 @@ const saveDocListeners: Array<() => void> = [];
 const createFileListeners: Array<() => void> = [];
 const deleteFileListeners: Array<() => void> = [];
 const renameFileListeners: Array<() => void> = [];
+const activeEditorListeners: Array<(editor: unknown) => void> = [];
+const workspaceFolderListeners: Array<() => void> = [];
 type FsWatchCallback = (...args: unknown[]) => void;
 const fsWatchCallbacks: FsWatchCallback[] = [];
 
 let workspaceFolders: Array<{ uri: { fsPath: string; path: string } }> | undefined = [
     { uri: { fsPath: "/repo", path: "/repo" } },
 ];
+let activeTextEditor:
+    | {
+          document: {
+              uri: { fsPath: string; path: string; scheme: string };
+          };
+      }
+    | undefined = undefined;
 
 class MockDisposable {
     constructor(private readonly fn: () => void) {}
@@ -164,6 +173,24 @@ const gitOpsState = {
     push: vi.fn(async () => ""),
 };
 
+const repositoryEntries = [
+    {
+        root: "/repo-a",
+        uri: { fsPath: "/repo-a", path: "/repo-a" },
+        info: { name: "repo-a", root: "/repo-a", relativePath: "repo-a" },
+        executor: { run: executorRun },
+        gitOps: gitOpsState,
+    },
+    {
+        root: "/repo-b",
+        uri: { fsPath: "/repo-b", path: "/repo-b" },
+        info: { name: "repo-b", root: "/repo-b", relativePath: "repo-b" },
+        executor: { run: executorRun },
+        gitOps: gitOpsState,
+    },
+] as const;
+let currentRepositoryRoot = repositoryEntries[0].root;
+
 const deleteFileWithFallback = vi.fn(async () => true);
 type MockExtensionContext = {
     extensionUri: { fsPath: string; path: string };
@@ -198,6 +225,7 @@ class MockCommitGraphViewProvider {
     onCommitAction = this.commitActionEmitter.event;
     onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
     setBranches = vi.fn();
+    setRepositoryContext = vi.fn();
     refresh = vi.fn(async () => undefined);
     filterByBranch = vi.fn(async () => undefined);
     revealCommit = vi.fn(async () => undefined);
@@ -242,6 +270,7 @@ class MockCommitPanelViewProvider {
         latestCommitPanelProvider = this;
     }
     onDidChangeFileCount = this.fileCountEmitter.event;
+    setRepositoryContext = vi.fn();
     refresh = vi.fn(async () => undefined);
     dispose = vi.fn();
     emitFileCount(count: number): void {
@@ -328,6 +357,13 @@ vi.mock("vscode", () => ({
         }),
     },
     window: {
+        get activeTextEditor() {
+            return activeTextEditor;
+        },
+        onDidChangeActiveTextEditor: vi.fn((listener: (editor: unknown) => void) => {
+            activeEditorListeners.push(listener);
+            return { dispose: vi.fn() };
+        }),
         registerWebviewViewProvider,
         createTreeView: vi.fn(() => ({
             badge: undefined,
@@ -373,6 +409,10 @@ vi.mock("vscode", () => ({
         get workspaceFolders() {
             return workspaceFolders;
         },
+        onDidChangeWorkspaceFolders: vi.fn((listener: () => void) => {
+            workspaceFolderListeners.push(listener);
+            return { dispose: vi.fn() };
+        }),
         fs: { writeFile },
         openTextDocument,
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
@@ -455,6 +495,82 @@ vi.mock("../../src/services/EditorBlameController", () => ({
     EditorBlameController: MockEditorBlameController,
 }));
 
+vi.mock("../../src/services/RepositoryContextService", () => ({
+    RepositoryContextService: class {
+        async initialize() {}
+        async refreshRepositories() {
+            return repositoryEntries.find((entry) => entry.root === currentRepositoryRoot) ?? null;
+        }
+        async followActiveEditor(
+            editor:
+                | {
+                      document?: { uri?: { fsPath?: string } };
+                  }
+                | undefined,
+        ) {
+            const fsPath = editor?.document?.uri?.fsPath;
+            if (!fsPath) return false;
+            const next =
+                repositoryEntries.find((entry) => fsPath.startsWith(`${entry.root}/`)) ?? null;
+            if (!next || next.root === currentRepositoryRoot) return false;
+            currentRepositoryRoot = next.root;
+            return true;
+        }
+        switchRepository(root: string) {
+            if (!repositoryEntries.some((entry) => entry.root === root)) return false;
+            if (root === currentRepositoryRoot) return false;
+            currentRepositoryRoot = root;
+            return true;
+        }
+        listRepositories() {
+            return [...repositoryEntries];
+        }
+        getCurrentRepository() {
+            return repositoryEntries.find((entry) => entry.root === currentRepositoryRoot) ?? null;
+        }
+        getCurrentRepositoryInfo() {
+            return (
+                repositoryEntries.find((entry) => entry.root === currentRepositoryRoot)?.info ??
+                null
+            );
+        }
+        getRepositoryForUri(uri?: { fsPath?: string }) {
+            const fsPath = uri?.fsPath;
+            if (!fsPath) return null;
+            return (
+                repositoryEntries.find((entry) => fsPath.startsWith(`${entry.root}/`)) ?? null
+            );
+        }
+        requireCurrentRepository() {
+            const repository = repositoryEntries.find(
+                (entry) => entry.root === currentRepositoryRoot,
+            );
+            if (!repository) throw new Error("No git repository found in the current workspace.");
+            return repository;
+        }
+    },
+    createRepositoryScopedExecutor: vi.fn(() => ({ run: executorRun })),
+    createRepositoryScopedGitOps: vi.fn(() => ({
+        isRepository: gitOpsState.isRepository,
+        getBranches: gitOpsState.getBranches,
+        getCommitDetail: gitOpsState.getCommitDetail,
+        getUnpushedCommitHashes: gitOpsState.getUnpushedCommitHashes,
+        getFileContentAtRef: gitOpsState.getFileContentAtRef,
+        rollbackFiles: gitOpsState.rollbackFiles,
+        shelveSave: gitOpsState.shelveSave,
+        getFileHistory: gitOpsState.getFileHistory,
+        getStatus: gitOpsState.getStatus,
+        listShelved: gitOpsState.listShelved,
+        getShelvedFiles: gitOpsState.getShelvedFiles,
+        getConflictedFiles: gitOpsState.getConflictedFiles,
+        getConflictFilesDetailed: gitOpsState.getConflictFilesDetailed,
+        acceptConflictSide: gitOpsState.acceptConflictSide,
+        getConflictFileVersions: gitOpsState.getConflictFileVersions,
+        stageFile: gitOpsState.stageFile,
+        push: gitOpsState.push,
+    })),
+}));
+
 vi.mock("../../src/utils/fileOps", async () => {
     const actual = await vi.importActual("../../src/utils/fileOps");
     return {
@@ -492,8 +608,12 @@ describe("extension integration", () => {
         createFileListeners.length = 0;
         deleteFileListeners.length = 0;
         renameFileListeners.length = 0;
+        activeEditorListeners.length = 0;
+        workspaceFolderListeners.length = 0;
         fsWatchCallbacks.length = 0;
         workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
+        activeTextEditor = undefined;
+        currentRepositoryRoot = repositoryEntries[0].root;
         latestCommitGraphProvider = undefined;
         latestCommitPanelProvider = undefined;
         latestBlameController = undefined;
@@ -588,9 +708,7 @@ describe("extension integration", () => {
             fsPath: "/tmp/patch.diff",
             path: "/tmp/patch.diff",
         } as unknown as { fsPath: string; path: string });
-        showQuickPick.mockImplementation(
-            async (items: Array<{ parentNumber: number }>) => items[0],
-        );
+        showQuickPick.mockImplementation(async (items: Array<Record<string, unknown>>) => items[0]);
     });
 
     it("activates and executes branch/file command handlers", async () => {
@@ -1057,7 +1175,7 @@ describe("extension integration", () => {
         workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
         gitOpsState.isRepository.mockResolvedValueOnce(false);
         await activate(context);
-        expect(registeredCommands.size).toBe(0);
+        expect(registeredCommands.size).toBeGreaterThan(0);
 
         vi.useFakeTimers();
         try {

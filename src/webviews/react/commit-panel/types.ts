@@ -2,6 +2,7 @@
 // and the extension host. Defines all inbound and outbound message shapes.
 
 import type {
+    RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
     ThemeTreeIcon,
@@ -50,6 +51,7 @@ export type InboundMessage =
       }
     | { type: "lastCommitMessage"; message: string }
     | { type: "committed" }
+    | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "refreshing"; active: boolean }
     | { type: "error"; message: string };
 
@@ -63,6 +65,7 @@ export interface CommitPanelState {
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
     iconFonts: ThemeIconFont[];
+    repository: RepositoryContextInfo | null;
     commitMessage: string;
     isAmend: boolean;
     isRefreshing: boolean;
@@ -84,6 +87,7 @@ export type CommitPanelAction =
       }
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }
     | { type: "COMMITTED" }
+    | { type: "SET_REPOSITORY_CONTEXT"; repository: RepositoryContextInfo | null }
     | { type: "SET_REFRESHING"; active: boolean }
     | { type: "SET_ERROR"; message: string }
     | { type: "SET_COMMIT_MESSAGE"; message: string }

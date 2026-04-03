@@ -26,11 +26,19 @@ export class RefreshService implements vscode.Disposable {
     private fullTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly fsWatchers: fs.FSWatcher[] = [];
     private readonly disposables: vscode.Disposable[] = [];
+    private readonly gitWatcherDisposables: vscode.Disposable[] = [];
 
     constructor(
         private readonly deps: RefreshServiceDeps,
-        private readonly repoRoot: string,
+        private repoRoot: string | null,
     ) {}
+
+    updateRepositoryRoot(repoRoot: string | null): void {
+        if (this.repoRoot === repoRoot) return;
+        this.repoRoot = repoRoot;
+        this.disposeGitDirWatchers();
+        this.registerGitDirWatchers();
+    }
 
     async refreshMergeConflicts(): Promise<void> {
         const count = await this.deps.mergeConflicts.refresh();
@@ -91,6 +99,9 @@ export class RefreshService implements vscode.Disposable {
     }
 
     private resolveGitDir(): string {
+        if (!this.repoRoot) {
+            return "";
+        }
         const dotGit = path.join(this.repoRoot, ".git");
         try {
             const stat = fs.statSync(dotGit);
@@ -109,6 +120,7 @@ export class RefreshService implements vscode.Disposable {
     }
 
     private registerGitDirWatchers(): void {
+        if (!this.repoRoot) return;
         const gitDir = this.resolveGitDir();
         const gitStateFiles = new Set([
             "HEAD",
@@ -147,7 +159,7 @@ export class RefreshService implements vscode.Disposable {
                 const pattern = new vscode.RelativePattern(vscode.Uri.file(refsPath), "**/*");
                 const watcher = vscode.workspace.createFileSystemWatcher(pattern);
                 const handler = () => this.debouncedFullRefresh();
-                this.disposables.push(
+                this.gitWatcherDisposables.push(
                     watcher.onDidChange(handler),
                     watcher.onDidCreate(handler),
                     watcher.onDidDelete(handler),
@@ -167,11 +179,23 @@ export class RefreshService implements vscode.Disposable {
     dispose(): void {
         if (this.lightTimer) clearTimeout(this.lightTimer);
         if (this.fullTimer) clearTimeout(this.fullTimer);
+        this.disposeGitDirWatchers();
         for (const watcher of this.fsWatchers) {
             watcher.close();
         }
         for (const disposable of this.disposables) {
             disposable.dispose();
         }
+    }
+
+    private disposeGitDirWatchers(): void {
+        for (const watcher of this.fsWatchers) {
+            watcher.close();
+        }
+        this.fsWatchers.length = 0;
+        for (const disposable of this.gitWatcherDisposables) {
+            disposable.dispose();
+        }
+        this.gitWatcherDisposables.length = 0;
     }
 }

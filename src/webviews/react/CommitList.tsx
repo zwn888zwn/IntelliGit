@@ -4,7 +4,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LuSearch, LuX } from "react-icons/lu";
-import type { Commit } from "../../types";
+import type { Commit, RepositoryContextInfo } from "../../types";
 import { computeGraph, LANE_WIDTH, ROW_HEIGHT } from "./graph";
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getCommitMenuItems } from "./commit-list/commitMenu";
@@ -33,6 +33,7 @@ const MAX_GRAPH_WIDTH = 200;
 
 interface Props {
     commits: Commit[];
+    repository: RepositoryContextInfo | null;
     selectedHash: string | null;
     revealHash: string | null;
     filterText: string;
@@ -47,6 +48,7 @@ interface Props {
 
 export function CommitList({
     commits,
+    repository,
     selectedHash,
     revealHash,
     filterText,
@@ -213,6 +215,16 @@ export function CommitList({
                 </div>
                 <span
                     style={BRANCH_SCOPE_STYLE}
+                    title={
+                        repository
+                            ? `Repository: ${repository.relativePath ?? repository.root}`
+                            : "No repository selected"
+                    }
+                >
+                    Repo: {repository?.relativePath ?? repository?.name ?? "No repository"}
+                </span>
+                <span
+                    style={BRANCH_SCOPE_STYLE}
                     title={selectedBranch ? `Branch: ${selectedBranch}` : "Branch: All branches"}
                 >
                     Branch: {selectedBranch ?? "All branches"}
@@ -235,6 +247,20 @@ export function CommitList({
             >
                 <div style={contentContainerStyle(commits.length + (hasMore ? 1 : 0))}>
                     <canvas ref={canvasRef} style={CANVAS_STYLE} />
+
+                    {!repository && commits.length === 0 && (
+                        <div
+                            style={{
+                                ...LOADING_MORE_STYLE,
+                                position: "absolute",
+                                left: 0,
+                                right: 0,
+                                top: 0,
+                            }}
+                        >
+                            No git repository found in this workspace.
+                        </div>
+                    )}
 
                     <div
                         style={{

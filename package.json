@@ -38,7 +38,8 @@
     ],
     "activationEvents": [
         "workspaceContains:.git",
-        "onView:intelligit.commitGraph"
+        "onView:intelligit.commitGraph",
+        "onView:intelligit.commitPanel"
     ],
     "main": "./dist/extension.js",
     "contributes": {
@@ -101,6 +102,18 @@
                 "command": "intelligit.filterByBranch",
                 "title": "Filter by Branch",
                 "category": "IntelliGit"
+            },
+            {
+                "command": "intelligit.switchRepository",
+                "title": "Switch Repository",
+                "category": "IntelliGit",
+                "icon": "$(repo)"
+            },
+            {
+                "command": "intelligit.refreshRepositories",
+                "title": "Refresh Repositories",
+                "category": "IntelliGit",
+                "icon": "$(refresh)"
             },
             {
                 "command": "intelligit.checkout",

@@ -4,8 +4,6 @@
 
 import * as path from "path";
 import * as vscode from "vscode";
-import { GitExecutor } from "./git/executor";
-import { GitOps } from "./git/operations";
 import { CommitGraphViewProvider } from "./views/CommitGraphViewProvider";
 import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
 import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
@@ -30,25 +28,25 @@ import {
     applySelectedCommitFileChange,
     openCommitFileDiff,
     registerDiffContentProvider,
+    getEditorContextFileUri,
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
 import { runWithNotificationProgress } from "./utils/notifications";
+import {
+    RepositoryContextService,
+    createRepositoryScopedExecutor,
+    createRepositoryScopedGitOps,
+} from "./services/RepositoryContextService";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) return;
 
-    const repoRoot = workspaceFolder.uri.fsPath;
-    const executor = new GitExecutor(repoRoot);
-    const gitOps = new GitOps(executor);
+    const repositoryService = new RepositoryContextService(workspaceFolder.uri);
+    await repositoryService.initialize();
+    const executor = createRepositoryScopedExecutor(repositoryService);
+    const gitOps = createRepositoryScopedGitOps(repositoryService);
     registerDiffContentProvider(context.subscriptions);
-
-    try {
-        const isRepo = await gitOps.isRepository();
-        if (!isRepo) return;
-    } catch {
-        return;
-    }
 
     // Cached branch list for webview context menu lookups
     let currentBranches: Branch[] = [];
@@ -58,11 +56,57 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const commitGraph = new CommitGraphViewProvider(context.extensionUri, gitOps);
     const commitInfo = new CommitInfoViewProvider(context.extensionUri);
-    const commitPanel = new CommitPanelViewProvider(context.extensionUri, gitOps);
-    const mergeConflicts = new MergeConflictsTreeProvider(gitOps, workspaceFolder.uri);
-    const blameController = new EditorBlameController(repoRoot, gitOps, async (hash) => {
-        await vscode.commands.executeCommand("intelligit.revealCommitInGraph", hash);
-    });
+    const commitPanel = new CommitPanelViewProvider(
+        context.extensionUri,
+        gitOps,
+        () => repositoryService.getCurrentRepository()?.uri,
+    );
+    const mergeConflicts = new MergeConflictsTreeProvider(
+        gitOps,
+        () => repositoryService.getCurrentRepository()?.uri,
+    );
+    const blameController = new EditorBlameController(
+        workspaceFolder.uri.fsPath,
+        gitOps,
+        async (hash) => {
+            await vscode.commands.executeCommand("intelligit.revealCommitInGraph", hash);
+        },
+        () => repositoryService.getCurrentRepository()?.root ?? null,
+        () => repositoryService.requireCurrentRepository().gitOps,
+    );
+
+    const getCurrentRepository = () => repositoryService.getCurrentRepository();
+    const requireCurrentRepository = () => repositoryService.requireCurrentRepository();
+    const resolveRepositoryForEditorContext = (ctx?: unknown) => {
+        const fileUri = getEditorContextFileUri(ctx);
+        return repositoryService.getRepositoryForUri(fileUri ?? undefined) ?? getCurrentRepository();
+    };
+
+    const applyCurrentRepositoryContext = async (): Promise<void> => {
+        const repository = getCurrentRepository();
+        const repositoryInfo = repository?.info ?? null;
+        commitGraph.setRepositoryContext(repositoryInfo);
+        commitPanel.setRepositoryContext(repositoryInfo);
+        mergeConflicts.setRepositoryRoot(repository?.uri);
+        refreshService.updateRepositoryRoot(repository?.root ?? null);
+
+        if (!repository) {
+            currentBranches = [];
+            commitGraph.setBranches([]);
+            await commitGraph.refresh();
+            await commitPanel.refresh();
+            await refreshService.refreshMergeConflicts();
+            clearSelection();
+            return;
+        }
+
+        currentBranches = await repository.gitOps.getBranches();
+        commitGraph.setBranches(currentBranches);
+        await commitGraph.refresh();
+        await commitPanel.refresh();
+        await refreshService.refreshMergeConflicts();
+        clearSelection();
+    };
 
     // --- Register views ---
 
@@ -99,13 +143,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 currentBranches = branches;
             },
         },
-        repoRoot,
+        getCurrentRepository()?.root ?? null,
     );
 
     // --- Merge conflict helpers ---
 
     const openBuiltInMergeEditorForFile = async (filePath: string): Promise<void> => {
-        const fileUri = vscode.Uri.file(path.join(repoRoot, assertRepoRelativePath(filePath)));
+        const fileUri = vscode.Uri.file(
+            path.join(requireCurrentRepository().root, assertRepoRelativePath(filePath)),
+        );
         try {
             await vscode.commands.executeCommand("git.openMergeEditor", fileUri);
         } catch (error) {
@@ -123,7 +169,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (preferExternal && getJetBrainsMergeToolPath()) {
             const opened = await openJetBrainsMergeToolForFile(
                 filePath,
-                repoRoot,
+                requireCurrentRepository().root,
                 gitOps,
                 () => refreshService.refreshConflictUi(),
                 openBuiltInMergeEditorForFile,
@@ -200,7 +246,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     hash,
                     executor,
                     gitOps,
-                    repoRoot,
+                    repoRoot: requireCurrentRepository().root,
                     currentBranches,
                     refreshAll: () => refreshService.refreshAll(),
                 });
@@ -220,7 +266,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await openCommitFileDiff(
                 params.commitHash,
                 params.filePath,
-                repoRoot,
+                requireCurrentRepository().root,
                 gitOps,
                 executor,
             );
@@ -246,12 +292,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         vscode.commands.registerCommand("intelligit.refresh", async () => {
-            currentBranches = await gitOps.getBranches();
-            commitGraph.setBranches(currentBranches);
-            await commitGraph.refresh();
-            await commitPanel.refresh();
-            await refreshService.refreshMergeConflicts();
-            await clearSelection();
+            await repositoryService.refreshRepositories();
+            await applyCurrentRepositoryContext();
         }),
 
         vscode.commands.registerCommand(
@@ -270,6 +312,31 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (typeof hash !== "string" || !hash.trim()) return;
             await vscode.commands.executeCommand("intelligit.commitGraph.focus");
             await commitGraph.revealCommit(hash.trim());
+        }),
+
+        vscode.commands.registerCommand("intelligit.switchRepository", async () => {
+            const repositories = repositoryService.listRepositories();
+            if (repositories.length === 0) {
+                vscode.window.showWarningMessage("No git repositories found in the current workspace.");
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(
+                repositories.map((repository) => ({
+                    label: repository.info.name,
+                    description: repository.info.relativePath ?? repository.info.root,
+                    root: repository.root,
+                })),
+                { placeHolder: "Select IntelliGit repository" },
+            );
+            if (!picked) return;
+            if (repositoryService.switchRepository(picked.root)) {
+                await applyCurrentRepositoryContext();
+            }
+        }),
+
+        vscode.commands.registerCommand("intelligit.refreshRepositories", async () => {
+            await repositoryService.refreshRepositories();
+            await applyCurrentRepositoryContext();
         }),
 
         vscode.commands.registerCommand("intelligit.annotateWithGitBlame", async () => {
@@ -304,10 +371,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await openMergeConflictForFile(filePath);
         }),
         vscode.commands.registerCommand("intelligit.compareWithRevision", async (ctx?: unknown) => {
-            await compareEditorFileWithRevision(ctx, repoRoot, gitOps);
+            const repository = resolveRepositoryForEditorContext(ctx);
+            if (!repository) {
+                vscode.window.showWarningMessage("No git repository found for the selected file.");
+                return;
+            }
+            await compareEditorFileWithRevision(ctx, repository.root, repository.gitOps);
         }),
         vscode.commands.registerCommand("intelligit.compareWithBranch", async (ctx?: unknown) => {
-            await compareEditorFileWithBranch(ctx, repoRoot, gitOps);
+            const repository = resolveRepositoryForEditorContext(ctx);
+            if (!repository) {
+                vscode.window.showWarningMessage("No git repository found for the selected file.");
+                return;
+            }
+            await compareEditorFileWithBranch(ctx, repository.root, repository.gitOps);
         }),
         vscode.commands.registerCommand("intelligit.openConflictSession", async () => {
             const conflicts = await gitOps.getConflictFilesDetailed();
@@ -327,7 +404,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 if (!filePath) return;
                 await openJetBrainsMergeToolForFile(
                     filePath,
-                    repoRoot,
+                    requireCurrentRepository().root,
                     gitOps,
                     () => refreshService.refreshConflictUi(),
                     openBuiltInMergeEditorForFile,
@@ -399,7 +476,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand(
             "intelligit.commitFileCompareWithLocal",
             async (ctx: unknown) => {
-                await compareCommitInfoFileWithLocal(ctx, repoRoot, gitOps);
+                await compareCommitInfoFileWithLocal(
+                    ctx,
+                    requireCurrentRepository().root,
+                    gitOps,
+                );
             },
         ),
         vscode.commands.registerCommand(
@@ -445,7 +526,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             async (ctx: { filePath?: string }) => {
                 if (!ctx?.filePath) return;
                 const uri = vscode.Uri.joinPath(
-                    workspaceFolder.uri,
+                    requireCurrentRepository().uri,
                     assertRepoRelativePath(ctx.filePath),
                 );
                 await vscode.window.showTextDocument(uri);
@@ -463,7 +544,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
                 if (confirm !== "Delete") return;
 
-                const deleted = await deleteFileWithFallback(gitOps, workspaceFolder.uri, safePath);
+                const deleted = await deleteFileWithFallback(
+                    gitOps,
+                    requireCurrentRepository().uri,
+                    safePath,
+                );
                 if (!deleted) return;
 
                 vscode.window.showInformationMessage(`Deleted ${safePath}`);
@@ -514,9 +599,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // --- Initial load ---
 
-    currentBranches = await gitOps.getBranches();
-    commitGraph.setBranches(currentBranches);
+    await applyCurrentRepositoryContext();
     await blameController.initialize();
+
+    context.subscriptions.push(
+        vscode.window.onDidChangeActiveTextEditor(async (editor) => {
+            if (await repositoryService.followActiveEditor(editor)) {
+                await applyCurrentRepositoryContext();
+            }
+        }),
+        vscode.workspace.onDidChangeWorkspaceFolders(async () => {
+            await repositoryService.refreshRepositories();
+            await applyCurrentRepositoryContext();
+        }),
+    );
 
     // Eagerly fetch file count so the activity bar badge shows immediately.
     commitPanel.refresh().catch((err) => {

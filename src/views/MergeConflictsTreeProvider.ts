@@ -33,8 +33,12 @@ export class MergeConflictsTreeProvider implements vscode.TreeDataProvider<Merge
 
     constructor(
         private readonly gitOps: GitOps,
-        private readonly workspaceRoot: vscode.Uri,
+        private readonly getRepositoryRootUri: () => vscode.Uri | undefined,
     ) {}
+
+    setRepositoryRoot(_repository: vscode.Uri | undefined): void {
+        this._onDidChangeTreeData.fire();
+    }
 
     async refresh(): Promise<number> {
         try {
@@ -54,8 +58,10 @@ export class MergeConflictsTreeProvider implements vscode.TreeDataProvider<Merge
 
     getChildren(element?: MergeConflictTreeItem): MergeConflictTreeItem[] {
         if (element) return [];
+        const repoRoot = this.getRepositoryRootUri();
+        if (!repoRoot) return [];
         return this.conflicts.map(
-            (filePath) => new MergeConflictTreeItem(filePath, this.workspaceRoot),
+            (filePath) => new MergeConflictTreeItem(filePath, repoRoot),
         );
     }
 

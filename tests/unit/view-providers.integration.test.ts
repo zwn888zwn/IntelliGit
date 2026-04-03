@@ -213,6 +213,11 @@ function makeGitOpsMock() {
     };
 }
 
+const testRepository = {
+    name: "repo",
+    root: "/repo",
+} as const;
+
 async function setupCommitPanelProvider() {
     const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
     const gitOps = makeGitOpsMock();
@@ -220,6 +225,7 @@ async function setupCommitPanelProvider() {
         { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
         gitOps as unknown as object,
     );
+    provider.setRepositoryContext(testRepository);
     const webview = createWebviewView();
     provider.resolveWebviewView(
         webview.view as unknown as object,
@@ -310,6 +316,7 @@ describe("view providers integration", () => {
             { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
             gitOps as unknown as object,
         );
+        provider.setRepositoryContext(testRepository);
         const webview = createWebviewView();
 
         provider.resolveWebviewView(
@@ -356,6 +363,7 @@ describe("view providers integration", () => {
             { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
             gitOps as unknown as object,
         );
+        provider.setRepositoryContext(testRepository);
         const webview = createWebviewView();
 
         provider.resolveWebviewView(
@@ -381,6 +389,7 @@ describe("view providers integration", () => {
             { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
             gitOps as unknown as object,
         );
+        provider.setRepositoryContext(testRepository);
         const webview = createWebviewView();
 
         const selected = vi.fn();
@@ -561,6 +570,7 @@ describe("view providers integration", () => {
             { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
             gitOps as unknown as object,
         );
+        provider.setRepositoryContext(testRepository);
         const webview = createWebviewView();
 
         // Register event listener BEFORE resolving the view (which triggers refreshData)
@@ -685,7 +695,7 @@ describe("view providers integration", () => {
         const { provider, webview } = await setupCommitPanelProvider();
         workspaceState.workspaceFolders = undefined;
         await webview.send({ type: "showDiff", path: "src/a.ts" });
-        expect(showErrorMessage).toHaveBeenCalledWith("No workspace folder is open.");
+        expect(showErrorMessage).toHaveBeenCalledWith("No IntelliGit repository is selected.");
 
         provider.dispose();
     });

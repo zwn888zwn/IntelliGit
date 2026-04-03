@@ -9,6 +9,12 @@ export interface Branch {
     behind: number;
 }
 
+export interface RepositoryContextInfo {
+    name: string;
+    root: string;
+    relativePath?: string;
+}
+
 export interface ThemeTreeIcon {
     uri?: string;
     glyph?: string;

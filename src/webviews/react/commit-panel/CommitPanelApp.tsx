@@ -90,6 +90,9 @@ function App(): React.ReactElement {
             <Box flex={1} overflow="hidden" display="flex" flexDirection="column">
                 <TabBar
                     stashCount={state.stashes.length}
+                    repositoryLabel={
+                        state.repository?.relativePath ?? state.repository?.name ?? "No repository"
+                    }
                     commitContent={
                         <CommitTab
                             files={state.files}

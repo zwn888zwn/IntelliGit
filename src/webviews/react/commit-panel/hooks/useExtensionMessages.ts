@@ -14,6 +14,7 @@ const initialState: CommitPanelState = {
     folderExpandedIcon: undefined,
     folderIconsByName: undefined,
     iconFonts: [],
+    repository: null,
     commitMessage: "",
     isAmend: false,
     isRefreshing: false,
@@ -41,6 +42,8 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
             return { ...state, commitMessage: action.message };
         case "COMMITTED":
             return { ...state, commitMessage: "", isAmend: false };
+        case "SET_REPOSITORY_CONTEXT":
+            return { ...state, repository: action.repository };
         case "SET_ERROR":
             return { ...state, error: action.message };
         case "SET_COMMIT_MESSAGE":
@@ -77,6 +80,9 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                     break;
                 case "committed":
                     dispatch({ type: "COMMITTED" });
+                    break;
+                case "setRepositoryContext":
+                    dispatch({ type: "SET_REPOSITORY_CONTEXT", repository: msg.repository });
                     break;
                 case "refreshing":
                     dispatch({ type: "SET_REFRESHING", active: msg.active });

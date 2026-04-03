@@ -32,6 +32,8 @@ export class EditorBlameController implements vscode.Disposable {
         private readonly repoRoot: string,
         private readonly gitOps: GitOps,
         private readonly revealCommitInGraph: (hash: string) => Promise<void>,
+        private readonly getRepoRoot: () => string | null = () => repoRoot,
+        private readonly getGitOps: () => GitOps = () => gitOps,
     ) {
         this.disposables.push(
             vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -70,7 +72,7 @@ export class EditorBlameController implements vscode.Disposable {
         this.disposeSession();
 
         try {
-            const blameLines = await this.gitOps.getBlame(filePath);
+            const blameLines = await this.getGitOps().getBlame(filePath);
             const decorationType = vscode.window.createTextEditorDecorationType({});
             const decorations = buildBlameDecorations(blameLines);
             this.session = {
@@ -155,7 +157,9 @@ export class EditorBlameController implements vscode.Disposable {
 
     private getRepoRelativeFilePath(editor: vscode.TextEditor | undefined): string | null {
         if (!editor || editor.document.uri.scheme !== "file") return null;
-        return getRepoRelativeFilePathFromUri(editor.document.uri, this.repoRoot);
+        const repoRoot = this.getRepoRoot();
+        if (!repoRoot) return null;
+        return getRepoRelativeFilePathFromUri(editor.document.uri, repoRoot);
     }
 
     private async updateContextKeys(editor: vscode.TextEditor | undefined): Promise<void> {

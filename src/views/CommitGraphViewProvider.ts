@@ -4,7 +4,13 @@
 
 import * as vscode from "vscode";
 import { GitOps } from "../git/operations";
-import type { Branch, Commit, CommitDetail, ThemeFolderIconMap } from "../types";
+import type {
+    Branch,
+    Commit,
+    CommitDetail,
+    RepositoryContextInfo,
+    ThemeFolderIconMap,
+} from "../types";
 import type {
     BranchAction,
     CommitAction,
@@ -28,6 +34,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private pendingRevealHash: string | null = null;
     private requestSeq = 0;
     private readonly PAGE_SIZE = 500;
+    private repository: RepositoryContextInfo | null = null;
 
     private branches: Branch[] = [];
     private selectedCommitDetail: CommitDetail | null = null;
@@ -164,6 +171,28 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    setRepositoryContext(repository: RepositoryContextInfo | null): void {
+        this.repository = repository;
+        this.postToWebview({ type: "setRepositoryContext", repository });
+        if (!repository) {
+            this.currentBranch = null;
+            this.filterText = "";
+            this.offset = 0;
+            this.loadingMore = false;
+            this.loadedCommits = [];
+            this.postToWebview({ type: "setSelectedBranch", branch: null });
+            this.postToWebview({ type: "setFilterText", text: "" });
+            this.postToWebview({
+                type: "loadCommits",
+                commits: [],
+                hasMore: false,
+                append: false,
+                unpushedHashes: [],
+            });
+            this.postToWebview({ type: "clearCommitDetail" });
+        }
+    }
+
     async filterByBranch(branch: string | null): Promise<void> {
         this.currentBranch = branch;
         this.filterText = "";
@@ -200,6 +229,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     async revealCommit(hash: string): Promise<void> {
         this.pendingRevealHash = hash;
         if (!this.webviewReady) return;
+        if (!this.repository) return;
 
         const requestId = ++this.requestSeq;
         this.loadingMore = false;
@@ -260,6 +290,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private async sendBranches(): Promise<void> {
         this.branchFolderIconsByName = await this.iconTheme.getFolderIconsByBranches(this.branches);
         const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
+        this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.postToWebview({
             type: "setBranches",
             branches: this.branches,
@@ -274,6 +305,18 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         const requestId = ++this.requestSeq;
         this.offset = 0;
         this.loadingMore = false;
+
+        if (!this.repository) {
+            this.loadedCommits = [];
+            this.postToWebview({
+                type: "loadCommits",
+                commits: [],
+                hasMore: false,
+                append: false,
+                unpushedHashes: [],
+            });
+            return;
+        }
 
         if (this.currentBranch && !this.branches.some((b) => b.name === this.currentBranch)) {
             this.currentBranch = null;
@@ -309,7 +352,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async loadMore(): Promise<void> {
-        if (this.loadingMore) return;
+        if (!this.repository || this.loadingMore) return;
         this.loadingMore = true;
         const requestId = ++this.requestSeq;
         try {

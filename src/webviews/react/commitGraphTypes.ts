@@ -5,6 +5,7 @@ import type {
     Branch,
     Commit,
     CommitDetail,
+    RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
     ThemeTreeIcon,
@@ -77,6 +78,7 @@ export type CommitGraphInbound =
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
       }
+    | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "setSelectedBranch"; branch: string | null }
     | { type: "setFilterText"; text: string }
     | {
