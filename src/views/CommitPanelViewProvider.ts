@@ -92,6 +92,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         this.repository = repository;
         this.postToWebview({ type: "setRepositoryContext", repository });
         if (!repository) {
+            void Promise.resolve(
+                vscode.commands.executeCommand("setContext", "intelligit.commitPanel.refreshing", false),
+            ).catch(() => {});
             this.files = [];
             this.stashes = [];
             this.selectedShelfIndex = null;

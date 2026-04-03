@@ -146,7 +146,7 @@ function App(): React.ReactElement {
                 justifyContent="center"
             >
                 <Box color="var(--vscode-descriptionForeground)" fontSize="13px" fontStyle="italic">
-                    Coming...
+                    {state.repository ? "Coming..." : "No git repository found in this workspace."}
                 </Box>
             </Box>
         </Box>
