@@ -9,6 +9,7 @@ import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
 import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
 import { MergeConflictSessionPanel } from "./views/MergeConflictSessionPanel";
 import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
+import { NoWorkspaceViewProvider } from "./views/NoWorkspaceViewProvider";
 import type { Branch } from "./types";
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
@@ -40,7 +41,21 @@ import {
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) return;
+    if (!workspaceFolder) {
+        const noWorkspaceMessage =
+            "Open a folder or workspace that contains a Git repository to use IntelliGit. Loose files opened without a workspace are not enough for repository-backed views.";
+        context.subscriptions.push(
+            vscode.window.registerWebviewViewProvider(
+                CommitGraphViewProvider.viewType,
+                new NoWorkspaceViewProvider("IntelliGit unavailable", noWorkspaceMessage),
+            ),
+            vscode.window.registerWebviewViewProvider(
+                CommitPanelViewProvider.viewType,
+                new NoWorkspaceViewProvider("IntelliGit unavailable", noWorkspaceMessage),
+            ),
+        );
+        return;
+    }
 
     const repositoryService = new RepositoryContextService(workspaceFolder.uri);
     await repositoryService.initialize();

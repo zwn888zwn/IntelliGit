@@ -1171,6 +1171,18 @@ describe("extension integration", () => {
         workspaceFolders = undefined;
         await activate(context);
         expect(registeredCommands.size).toBe(0);
+        expect(registerWebviewViewProvider).toHaveBeenCalledTimes(2);
+        expect(registerWebviewViewProvider).toHaveBeenNthCalledWith(
+            1,
+            "intelligit.commitGraph",
+            expect.anything(),
+        );
+        expect(registerWebviewViewProvider).toHaveBeenNthCalledWith(
+            2,
+            "intelligit.commitPanel",
+            expect.anything(),
+        );
+        registerWebviewViewProvider.mockClear();
 
         workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
         gitOpsState.isRepository.mockResolvedValueOnce(false);
