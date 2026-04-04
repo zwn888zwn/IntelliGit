@@ -214,4 +214,35 @@ describe("shared file tree helpers", () => {
         const tree = buildFileTree(files);
         expect(countFiles(tree)).toBe(3);
     });
+
+    it("compacts single-child directory chains without direct files", () => {
+        const compactTree = buildFileTree([
+            {
+                path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/App.java",
+                status: "M",
+                staged: false,
+                additions: 1,
+                deletions: 0,
+            },
+            {
+                path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/service/Order.java",
+                status: "M",
+                staged: false,
+                additions: 1,
+                deletions: 0,
+            },
+        ]);
+
+        expect(compactTree).toHaveLength(1);
+        expect(compactTree[0]).toMatchObject({
+            type: "folder",
+            name: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder",
+            path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder",
+        });
+        expect(collectDirPaths(compactTree)).toEqual([
+            "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder",
+            "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/service",
+        ]);
+        expect(countFiles(compactTree)).toBe(2);
+    });
 });

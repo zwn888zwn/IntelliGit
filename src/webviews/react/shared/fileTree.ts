@@ -59,17 +59,30 @@ export function buildFileTree<F extends { path: string }>(files: F[]): TreeEntry
 function convertBuild<F>(node: { dirs: Map<string, DirBuild<F>>; files: F[] }): TreeEntry<F>[] {
     const entries: TreeEntry<F>[] = [];
     for (const dir of node.dirs.values()) {
-        entries.push({
-            type: "folder",
-            name: dir.name,
-            path: dir.path,
-            children: convertBuild(dir),
-        });
+        entries.push(compactFolder(dir));
     }
     for (const file of node.files) {
         entries.push({ type: "file", file });
     }
     return entries;
+}
+
+function compactFolder<F>(dir: DirBuild<F>): TreeFolder<F> {
+    const names = [dir.name];
+    let current = dir;
+
+    while (current.files.length === 0 && current.dirs.size === 1) {
+        const [child] = current.dirs.values();
+        names.push(child.name);
+        current = child;
+    }
+
+    return {
+        type: "folder",
+        name: names.join("/"),
+        path: current.path,
+        children: convertBuild(current),
+    };
 }
 
 /** Collect all directory paths in a tree. */
