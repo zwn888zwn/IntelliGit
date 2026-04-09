@@ -23,6 +23,7 @@ const showQuickPick = vi.fn(async (items: Array<Record<string, unknown>>) => ite
 const showTextDocument = vi.fn(async () => undefined);
 const openTextDocument = vi.fn(async (arg: unknown) => arg);
 const writeFile = vi.fn(async () => undefined);
+const fsStat = vi.fn(async () => ({ type: 1, ctime: 0, mtime: 0, size: 1 }));
 const clipboardWriteText = vi.fn(async () => undefined);
 const createOutputChannel = vi.fn(() => ({ appendLine: vi.fn() }));
 const withProgress = vi.fn(
@@ -413,7 +414,7 @@ vi.mock("vscode", () => ({
             workspaceFolderListeners.push(listener);
             return { dispose: vi.fn() };
         }),
-        fs: { writeFile },
+        fs: { writeFile, stat: fsStat },
         openTextDocument,
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn(() => ({ dispose: vi.fn() })),
@@ -621,6 +622,7 @@ describe("extension integration", () => {
             uri: arg,
             languageId: "typescript",
         }));
+        fsStat.mockResolvedValue({ type: 1, ctime: 0, mtime: 0, size: 1 });
 
         executorRun.mockImplementation(defaultExecutorRunImpl);
         gitOpsState.isRepository.mockResolvedValue(true);
@@ -730,6 +732,7 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.annotateWithGitBlame")).toBe(true);
         expect(registeredCommands.has("intelligit.clearGitBlame")).toBe(true);
         expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
+        expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
 
         function getCommand(id: string): CommandHandler {
             const cmd = registeredCommands.get(id);
@@ -1122,6 +1125,70 @@ describe("extension integration", () => {
         expect(diffCall?.[1]).toMatchObject({ scheme: "intelligit-diff" });
         expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff-editable" });
         expect(diffCall?.[3]).toBe("src/feature.ts (parent1 ↔ a1b2c3d4)");
+    });
+
+    it("opens the working tree file from an IntelliGit commit diff editor", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+
+        activeTextEditor = {
+            document: {
+                uri: {
+                    scheme: "intelligit-diff-editable",
+                    path: "/src/feature.ts",
+                    fsPath: "/src/feature.ts",
+                    query: "ref=a1b2c3d4&id=1",
+                },
+            },
+        };
+
+        await registeredCommands.get("intelligit.openCommitDiffSource")?.();
+
+        expect(fsStat).toHaveBeenCalledWith({
+            fsPath: "/repo-a/src/feature.ts",
+            path: "/repo-a/src/feature.ts",
+        });
+        expect(showTextDocument).toHaveBeenCalledWith({
+            fsPath: "/repo-a/src/feature.ts",
+            path: "/repo-a/src/feature.ts",
+        });
+    });
+
+    it("updates commit diff toolbar context when the source file is missing", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+
+        fsStat.mockRejectedValueOnce(new Error("missing"));
+        activeTextEditor = {
+            document: {
+                uri: {
+                    scheme: "intelligit-diff-editable",
+                    path: "/src/deleted.ts",
+                    fsPath: "/src/deleted.ts",
+                    query: "ref=a1b2c3d4&id=2",
+                },
+            },
+        };
+
+        executeCommandFallback.mockClear();
+        await activeEditorListeners[0]?.(activeTextEditor);
+        await waitForAsync();
+
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.commitDiffSourceExists",
+            false,
+        );
     });
 
     it("prompts merge parent selection before opening commit file diff", async () => {

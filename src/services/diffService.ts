@@ -203,6 +203,49 @@ export function getEditorContextFileUri(ctx?: unknown): vscode.Uri | null {
     return activeUri?.scheme === "file" ? activeUri : null;
 }
 
+function isUriLike(value: unknown): value is vscode.Uri {
+    if (!value || typeof value !== "object") return false;
+    const maybe = value as { scheme?: unknown; path?: unknown };
+    return typeof maybe.scheme === "string" && typeof maybe.path === "string";
+}
+
+export function getCommitDiffEditorUri(ctx?: unknown): vscode.Uri | null {
+    if (isUriLike(ctx) && ctx.scheme === DIFF_EDITABLE_SCHEME) return ctx;
+    const activeUri = vscode.window.activeTextEditor?.document.uri;
+    return activeUri?.scheme === DIFF_EDITABLE_SCHEME ? activeUri : null;
+}
+
+export function getCommitDiffFilePathFromUri(uri: vscode.Uri): string | null {
+    if (uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
+    const rawPath = uri.path.replace(/^\/+/, "").trim();
+    if (!rawPath) return null;
+    return assertRepoRelativePath(rawPath);
+}
+
+export function getCommitDiffSourceFileUri(
+    uri: vscode.Uri,
+    repoRoot: vscode.Uri,
+): vscode.Uri | null {
+    const filePath = getCommitDiffFilePathFromUri(uri);
+    if (!filePath) return null;
+    return vscode.Uri.joinPath(repoRoot, filePath);
+}
+
+export async function commitDiffSourceFileExists(
+    uri: vscode.Uri | null | undefined,
+    repoRoot: vscode.Uri | null | undefined,
+): Promise<boolean> {
+    if (!uri || !repoRoot) return false;
+    const sourceUri = getCommitDiffSourceFileUri(uri, repoRoot);
+    if (!sourceUri) return false;
+    try {
+        await vscode.workspace.fs.stat(sourceUri);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export interface CommitInfoFileContext {
     filePath: string;
     commitHash: string;
@@ -296,6 +339,35 @@ export async function openCommitFileDiff(
     const shortCommit = commitHash.slice(0, 8);
     const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightDoc.uri, title);
+}
+
+export async function openCommitDiffSourceFile(
+    ctx: unknown,
+    repoRoot: vscode.Uri,
+): Promise<void> {
+    const diffUri = getCommitDiffEditorUri(ctx);
+    if (!diffUri) {
+        vscode.window.showErrorMessage(
+            "Open in Editor is only available for IntelliGit commit diff editors.",
+        );
+        return;
+    }
+
+    const sourceUri = getCommitDiffSourceFileUri(diffUri, repoRoot);
+    const filePath = sourceUri ? getCommitDiffFilePathFromUri(diffUri) : null;
+    if (!sourceUri || !filePath) {
+        vscode.window.showErrorMessage("Failed to resolve the source file for this commit diff.");
+        return;
+    }
+
+    try {
+        await vscode.workspace.fs.stat(sourceUri);
+    } catch {
+        vscode.window.showWarningMessage(`File no longer exists: ${filePath}`);
+        return;
+    }
+
+    await vscode.window.showTextDocument(sourceUri);
 }
 
 export async function applyPatchTextToRepo(

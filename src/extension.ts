@@ -27,7 +27,10 @@ import {
     compareEditorFileWithRevision,
     compareCommitInfoFileWithLocal,
     applySelectedCommitFileChange,
+    commitDiffSourceFileExists,
+    getCommitDiffEditorUri,
     openCommitFileDiff,
+    openCommitDiffSourceFile,
     registerDiffContentProvider,
     getEditorContextFileUri,
 } from "./services/diffService";
@@ -40,6 +43,7 @@ import {
 } from "./services/RepositoryContextService";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
         const noWorkspaceMessage =
@@ -96,6 +100,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const fileUri = getEditorContextFileUri(ctx);
         return repositoryService.getRepositoryForUri(fileUri ?? undefined) ?? getCurrentRepository();
     };
+    let commitDiffSourceContextSeq = 0;
+    const updateCommitDiffSourceContext = async (
+        editor: vscode.TextEditor | undefined = vscode.window.activeTextEditor,
+    ): Promise<void> => {
+        const requestId = ++commitDiffSourceContextSeq;
+        const repository = getCurrentRepository();
+        const enabled = await commitDiffSourceFileExists(
+            getCommitDiffEditorUri(editor?.document.uri),
+            repository?.uri,
+        );
+        if (requestId !== commitDiffSourceContextSeq) return;
+        await vscode.commands.executeCommand(
+            "setContext",
+            COMMIT_DIFF_SOURCE_EXISTS_CONTEXT,
+            enabled,
+        );
+    };
 
     const applyCurrentRepositoryContext = async (): Promise<void> => {
         const repository = getCurrentRepository();
@@ -112,6 +133,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await commitPanel.refresh();
             await refreshService.refreshMergeConflicts();
             clearSelection();
+            await updateCommitDiffSourceContext();
             return;
         }
 
@@ -121,6 +143,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         await commitPanel.refresh();
         await refreshService.refreshMergeConflicts();
         clearSelection();
+        await updateCommitDiffSourceContext();
     };
 
     // --- Register views ---
@@ -547,6 +570,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 await vscode.window.showTextDocument(uri);
             },
         ),
+        vscode.commands.registerCommand("intelligit.openCommitDiffSource", async (ctx: unknown) => {
+            const repository = getCurrentRepository();
+            if (!repository) return;
+            await openCommitDiffSourceFile(ctx, repository.uri);
+            await updateCommitDiffSourceContext();
+        }),
         vscode.commands.registerCommand(
             "intelligit.fileDelete",
             async (ctx: { filePath?: string }) => {
@@ -621,11 +650,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.window.onDidChangeActiveTextEditor(async (editor) => {
             if (await repositoryService.followActiveEditor(editor)) {
                 await applyCurrentRepositoryContext();
+                return;
             }
+            await updateCommitDiffSourceContext(editor);
         }),
         vscode.workspace.onDidChangeWorkspaceFolders(async () => {
             await repositoryService.refreshRepositories();
             await applyCurrentRepositoryContext();
+        }),
+        vscode.workspace.onDidCreateFiles(async () => {
+            await updateCommitDiffSourceContext();
+        }),
+        vscode.workspace.onDidDeleteFiles(async () => {
+            await updateCommitDiffSourceContext();
+        }),
+        vscode.workspace.onDidRenameFiles(async () => {
+            await updateCommitDiffSourceContext();
         }),
     );
 

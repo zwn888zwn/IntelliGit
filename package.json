@@ -171,6 +171,13 @@
                 "category": "IntelliGit"
             },
             {
+                "command": "intelligit.openCommitDiffSource",
+                "title": "Open in Editor",
+                "category": "IntelliGit",
+                "icon": "$(go-to-file)",
+                "enablement": "resourceScheme == intelligit-diff-editable && intelligit.commitDiffSourceExists"
+            },
+            {
                 "command": "intelligit.fileDelete",
                 "title": "Delete",
                 "category": "IntelliGit"
@@ -355,6 +362,13 @@
                     "command": "intelligit.openConflictSession",
                     "when": "view == intelligit.mergeConflicts",
                     "group": "navigation@2"
+                }
+            ],
+            "editor/title": [
+                {
+                    "command": "intelligit.openCommitDiffSource",
+                    "when": "resourceScheme == intelligit-diff-editable",
+                    "group": "navigation@8"
                 }
             ],
             "view/item/context": [
