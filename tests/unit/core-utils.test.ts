@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { GitOps } from "../../src/git/operations";
-import { computeGraph, MAX_RENDER_COLUMNS } from "../../src/webviews/react/graph";
+import { computeGraph } from "../../src/webviews/react/graph";
 import { formatDateTime } from "../../src/webviews/react/shared/date";
 import {
     FILE_TYPE_BADGES,
@@ -200,8 +200,9 @@ describe("core utilities", () => {
             { hash: "c2", parentHashes: ["c1"] },
             { hash: "c1", parentHashes: [] },
         ]);
-        expect(linear).toHaveLength(3);
-        expect(linear[0].column).toBe(0);
+        expect(linear.rows).toHaveLength(3);
+        expect(linear.rows[0].nodePosition).toBe(0);
+        expect(linear.arrowMarkers).toHaveLength(0);
 
         const merge = computeGraph([
             { hash: "m1", parentHashes: ["p1", "p2"] },
@@ -209,10 +210,12 @@ describe("core utilities", () => {
             { hash: "p2", parentHashes: ["base"] },
             { hash: "base", parentHashes: [] },
         ]);
-        expect(merge[0].connectionsDown.length).toBeGreaterThan(1);
+        expect(
+            merge.rows[0].elements.filter((element) => element.type === "edge"),
+        ).toHaveLength(2);
     });
 
-    it("graph compute compresses wide histories into overflow arrows", () => {
+    it("graph compute uses dynamic recommended width for wide histories", () => {
         const wide = computeGraph([
             { hash: "merge", parentHashes: ["a", "b", "c", "d", "e", "f", "g"] },
             { hash: "a", parentHashes: ["base"] },
@@ -225,10 +228,8 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(wide.some((row) => row.numColumns === MAX_RENDER_COLUMNS)).toBe(true);
-        expect(
-            wide.some((row) => row.overflowAbove.length > 0 || row.overflowBelow.length > 0),
-        ).toBe(true);
+        expect(wide.recommendedWidth).toBeGreaterThan(140);
+        expect(wide.rows[0].nodePosition).toBe(0);
     });
 
     it("graph compute avoids reusing colors for simultaneously active lanes", () => {
@@ -252,51 +253,39 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        const mergeRowColors = new Set(wide[0].connectionsDown.map((connection) => connection.color));
-        expect(mergeRowColors.size).toBe(wide[0].connectionsDown.length);
+        const mergeRowColors = new Set(
+            wide.rows[0].elements
+                .filter((element) => element.type === "edge")
+                .map((element) => element.color),
+        );
+        expect(mergeRowColors.size).toBe(
+            wide.rows[0].elements.filter((element) => element.type === "edge").length,
+        );
     });
 
-    it("graph compute marks jumps only for broken long lanes", () => {
+    it("graph compute marks arrows on both cropped long-edge endpoints", () => {
         const filtered = computeGraph([
-            { hash: "m", parentHashes: ["a1", "b1", "c1", "d1", "e1", "f1", "g1"] },
-            { hash: "a1", parentHashes: ["a2"] },
-            { hash: "a2", parentHashes: ["a3"] },
-            { hash: "a3", parentHashes: ["base"] },
-            { hash: "b1", parentHashes: ["b2"] },
-            { hash: "b2", parentHashes: ["b3"] },
-            { hash: "b3", parentHashes: ["base"] },
-            { hash: "c1", parentHashes: ["c2"] },
-            { hash: "c2", parentHashes: ["c3"] },
-            { hash: "c3", parentHashes: ["base"] },
-            { hash: "d1", parentHashes: ["d2"] },
-            { hash: "d2", parentHashes: ["d3"] },
-            { hash: "d3", parentHashes: ["base"] },
-            { hash: "e1", parentHashes: ["e2"] },
-            { hash: "e2", parentHashes: ["e3"] },
-            { hash: "e3", parentHashes: ["base"] },
-            { hash: "f1", parentHashes: ["f2"] },
-            { hash: "f2", parentHashes: ["f3"] },
-            { hash: "f3", parentHashes: ["base"] },
-            { hash: "g1", parentHashes: ["g2"] },
-            { hash: "g2", parentHashes: ["g3"] },
-            { hash: "g3", parentHashes: ["base"] },
+            { hash: "merge", parentHashes: ["main-01", "side-01"] },
+            ...Array.from({ length: 34 }, (_, index) => ({
+                hash: `main-${String(index + 1).padStart(2, "0")}`,
+                parentHashes:
+                    index === 33
+                        ? ["base"]
+                        : [`main-${String(index + 2).padStart(2, "0")}`],
+            })),
+            { hash: "side-01", parentHashes: ["base"] },
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(filtered[0].jumpBelow.length).toBeGreaterThan(0);
-        expect(filtered[16].jumpAbove.length).toBeGreaterThan(0);
-    });
-
-    it("graph compute skips short downward jumps", () => {
-        const filtered = computeGraph([
-            { hash: "keep-head", parentHashes: ["visible-base"] },
-            { hash: "gap-01", parentHashes: [] },
-            { hash: "gap-02", parentHashes: [] },
-            { hash: "gap-03", parentHashes: [] },
-            { hash: "visible-base", parentHashes: [] },
-        ]);
-
-        expect(filtered.every((row) => row.jumpBelow.length === 0)).toBe(true);
+        expect(filtered.arrowMarkers.some((arrow) => arrow.direction === "down")).toBe(true);
+        expect(filtered.arrowMarkers.some((arrow) => arrow.direction === "up")).toBe(true);
+        expect(
+            filtered.arrowMarkers.every((arrow) =>
+                arrow.direction === "down"
+                    ? arrow.targetRowIndex > arrow.rowIndex
+                    : arrow.targetRowIndex < arrow.rowIndex,
+            ),
+        ).toBe(true);
     });
 
     it("graph compute skips arrows for continuous long lanes", () => {
@@ -316,18 +305,36 @@ describe("core utilities", () => {
             { hash: "mid", parentHashes: [] },
         ]);
 
-        expect(filtered.every((row) => row.jumpAbove.length === 0)).toBe(true);
-        expect(filtered.every((row) => row.jumpBelow.length === 0)).toBe(true);
+        expect(filtered.arrowMarkers).toHaveLength(0);
     });
 
-    it("graph compute skips jump arrows when the target commit is not visible", () => {
+    it("graph compute skips arrows when the target commit is not visible", () => {
         const partial = computeGraph([
             { hash: "head", parentHashes: ["missing-parent"] },
             { hash: "next", parentHashes: [] },
         ]);
 
-        expect(partial.every((row) => row.jumpAbove.length === 0)).toBe(true);
-        expect(partial.every((row) => row.jumpBelow.length === 0)).toBe(true);
+        expect(partial.arrowMarkers).toHaveLength(0);
+    });
+
+    it("graph compute routes merge edges without fake jump markers", () => {
+        const routed = computeGraph([
+            { hash: "merge", parentHashes: ["a1", "b1", "c1", "d1", "e1", "f1", "g1"] },
+            { hash: "a1", parentHashes: ["base"] },
+            { hash: "b1", parentHashes: ["base"] },
+            { hash: "c1", parentHashes: ["base"] },
+            { hash: "d1", parentHashes: ["base"] },
+            { hash: "e1", parentHashes: ["base"] },
+            { hash: "f1", parentHashes: ["base"] },
+            { hash: "g1", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        const slantedEdges = routed.rows[0].elements.filter(
+            (element) =>
+                element.type === "edge" && element.fromPosition !== element.toPosition,
+        );
+        expect(slantedEdges.length).toBeGreaterThan(0);
     });
 
     it("date formatting falls back safely on invalid date", () => {

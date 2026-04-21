@@ -3,18 +3,18 @@ import {
     DOT_RADIUS,
     LANE_WIDTH,
     ROW_HEIGHT,
-    type GraphRow,
+    type EdgeAnchor,
+    type PrintElement,
+    type RenderRowModel,
 } from "../graph";
 
 const GRAPH_LEFT_PAD = 4;
 const OVERSCAN_ROWS = 8;
-const ARROW_HEAD_SIZE = 4;
-const ARROW_STEM = 8;
 
 interface Args {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
     viewportRef: React.RefObject<HTMLDivElement | null>;
-    rows: GraphRow[];
+    rows: RenderRowModel[];
     graphWidth: number;
     graphOffset: number;
 }
@@ -43,49 +43,49 @@ export function useCommitGraphCanvas({
         }
 
         let raf = 0;
-        const drawLaneArrow = (
+        const anchorY = (rowTop: number, anchor: EdgeAnchor): number => {
+            switch (anchor) {
+                case "top":
+                    return rowTop;
+                case "center":
+                    return rowTop + ROW_HEIGHT / 2;
+                case "bottom":
+                    return rowTop + ROW_HEIGHT;
+            }
+        };
+        const drawEdgeElement = (
             ctx2d: CanvasRenderingContext2D,
-            x: number,
-            cy: number,
-            color: string,
-            direction: "up" | "down",
-            offsetX = 0,
+            rowTop: number,
+            element: Extract<PrintElement, { type: "edge" }>,
         ) => {
-            const drawX = x + offsetX;
-            const tipY = direction === "up" ? cy - ARROW_STEM / 2 : cy + ARROW_STEM / 2;
-            const tailY = direction === "up" ? cy + ARROW_STEM / 2 : cy - ARROW_STEM / 2;
-            const headY = direction === "up" ? tipY + ARROW_HEAD_SIZE : tipY - ARROW_HEAD_SIZE;
-
             ctx2d.beginPath();
-            ctx2d.strokeStyle = color;
-            ctx2d.lineWidth = 2.25;
-            ctx2d.moveTo(drawX, tailY);
-            ctx2d.lineTo(drawX, tipY);
-            ctx2d.moveTo(drawX, tipY);
-            ctx2d.lineTo(drawX - ARROW_HEAD_SIZE, headY);
-            ctx2d.moveTo(drawX, tipY);
-            ctx2d.lineTo(drawX + ARROW_HEAD_SIZE, headY);
+            ctx2d.strokeStyle = element.color;
+            ctx2d.lineWidth = 2;
+            ctx2d.moveTo(
+                element.fromPosition * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD,
+                anchorY(rowTop, element.fromAnchor),
+            );
+            ctx2d.lineTo(
+                element.toPosition * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD,
+                anchorY(rowTop, element.toAnchor),
+            );
             ctx2d.stroke();
         };
-        const drawLaneTurn = (
+        const drawTerminalElement = (
             ctx2d: CanvasRenderingContext2D,
-            fromX: number,
-            fromY: number,
-            toX: number,
-            toY: number,
-            color: string,
+            rowTop: number,
+            element: Extract<PrintElement, { type: "terminal" }>,
         ) => {
+            const x = element.position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
             ctx2d.beginPath();
-            ctx2d.strokeStyle = color;
+            ctx2d.strokeStyle = element.color;
             ctx2d.lineWidth = 2;
-            ctx2d.moveTo(fromX, fromY);
-            if (fromX === toX) {
-                ctx2d.lineTo(toX, toY);
+            if (element.direction === "down") {
+                ctx2d.moveTo(x, rowTop);
+                ctx2d.lineTo(x, rowTop + ROW_HEIGHT / 2);
             } else {
-                const midY = fromY + (toY - fromY) * 0.48;
-                ctx2d.lineTo(fromX, midY);
-                ctx2d.lineTo(toX, toY - (toY - fromY) * 0.2);
-                ctx2d.lineTo(toX, toY);
+                ctx2d.moveTo(x, rowTop + ROW_HEIGHT / 2);
+                ctx2d.lineTo(x, rowTop + ROW_HEIGHT);
             }
             ctx2d.stroke();
         };
@@ -115,61 +115,23 @@ export function useCommitGraphCanvas({
             for (let i = drawStart; i < drawEnd; i++) {
                 const row = rows[i];
                 const y = (i - drawStart) * ROW_HEIGHT;
-                const cy = y + ROW_HEIGHT / 2;
-                const cx = row.column * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-
-                for (const lane of row.passThroughLanes) {
-                    const lx = lane.column * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                    ctx.beginPath();
-                    ctx.strokeStyle = lane.color;
-                    ctx.lineWidth = 2;
-                    ctx.moveTo(lx, y);
-                    ctx.lineTo(lx, y + ROW_HEIGHT);
-                    ctx.stroke();
-                }
-
-                if (i > 0) {
-                    const prev = rows[i - 1];
-                    const incomingConnection = prev.connectionsDown.find(
-                        (connection) => connection.rawToCol === row.rawColumn,
-                    );
-                    const incomingLane =
-                        prev.passThroughLanes.find((lane) => lane.rawColumn === row.rawColumn) ??
-                        (prev.rawColumn === row.rawColumn
-                            ? { column: prev.column, rawColumn: prev.rawColumn, color: prev.color }
-                            : undefined);
-                    const incomingColumn =
-                        incomingConnection?.toCol ?? incomingLane?.column;
-                    if (incomingColumn !== undefined) {
-                        const incomingX =
-                            incomingColumn * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                        drawLaneTurn(ctx, incomingX, y, cx, cy, row.color);
+                for (const element of row.elements) {
+                    if (element.type === "edge") {
+                        drawEdgeElement(ctx, y, element);
+                    } else if (element.type === "terminal") {
+                        drawTerminalElement(ctx, y, element);
                     }
                 }
 
-                for (const conn of row.connectionsDown) {
-                    const fx = conn.fromCol * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                    const tx = conn.toCol * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                    drawLaneTurn(ctx, fx, cy, tx, y + ROW_HEIGHT, conn.color);
+                const node = row.elements.find((element) => element.type === "node");
+                if (node) {
+                    const cx = node.position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
+                    const cy = y + ROW_HEIGHT / 2;
+                    ctx.beginPath();
+                    ctx.fillStyle = node.color;
+                    ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
+                    ctx.fill();
                 }
-
-                ctx.beginPath();
-                ctx.fillStyle = row.color;
-                ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
-                ctx.fill();
-
-                for (const lane of row.jumpBelow) {
-                    const arrowX = lane.column * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                    drawLaneArrow(
-                        ctx,
-                        arrowX,
-                        y + ROW_HEIGHT * 0.66,
-                        lane.color,
-                        "down",
-                        0,
-                    );
-                }
-
             }
         };
 

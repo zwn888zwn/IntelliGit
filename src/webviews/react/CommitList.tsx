@@ -29,7 +29,6 @@ import {
 } from "./commit-list/styles";
 
 const MIN_PREFIX_LENGTH = 7;
-const MAX_GRAPH_WIDTH = 200;
 const PRELOAD_ROWS = 80;
 
 interface Props {
@@ -81,38 +80,21 @@ export function CommitList({
     const [viewportHeight, setViewportHeight] = useState(0);
     const [loadMoreDebug, setLoadMoreDebug] = useState({ count: 0, lastVisibleEnd: 0 });
 
-    const graphRows = useMemo(() => computeGraph(commits), [commits]);
-    const maxCols = useMemo(
-        () => graphRows.reduce((max, row) => Math.max(max, row.numColumns), 1),
-        [graphRows],
-    );
-    const graphWidth = Math.min(maxCols * LANE_WIDTH + 12, MAX_GRAPH_WIDTH);
+    const graph = useMemo(() => computeGraph(commits), [commits]);
+    const graphRows = graph.rows;
+    const graphWidth = graph.recommendedWidth;
     const repoRailWidth = repoRailExpanded ? 168 : 16;
     const totalGraphWidth = repoRailWidth + graphWidth;
     const repositoryLookup = useMemo(
         () => new Map(repositories.map((item) => [item.root, item])),
         [repositories],
     );
-    const commitByHash = useMemo(() => new Map(commits.map((commit) => [commit.hash, commit])), [commits]);
-    const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
-    const visibleJumpMarkers = useMemo(
-        () =>
-            graphRows.flatMap((row, rowIndex) =>
-                [
-                    ...row.jumpAbove.map((jump) => ({
-                        rowIndex,
-                        direction: "up" as const,
-                        jump,
-                    })),
-                    ...row.jumpBelow.map((jump) => ({
-                        rowIndex,
-                        direction: "down" as const,
-                        jump,
-                    })),
-                ],
-            ),
-        [graphRows],
+    const commitByHash = useMemo(
+        () => new Map(commits.map((commit) => [commit.hash, commit])),
+        [commits],
     );
+    const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
+    const visibleArrowMarkers = graph.arrowMarkers;
 
     const handleJumpNavigate = useCallback(
         (targetHash: string, targetRowIndex: number) => {
@@ -429,7 +411,7 @@ export function CommitList({
                                         graphWidth={totalGraphWidth}
                                         isSelected={selectedHash === commit.hash}
                                         isUnpushed={isUnpushedCommit(commit.hash)}
-                                        laneColor={graphRows[idx]?.color}
+                                        laneColor={graphRows[idx]?.nodeColor}
                                         onSelect={onSelectCommit}
                                         onContextMenu={handleRowContextMenu}
                                     />
@@ -448,29 +430,33 @@ export function CommitList({
                                 pointerEvents: "none",
                             }}
                         >
-                            {visibleJumpMarkers
+                            {visibleArrowMarkers
                                 .filter(
-                                    ({ rowIndex }) =>
-                                        rowIndex >= visibleRange.start && rowIndex < visibleRange.end,
+                                    (arrow) =>
+                                        arrow.rowIndex >= visibleRange.start &&
+                                        arrow.rowIndex < visibleRange.end,
                                 )
-                                .map(({ rowIndex, direction, jump }) => {
-                                    const targetCommit = commitByHash.get(jump.targetHash);
+                                .map((arrow) => {
+                                    const targetCommit = commitByHash.get(arrow.targetHash);
                                     if (!targetCommit) return null;
                                     const buttonSize = 18;
                                     const left =
-                                        jump.column * LANE_WIDTH + LANE_WIDTH / 2 + 4 - buttonSize / 2;
+                                        arrow.position * LANE_WIDTH +
+                                        LANE_WIDTH / 2 +
+                                        4 -
+                                        buttonSize / 2;
                                     const top =
-                                        rowIndex * ROW_HEIGHT +
-                                        ROW_HEIGHT * (direction === "down" ? 0.66 : 0.34) -
+                                        arrow.rowIndex * ROW_HEIGHT +
+                                        ROW_HEIGHT * (arrow.direction === "down" ? 0.66 : 0.34) -
                                         buttonSize / 2;
                                     return (
                                         <button
-                                            key={`jump:${direction}:${rowIndex}:${jump.targetHash}:${jump.rawColumn}`}
+                                            key={`arrow:${arrow.direction}:${arrow.rowIndex}:${arrow.edgeId}`}
                                             type="button"
                                             title={`Jump to '${targetCommit.shortHash} ${targetCommit.message}'`}
                                             onMouseEnter={() =>
                                                 setJumpTooltip({
-                                                    targetHash: jump.targetHash,
+                                                    targetHash: arrow.targetHash,
                                                     left: repoRailWidth + left + buttonSize + 6,
                                                     top: top - 4,
                                                 })
@@ -479,7 +465,7 @@ export function CommitList({
                                             onClick={(event) => {
                                                 event.preventDefault();
                                                 event.stopPropagation();
-                                                handleJumpNavigate(jump.targetHash, jump.targetRowIndex);
+                                                handleJumpNavigate(arrow.targetHash, arrow.targetRowIndex);
                                             }}
                                             style={{
                                                 position: "absolute",
@@ -490,7 +476,7 @@ export function CommitList({
                                                 border: "none",
                                                 padding: 0,
                                                 background: "transparent",
-                                                color: jump.color,
+                                                color: arrow.color,
                                                 cursor: "pointer",
                                                 pointerEvents: "auto",
                                             }}
@@ -503,7 +489,7 @@ export function CommitList({
                                                     aria-hidden="true"
                                                     style={{
                                                         transform:
-                                                            direction === "up"
+                                                            arrow.direction === "up"
                                                                 ? "rotate(180deg)"
                                                                 : "none",
                                                     }}
