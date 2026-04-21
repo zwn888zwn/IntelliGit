@@ -231,6 +231,26 @@ describe("core utilities", () => {
         ).toBe(true);
     });
 
+    it("graph compute marks downward lane jumps", () => {
+        const filtered = computeGraph([
+            { hash: "keep-head", parentHashes: ["visible-base"] },
+            { hash: "other-head", parentHashes: ["other-base"] },
+            { hash: "visible-base", parentHashes: [] },
+            { hash: "other-base", parentHashes: [] },
+        ]);
+
+        expect(filtered[0].jumpBelow.length).toBeGreaterThan(0);
+    });
+
+    it("graph compute skips jump arrows when the target commit is not visible", () => {
+        const partial = computeGraph([
+            { hash: "head", parentHashes: ["missing-parent"] },
+            { hash: "next", parentHashes: [] },
+        ]);
+
+        expect(partial.every((row) => row.jumpBelow.length === 0)).toBe(true);
+    });
+
     it("date formatting falls back safely on invalid date", () => {
         expect(formatDateTime("not-a-date")).toBe("not-a-date");
         expect(typeof formatDateTime("2026-02-19T08:00:00Z")).toBe("string");

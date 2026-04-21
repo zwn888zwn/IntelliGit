@@ -3,7 +3,7 @@ import { GRAPH_LANE_COLORS } from "./shared/tokens";
 export const COLORS = GRAPH_LANE_COLORS;
 
 export const LANE_WIDTH = 20;
-export const DOT_RADIUS = 5;
+export const DOT_RADIUS = 3.25;
 export const ROW_HEIGHT = 28;
 export const MAX_RENDER_COLUMNS = 6;
 export const OVERFLOW_COLUMN = MAX_RENDER_COLUMNS - 1;
@@ -19,9 +19,12 @@ interface GraphConnection extends GraphLane {
     toCol: number;
     rawFromCol: number;
     rawToCol: number;
+    targetHash: string;
 }
 
 interface RawGraphRow {
+    commitHash: string;
+    parentHashes: string[];
     column: number;
     color: string;
     numColumns: number;
@@ -34,7 +37,14 @@ interface HiddenLane {
     color: string;
 }
 
+export interface GraphJump extends GraphLane {
+    targetHash: string;
+    targetRowIndex: number;
+}
+
 export interface GraphRow {
+    commitHash: string;
+    parentHashes: string[];
     column: number;
     rawColumn: number;
     color: string;
@@ -43,6 +53,7 @@ export interface GraphRow {
     connectionsDown: GraphConnection[];
     overflowAbove: GraphLane[];
     overflowBelow: GraphLane[];
+    jumpBelow: GraphJump[];
 }
 
 export function computeGraph(commits: Array<{ hash: string; parentHashes: string[] }>): GraphRow[] {
@@ -87,6 +98,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     toCol: pCol,
                     rawFromCol: col,
                     rawToCol: pCol,
+                    targetHash: ph,
                     color: COLORS[pCol % COLORS.length],
                 });
             } else if (p === 0) {
@@ -98,6 +110,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     toCol: col,
                     rawFromCol: col,
                     rawToCol: col,
+                    targetHash: ph,
                     color: COLORS[col % COLORS.length],
                 });
             } else {
@@ -110,6 +123,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     toCol: nc,
                     rawFromCol: col,
                     rawToCol: nc,
+                    targetHash: ph,
                     color: COLORS[nc % COLORS.length],
                 });
             }
@@ -118,6 +132,8 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
         while (lanes.length > 0 && lanes[lanes.length - 1] === null) lanes.pop();
 
         rawRows.push({
+            commitHash: commit.hash,
+            parentHashes: commit.parentHashes,
             column: col,
             color: COLORS[col % COLORS.length],
             numColumns: Math.max(lanes.length, col + 1),
@@ -226,6 +242,8 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
         });
 
         rows.push({
+            commitHash: row.commitHash,
+            parentHashes: row.parentHashes,
             column: mapRawColumn(row.column),
             rawColumn: row.column,
             color: row.color,
@@ -241,6 +259,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     rawColumn: connection.rawToCol,
                     rawFromCol: connection.rawFromCol,
                     rawToCol: connection.rawToCol,
+                    targetHash: connection.targetHash,
                     color: connection.color,
                 })),
             ),
@@ -250,7 +269,47 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
             overflowBelow: currentHidden
                 .filter((lane) => !nextHiddenColumns.has(lane.rawColumn))
                 .map(toOverflowLane),
+            jumpBelow: [],
         });
+    }
+
+    const dedupeJumpLanes = (lanesToRender: GraphJump[]): GraphJump[] => {
+        const deduped = new Map<number, GraphJump>();
+        for (const lane of lanesToRender) {
+            if (!deduped.has(lane.rawColumn)) {
+                deduped.set(lane.rawColumn, lane);
+            }
+        }
+        return Array.from(deduped.values()).sort(
+            (a, b) => a.column - b.column || a.rawColumn - b.rawColumn,
+        );
+    };
+    const hashToRowIndex = new Map<string, number>();
+    rows.forEach((row, index) => {
+        hashToRowIndex.set(row.commitHash, index);
+    });
+
+    for (let index = 0; index < rows.length; index++) {
+        const row = rows[index];
+        const jumpBelow = new Map<number, GraphJump>();
+        const addJump = (target: Map<number, GraphJump>, lane: GraphJump) => {
+            if (!target.has(lane.rawColumn)) {
+                target.set(lane.rawColumn, lane);
+            }
+        };
+
+        for (const connection of row.connectionsDown) {
+            const targetIndex = hashToRowIndex.get(connection.targetHash);
+            if (targetIndex === undefined || targetIndex <= index + 1) continue;
+            addJump(jumpBelow, {
+                column: connection.toCol,
+                rawColumn: connection.rawToCol,
+                color: connection.color,
+                targetHash: connection.targetHash,
+                targetRowIndex: targetIndex,
+            });
+        }
+        row.jumpBelow = dedupeJumpLanes([...jumpBelow.values()]);
     }
 
     return rows;

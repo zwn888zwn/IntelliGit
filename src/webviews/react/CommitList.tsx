@@ -72,6 +72,11 @@ export function CommitList({
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; commit: Commit } | null>(
         null,
     );
+    const [jumpTooltip, setJumpTooltip] = useState<{
+        targetHash: string;
+        left: number;
+        top: number;
+    } | null>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
     const [loadMoreDebug, setLoadMoreDebug] = useState({ count: 0, lastVisibleEnd: 0 });
@@ -87,6 +92,34 @@ export function CommitList({
     const repositoryLookup = useMemo(
         () => new Map(repositories.map((item) => [item.root, item])),
         [repositories],
+    );
+    const commitByHash = useMemo(() => new Map(commits.map((commit) => [commit.hash, commit])), [commits]);
+    const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
+    const visibleJumpMarkers = useMemo(
+        () =>
+            graphRows.flatMap((row, rowIndex) =>
+                row.jumpBelow.map((jump) => ({
+                    rowIndex,
+                    jump,
+                })),
+            ),
+        [graphRows],
+    );
+
+    const handleJumpNavigate = useCallback(
+        (targetHash: string, targetRowIndex: number) => {
+            const viewport = viewportRef.current;
+            if (!viewport) return;
+            onSelectCommit(targetHash);
+            const centeredTop = Math.max(
+                0,
+                targetRowIndex * ROW_HEIGHT - (viewport.clientHeight - ROW_HEIGHT) / 2,
+            );
+            viewport.scrollTop = centeredTop;
+            setScrollTop(centeredTop);
+            setJumpTooltip(null);
+        },
+        [onSelectCommit],
     );
 
     useCommitGraphCanvas({
@@ -171,6 +204,7 @@ export function CommitList({
             const viewport = event.currentTarget;
             const nextScrollTop = viewport.scrollTop;
             setScrollTop(nextScrollTop);
+            setJumpTooltip(null);
 
             if (viewport.clientHeight <= 0) return;
             const overscan = 8;
@@ -395,6 +429,88 @@ export function CommitList({
                             })}
                         </div>
 
+                        <div
+                            style={{
+                                position: "absolute",
+                                left: repoRailWidth,
+                                top: 0,
+                                width: graphWidth,
+                                height: commits.length * ROW_HEIGHT,
+                                zIndex: 5,
+                                pointerEvents: "none",
+                            }}
+                        >
+                            {visibleJumpMarkers
+                                .filter(
+                                    ({ rowIndex }) =>
+                                        rowIndex >= visibleRange.start && rowIndex < visibleRange.end,
+                                )
+                                .map(({ rowIndex, jump }) => {
+                                    const targetCommit = commitByHash.get(jump.targetHash);
+                                    if (!targetCommit) return null;
+                                    const buttonSize = 18;
+                                    const left =
+                                        jump.column * LANE_WIDTH + LANE_WIDTH / 2 + 4 - buttonSize / 2;
+                                    const top =
+                                        rowIndex * ROW_HEIGHT + ROW_HEIGHT * 0.66 - buttonSize / 2;
+                                    return (
+                                        <button
+                                            key={`jump:${rowIndex}:${jump.targetHash}:${jump.rawColumn}`}
+                                            type="button"
+                                            title={`Jump to '${targetCommit.shortHash} ${targetCommit.message}'`}
+                                            onMouseEnter={() =>
+                                                setJumpTooltip({
+                                                    targetHash: jump.targetHash,
+                                                    left: repoRailWidth + left + buttonSize + 6,
+                                                    top: top - 4,
+                                                })
+                                            }
+                                            onMouseLeave={() => setJumpTooltip(null)}
+                                            onClick={(event) => {
+                                                event.preventDefault();
+                                                event.stopPropagation();
+                                                handleJumpNavigate(jump.targetHash, jump.targetRowIndex);
+                                            }}
+                                            style={{
+                                                position: "absolute",
+                                                left,
+                                                top,
+                                                width: buttonSize,
+                                                height: buttonSize,
+                                                border: "none",
+                                                padding: 0,
+                                                background: "transparent",
+                                                color: jump.color,
+                                                cursor: "pointer",
+                                                pointerEvents: "auto",
+                                            }}
+                                        >
+                                            <svg
+                                                width={buttonSize}
+                                                height={buttonSize}
+                                                viewBox="0 0 18 18"
+                                                fill="none"
+                                                aria-hidden="true"
+                                            >
+                                                <path
+                                                    d="M9 2.5V13"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2.4"
+                                                    strokeLinecap="round"
+                                                />
+                                                <path
+                                                    d="M4.5 8.5L9 13L13.5 8.5"
+                                                    stroke="currentColor"
+                                                    strokeWidth="2.4"
+                                                    strokeLinecap="round"
+                                                    strokeLinejoin="round"
+                                                />
+                                            </svg>
+                                        </button>
+                                    );
+                                })}
+                        </div>
+
                         {hasMore && (
                             <div
                                 style={{
@@ -406,6 +522,32 @@ export function CommitList({
                                 }}
                             >
                                 Loading more...
+                            </div>
+                        )}
+
+                        {jumpTooltip && jumpTargetCommit && (
+                            <div
+                                style={{
+                                    position: "absolute",
+                                    left: jumpTooltip.left,
+                                    top: jumpTooltip.top,
+                                    zIndex: 8,
+                                    pointerEvents: "none",
+                                    maxWidth: 320,
+                                    padding: "4px 8px",
+                                    borderRadius: 4,
+                                    background: "var(--vscode-editorHoverWidget-background)",
+                                    color: "var(--vscode-editorHoverWidget-foreground)",
+                                    border: "1px solid var(--vscode-editorHoverWidget-border)",
+                                    boxShadow: "0 4px 16px rgba(0,0,0,0.24)",
+                                    fontSize: "11px",
+                                    lineHeight: 1.4,
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                }}
+                            >
+                                {`Jump to '${jumpTargetCommit.shortHash} ${jumpTargetCommit.message}'`}
                             </div>
                         )}
                     </div>

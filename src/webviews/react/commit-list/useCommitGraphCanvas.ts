@@ -9,8 +9,8 @@ import {
 
 const GRAPH_LEFT_PAD = 4;
 const OVERSCAN_ROWS = 8;
-const OVERFLOW_ARROW_SIZE = 5;
-const OVERFLOW_ARROW_STEM = 8;
+const ARROW_HEAD_SIZE = 4;
+const ARROW_STEM = 8;
 
 interface Args {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -44,7 +44,7 @@ export function useCommitGraphCanvas({
         }
 
         let raf = 0;
-        const drawOverflowArrow = (
+        const drawLaneArrow = (
             ctx2d: CanvasRenderingContext2D,
             x: number,
             cy: number,
@@ -53,30 +53,46 @@ export function useCommitGraphCanvas({
             offsetX = 0,
         ) => {
             const drawX = x + offsetX;
-            const tipY = direction === "up" ? cy - OVERFLOW_ARROW_STEM / 2 : cy + OVERFLOW_ARROW_STEM / 2;
-            const tailY =
-                direction === "up" ? cy + OVERFLOW_ARROW_STEM / 2 : cy - OVERFLOW_ARROW_STEM / 2;
-            const headY = direction === "up" ? tipY + OVERFLOW_ARROW_SIZE : tipY - OVERFLOW_ARROW_SIZE;
+            const tipY = direction === "up" ? cy - ARROW_STEM / 2 : cy + ARROW_STEM / 2;
+            const tailY = direction === "up" ? cy + ARROW_STEM / 2 : cy - ARROW_STEM / 2;
+            const headY = direction === "up" ? tipY + ARROW_HEAD_SIZE : tipY - ARROW_HEAD_SIZE;
 
             ctx2d.beginPath();
             ctx2d.strokeStyle = color;
-            ctx2d.lineWidth = 2;
+            ctx2d.lineWidth = 2.25;
             ctx2d.moveTo(drawX, tailY);
             ctx2d.lineTo(drawX, tipY);
             ctx2d.moveTo(drawX, tipY);
-            ctx2d.lineTo(drawX - OVERFLOW_ARROW_SIZE, headY);
+            ctx2d.lineTo(drawX - ARROW_HEAD_SIZE, headY);
             ctx2d.moveTo(drawX, tipY);
-            ctx2d.lineTo(drawX + OVERFLOW_ARROW_SIZE, headY);
+            ctx2d.lineTo(drawX + ARROW_HEAD_SIZE, headY);
+            ctx2d.stroke();
+        };
+        const drawLaneTurn = (
+            ctx2d: CanvasRenderingContext2D,
+            fromX: number,
+            fromY: number,
+            toX: number,
+            toY: number,
+            color: string,
+        ) => {
+            ctx2d.beginPath();
+            ctx2d.strokeStyle = color;
+            ctx2d.lineWidth = 2;
+            ctx2d.moveTo(fromX, fromY);
+            if (fromX === toX) {
+                ctx2d.lineTo(toX, toY);
+            } else {
+                const midY = fromY + (toY - fromY) * 0.48;
+                ctx2d.lineTo(fromX, midY);
+                ctx2d.lineTo(toX, toY - (toY - fromY) * 0.2);
+                ctx2d.lineTo(toX, toY);
+            }
             ctx2d.stroke();
         };
         const draw = () => {
             raf = 0;
             const dpr = window.devicePixelRatio || 1;
-            // Read theme background on every draw so theme switches repaint correctly.
-            const bgColor =
-                getComputedStyle(document.documentElement)
-                    .getPropertyValue("--vscode-editor-background")
-                    .trim() || "#1e1e1e";
             const scrollTop = viewport.scrollTop;
             const viewportHeight = viewport.clientHeight;
             const visibleStart = Math.floor(scrollTop / ROW_HEIGHT);
@@ -95,6 +111,7 @@ export function useCommitGraphCanvas({
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.clearRect(0, 0, graphWidth, drawHeight);
             ctx.lineCap = "round";
+            ctx.lineJoin = "round";
 
             for (let i = drawStart; i < drawEnd; i++) {
                 const row = rows[i];
@@ -127,68 +144,36 @@ export function useCommitGraphCanvas({
                     if (incomingColumn !== undefined) {
                         const incomingX =
                             incomingColumn * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                        ctx.beginPath();
-                        ctx.strokeStyle = row.color;
-                        ctx.lineWidth = 2;
-                        ctx.moveTo(incomingX, y);
-                        if (incomingX === cx) {
-                            ctx.lineTo(cx, cy);
-                        } else {
-                            ctx.bezierCurveTo(
-                                incomingX,
-                                y + ROW_HEIGHT * 0.25,
-                                cx,
-                                y + ROW_HEIGHT * 0.35,
-                                cx,
-                                cy,
-                            );
-                        }
-                        ctx.stroke();
+                        drawLaneTurn(ctx, incomingX, y, cx, cy, row.color);
                     }
                 }
 
                 for (const conn of row.connectionsDown) {
                     const fx = conn.fromCol * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
                     const tx = conn.toCol * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                    ctx.beginPath();
-                    ctx.strokeStyle = conn.color;
-                    ctx.lineWidth = 2;
-                    if (conn.fromCol === conn.toCol) {
-                        ctx.moveTo(fx, cy);
-                        ctx.lineTo(tx, y + ROW_HEIGHT);
-                    } else {
-                        ctx.moveTo(fx, cy);
-                        ctx.bezierCurveTo(
-                            fx,
-                            cy + ROW_HEIGHT * 0.4,
-                            tx,
-                            y + ROW_HEIGHT - ROW_HEIGHT * 0.3,
-                            tx,
-                            y + ROW_HEIGHT,
-                        );
-                    }
-                    ctx.stroke();
+                    drawLaneTurn(ctx, fx, cy, tx, y + ROW_HEIGHT, conn.color);
                 }
 
                 ctx.beginPath();
-                ctx.fillStyle = bgColor;
-                ctx.arc(cx, cy, DOT_RADIUS + 1, 0, Math.PI * 2);
-                ctx.fill();
-
-                ctx.beginPath();
-                ctx.strokeStyle = row.color;
-                ctx.lineWidth = 2.5;
-                ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
-                ctx.stroke();
-
-                ctx.beginPath();
                 ctx.fillStyle = row.color;
-                ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+                ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
                 ctx.fill();
+
+                for (const lane of row.jumpBelow) {
+                    const arrowX = lane.column * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
+                    drawLaneArrow(
+                        ctx,
+                        arrowX,
+                        y + ROW_HEIGHT * 0.66,
+                        lane.color,
+                        "down",
+                        0,
+                    );
+                }
 
                 const overflowX = OVERFLOW_COLUMN * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
                 if (row.overflowAbove.length > 0) {
-                    drawOverflowArrow(
+                    drawLaneArrow(
                         ctx,
                         overflowX,
                         cy,
@@ -198,7 +183,7 @@ export function useCommitGraphCanvas({
                     );
                 }
                 if (row.overflowBelow.length > 0) {
-                    drawOverflowArrow(
+                    drawLaneArrow(
                         ctx,
                         overflowX,
                         cy,
