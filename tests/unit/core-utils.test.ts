@@ -231,6 +231,31 @@ describe("core utilities", () => {
         ).toBe(true);
     });
 
+    it("graph compute avoids reusing colors for simultaneously active lanes", () => {
+        const wide = computeGraph([
+            {
+                hash: "merge",
+                parentHashes: ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"],
+            },
+            { hash: "a", parentHashes: ["base"] },
+            { hash: "b", parentHashes: ["base"] },
+            { hash: "c", parentHashes: ["base"] },
+            { hash: "d", parentHashes: ["base"] },
+            { hash: "e", parentHashes: ["base"] },
+            { hash: "f", parentHashes: ["base"] },
+            { hash: "g", parentHashes: ["base"] },
+            { hash: "h", parentHashes: ["base"] },
+            { hash: "i", parentHashes: ["base"] },
+            { hash: "j", parentHashes: ["base"] },
+            { hash: "k", parentHashes: ["base"] },
+            { hash: "l", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        const mergeRowColors = new Set(wide[0].connectionsDown.map((connection) => connection.color));
+        expect(mergeRowColors.size).toBe(wide[0].connectionsDown.length);
+    });
+
     it("graph compute marks jumps only for broken long lanes", () => {
         const filtered = computeGraph([
             { hash: "m", parentHashes: ["a1", "b1", "c1", "d1", "e1", "f1", "g1"] },

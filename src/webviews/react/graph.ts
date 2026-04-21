@@ -70,6 +70,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
     const lanes: (ActiveLane | null)[] = [];
     const rawRows: RawGraphRow[] = [];
     let nextColorIndex = 0;
+    let generatedColorIndex = 0;
 
     function findFree(): number {
         const i = lanes.indexOf(null);
@@ -77,23 +78,41 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
         lanes.push(null);
         return lanes.length - 1;
     }
-    function allocateColor(): string {
-        const color = COLORS[nextColorIndex % COLORS.length];
-        nextColorIndex += 1;
-        return color;
+    function allocateColor(extraAvoidColors: Iterable<string> = []): string {
+        const usedColors = new Set<string>(extraAvoidColors);
+        for (const lane of lanes) {
+            if (lane) usedColors.add(lane.color);
+        }
+        for (let i = 0; i < COLORS.length; i++) {
+            const color = COLORS[(nextColorIndex + i) % COLORS.length];
+            if (!usedColors.has(color)) {
+                nextColorIndex = (nextColorIndex + i + 1) % COLORS.length;
+                return color;
+            }
+        }
+        for (;;) {
+            const hue = Math.round((generatedColorIndex * 137.508) % 360);
+            generatedColorIndex += 1;
+            const color = `hsl(${hue} 62% 58%)`;
+            if (!usedColors.has(color)) {
+                return color;
+            }
+        }
     }
     function findLaneIndex(hash: string): number {
         return lanes.findIndex((lane) => lane?.hash === hash);
     }
 
     for (const commit of commits) {
+        const reservedColors = new Set<string>();
         let col = findLaneIndex(commit.hash);
         if (col === -1) {
             col = findFree();
-            lanes[col] = { hash: commit.hash, color: allocateColor() };
+            lanes[col] = { hash: commit.hash, color: allocateColor(reservedColors) };
         }
         const currentLane = lanes[col];
-        const currentColor = currentLane?.color ?? allocateColor();
+        const currentColor = currentLane?.color ?? allocateColor(reservedColors);
+        reservedColors.add(currentColor);
 
         const passThroughLanes: GraphLane[] = [];
         for (let i = 0; i < lanes.length; i++) {
@@ -118,6 +137,8 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
 
             if (pCol >= 0) {
                 const parentLane = lanes[pCol];
+                const parentColor = parentLane?.color ?? currentColor;
+                reservedColors.add(parentColor);
                 connectionsDown.push({
                     column: pCol,
                     rawColumn: pCol,
@@ -126,7 +147,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     rawFromCol: col,
                     rawToCol: pCol,
                     targetHash: ph,
-                    color: parentLane?.color ?? currentColor,
+                    color: parentColor,
                     visible: true,
                     fromVisible: true,
                     toVisible: true,
@@ -148,7 +169,8 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                 });
             } else {
                 const nc = findFree();
-                const branchColor = allocateColor();
+                const branchColor = allocateColor(reservedColors);
+                reservedColors.add(branchColor);
                 lanes[nc] = { hash: ph, color: branchColor };
                 connectionsDown.push({
                     column: nc,
