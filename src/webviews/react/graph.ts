@@ -7,6 +7,7 @@ export const DOT_RADIUS = 3.25;
 export const ROW_HEIGHT = 28;
 export const MAX_RENDER_COLUMNS = 6;
 export const OVERFLOW_COLUMN = MAX_RENDER_COLUMNS - 1;
+export const JUMP_ARROW_MIN_HIDDEN_COMMITS = 10;
 
 interface GraphLane {
     column: number;
@@ -301,6 +302,8 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
         for (const connection of row.connectionsDown) {
             const targetIndex = hashToRowIndex.get(connection.targetHash);
             if (targetIndex === undefined || targetIndex <= index + 1) continue;
+            const hiddenCommitCount = targetIndex - index - 1;
+            if (hiddenCommitCount <= JUMP_ARROW_MIN_HIDDEN_COMMITS) continue;
             addJump(jumpBelow, {
                 column: connection.toCol,
                 rawColumn: connection.rawToCol,

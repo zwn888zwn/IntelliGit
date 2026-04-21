@@ -234,12 +234,35 @@ describe("core utilities", () => {
     it("graph compute marks downward lane jumps", () => {
         const filtered = computeGraph([
             { hash: "keep-head", parentHashes: ["visible-base"] },
+            { hash: "gap-01", parentHashes: [] },
+            { hash: "gap-02", parentHashes: [] },
+            { hash: "gap-03", parentHashes: [] },
+            { hash: "gap-04", parentHashes: [] },
+            { hash: "gap-05", parentHashes: [] },
+            { hash: "gap-06", parentHashes: [] },
+            { hash: "gap-07", parentHashes: [] },
+            { hash: "gap-08", parentHashes: [] },
+            { hash: "gap-09", parentHashes: [] },
+            { hash: "gap-10", parentHashes: [] },
+            { hash: "gap-11", parentHashes: [] },
             { hash: "other-head", parentHashes: ["other-base"] },
             { hash: "visible-base", parentHashes: [] },
             { hash: "other-base", parentHashes: [] },
         ]);
 
         expect(filtered[0].jumpBelow.length).toBeGreaterThan(0);
+    });
+
+    it("graph compute skips short downward jumps", () => {
+        const filtered = computeGraph([
+            { hash: "keep-head", parentHashes: ["visible-base"] },
+            { hash: "gap-01", parentHashes: [] },
+            { hash: "gap-02", parentHashes: [] },
+            { hash: "gap-03", parentHashes: [] },
+            { hash: "visible-base", parentHashes: [] },
+        ]);
+
+        expect(filtered.every((row) => row.jumpBelow.length === 0)).toBe(true);
     });
 
     it("graph compute skips jump arrows when the target commit is not visible", () => {

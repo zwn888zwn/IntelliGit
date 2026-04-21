@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import {
     DOT_RADIUS,
     LANE_WIDTH,
-    OVERFLOW_COLUMN,
     ROW_HEIGHT,
     type GraphRow,
 } from "../graph";
@@ -171,27 +170,6 @@ export function useCommitGraphCanvas({
                     );
                 }
 
-                const overflowX = OVERFLOW_COLUMN * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
-                if (row.overflowAbove.length > 0) {
-                    drawLaneArrow(
-                        ctx,
-                        overflowX,
-                        cy,
-                        row.overflowAbove[0].color,
-                        "up",
-                        row.overflowBelow.length > 0 ? -4 : 0,
-                    );
-                }
-                if (row.overflowBelow.length > 0) {
-                    drawLaneArrow(
-                        ctx,
-                        overflowX,
-                        cy,
-                        row.overflowBelow[0].color,
-                        "down",
-                        row.overflowAbove.length > 0 ? 4 : 0,
-                    );
-                }
             }
         };
 
