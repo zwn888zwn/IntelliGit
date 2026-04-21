@@ -16,6 +16,7 @@ interface Args {
     viewportRef: React.RefObject<HTMLDivElement | null>;
     rows: RenderRowModel[];
     graphWidth: number;
+    graphScale: number;
     graphOffset: number;
 }
 
@@ -24,6 +25,7 @@ export function useCommitGraphCanvas({
     viewportRef,
     rows,
     graphWidth,
+    graphScale,
     graphOffset,
 }: Args): void {
     useEffect(() => {
@@ -43,6 +45,8 @@ export function useCommitGraphCanvas({
         }
 
         let raf = 0;
+        const positionX = (position: number): number =>
+            (position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD) * graphScale;
         const anchorY = (rowTop: number, anchor: EdgeAnchor): number => {
             switch (anchor) {
                 case "top":
@@ -60,13 +64,13 @@ export function useCommitGraphCanvas({
         ) => {
             ctx2d.beginPath();
             ctx2d.strokeStyle = element.color;
-            ctx2d.lineWidth = 2;
+            ctx2d.lineWidth = Math.max(1.5, 2 * graphScale);
             ctx2d.moveTo(
-                element.fromPosition * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD,
+                positionX(element.fromPosition),
                 anchorY(rowTop, element.fromAnchor),
             );
             ctx2d.lineTo(
-                element.toPosition * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD,
+                positionX(element.toPosition),
                 anchorY(rowTop, element.toAnchor),
             );
             ctx2d.stroke();
@@ -76,10 +80,10 @@ export function useCommitGraphCanvas({
             rowTop: number,
             element: Extract<PrintElement, { type: "terminal" }>,
         ) => {
-            const x = element.position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
+            const x = positionX(element.position);
             ctx2d.beginPath();
             ctx2d.strokeStyle = element.color;
-            ctx2d.lineWidth = 2;
+            ctx2d.lineWidth = Math.max(1.5, 2 * graphScale);
             if (element.direction === "down") {
                 ctx2d.moveTo(x, rowTop);
                 ctx2d.lineTo(x, rowTop + ROW_HEIGHT / 2);
@@ -125,11 +129,11 @@ export function useCommitGraphCanvas({
 
                 const node = row.elements.find((element) => element.type === "node");
                 if (node) {
-                    const cx = node.position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD;
+                    const cx = positionX(node.position);
                     const cy = y + ROW_HEIGHT / 2;
                     ctx.beginPath();
                     ctx.fillStyle = node.color;
-                    ctx.arc(cx, cy, DOT_RADIUS, 0, Math.PI * 2);
+                    ctx.arc(cx, cy, Math.max(2.5, DOT_RADIUS * graphScale), 0, Math.PI * 2);
                     ctx.fill();
                 }
             }
@@ -165,5 +169,5 @@ export function useCommitGraphCanvas({
             viewport.removeEventListener("scroll", scheduleDraw);
             window.removeEventListener("resize", scheduleDraw);
         };
-    }, [canvasRef, viewportRef, graphOffset, graphWidth, rows]);
+    }, [canvasRef, viewportRef, graphOffset, graphScale, graphWidth, rows]);
 }

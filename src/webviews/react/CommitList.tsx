@@ -29,6 +29,7 @@ import {
 } from "./commit-list/styles";
 
 const MIN_PREFIX_LENGTH = 7;
+const MAX_GRAPH_WIDTH = 240;
 const PRELOAD_ROWS = 80;
 
 interface Props {
@@ -82,7 +83,8 @@ export function CommitList({
 
     const graph = useMemo(() => computeGraph(commits), [commits]);
     const graphRows = graph.rows;
-    const graphWidth = graph.recommendedWidth;
+    const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
+    const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
     const repoRailWidth = repoRailExpanded ? 168 : 16;
     const totalGraphWidth = repoRailWidth + graphWidth;
     const repositoryLookup = useMemo(
@@ -117,6 +119,7 @@ export function CommitList({
         viewportRef,
         rows: graphRows,
         graphWidth,
+        graphScale,
         graphOffset: repoRailWidth,
     });
 
@@ -441,9 +444,7 @@ export function CommitList({
                                     if (!targetCommit) return null;
                                     const buttonSize = 18;
                                     const left =
-                                        arrow.position * LANE_WIDTH +
-                                        LANE_WIDTH / 2 +
-                                        4 -
+                                        (arrow.position * LANE_WIDTH + LANE_WIDTH / 2 + 4) * graphScale -
                                         buttonSize / 2;
                                     const top =
                                         arrow.rowIndex * ROW_HEIGHT +
