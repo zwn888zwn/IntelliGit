@@ -1,5 +1,4 @@
 import React from "react";
-import { createPortal } from "react-dom";
 import type { Commit } from "../../../types";
 import { RefTypeIcon } from "../shared/components";
 import { formatDateTime } from "../shared/date";
@@ -50,47 +49,6 @@ function RefBadge({ kind, name }: { kind: "branch" | "tag"; name: string }): Rea
     );
 }
 
-function TooltipRefRow({
-    kind,
-    name,
-}: {
-    kind: "branch" | "tag";
-    name: string;
-}): React.ReactElement {
-    return (
-        <span
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                minWidth: 0,
-                fontSize: 11,
-                lineHeight: "16px",
-            }}
-            title={name}
-        >
-            <span style={{ display: "inline-flex", flexShrink: 0 }}>
-                <RefTypeIcon
-                    kind={kind}
-                    size={12}
-                    tagColor={kind === "tag" ? REF_BADGE_COLORS.tag.bg : undefined}
-                />
-            </span>
-            <span
-                style={{
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    color: "var(--vscode-foreground)",
-                }}
-            >
-                {name}
-            </span>
-        </span>
-    );
-}
-
 function CommitMessageCell({
     message,
     refs,
@@ -98,11 +56,6 @@ function CommitMessageCell({
     message: string;
     refs: string[];
 }): React.ReactElement {
-    const [tooltipPos, setTooltipPos] = React.useState<{
-        x: number;
-        y: number;
-        placement: "above" | "below";
-    } | null>(null);
     const { branches: branchRefs, tags: tagRefs } = splitCommitRefs(refs);
     const branchRefsCount = branchRefs.length;
     const visibleTagRefs = tagRefs.slice(0, 2);
@@ -113,20 +66,6 @@ function CommitMessageCell({
     const tooltipText =
         refSummaryLines.length > 0 ? `${message}\n\n${refSummaryLines.join("\n")}` : message;
 
-    const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const baseX = event.clientX > 0 ? event.clientX : rect.left + rect.width / 2;
-        const x = Math.max(220, Math.min(window.innerWidth - 220, baseX));
-        const shouldShowBelow = rect.top < 96;
-        setTooltipPos({
-            x,
-            y: shouldShowBelow ? rect.bottom + 6 : rect.top - 8,
-            placement: shouldShowBelow ? "below" : "above",
-        });
-    };
-
-    const hideTooltip = (): void => setTooltipPos(null);
-
     return (
         <span
             style={{
@@ -136,10 +75,7 @@ function CommitMessageCell({
                 alignItems: "center",
                 overflow: "hidden",
             }}
-            data-commit-tooltip={tooltipText}
-            onPointerEnter={showTooltip}
-            onPointerMove={showTooltip}
-            onPointerLeave={hideTooltip}
+            title={tooltipText}
         >
             <span
                 style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}
@@ -187,111 +123,6 @@ function CommitMessageCell({
                     {`+${hiddenTagCount}`}
                 </span>
             )}
-
-            {tooltipPos &&
-                createPortal(
-                    <span
-                        style={{
-                            position: "fixed",
-                            left: tooltipPos.x,
-                            top: tooltipPos.y,
-                            transform:
-                                tooltipPos.placement === "above"
-                                    ? "translate(-50%, -100%)"
-                                    : "translate(-50%, 0)",
-                            background: "var(--vscode-editorHoverWidget-background, #2f3646)",
-                            color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
-                            border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.12))",
-                            borderRadius: 6,
-                            fontSize: 11,
-                            lineHeight: "15px",
-                            padding: "8px 9px",
-                            whiteSpace: "normal",
-                            maxWidth: "560px",
-                            minWidth: "240px",
-                            zIndex: 9999,
-                            pointerEvents: "none",
-                            boxShadow: "0 10px 28px rgba(0,0,0,0.45)",
-                        }}
-                    >
-                        <span
-                            style={{
-                                display: "block",
-                                color: "var(--vscode-foreground)",
-                                fontSize: "12px",
-                                lineHeight: "16px",
-                                marginBottom: refs.length > 0 ? 14 : 0,
-                                wordBreak: "break-word",
-                            }}
-                        >
-                            {message}
-                        </span>
-                        {(branchRefs.length > 0 || tagRefs.length > 0) && (
-                            <>
-                                {branchRefs.length > 0 && (
-                                    <>
-                                        <span
-                                            style={{
-                                                display: "block",
-                                                fontSize: 11,
-                                                opacity: 0.82,
-                                                marginBottom: 5,
-                                            }}
-                                        >
-                                            Branches
-                                        </span>
-                                        <span
-                                            style={{
-                                                display: "flex",
-                                                flexDirection: "column",
-                                                gap: 3,
-                                            }}
-                                        >
-                                            {branchRefs.map((name) => (
-                                                <TooltipRefRow
-                                                    key={`branch:${name}`}
-                                                    kind="branch"
-                                                    name={name}
-                                                />
-                                            ))}
-                                        </span>
-                                    </>
-                                )}
-                                {tagRefs.length > 0 && (
-                                    <>
-                                        <span
-                                            style={{
-                                                display: "block",
-                                                fontSize: 11,
-                                                opacity: 0.82,
-                                                marginTop: branchRefs.length > 0 ? 12 : 0,
-                                                marginBottom: 5,
-                                            }}
-                                        >
-                                            Tags
-                                        </span>
-                                        <span
-                                            style={{
-                                                display: "flex",
-                                                flexDirection: "column",
-                                                gap: 3,
-                                            }}
-                                        >
-                                            {tagRefs.map((name) => (
-                                                <TooltipRefRow
-                                                    key={`tag:${name}`}
-                                                    kind="tag"
-                                                    name={name}
-                                                />
-                                            ))}
-                                        </span>
-                                    </>
-                                )}
-                            </>
-                        )}
-                    </span>,
-                    document.body,
-                )}
         </span>
     );
 }
@@ -313,6 +144,9 @@ function CommitRowInner({
             onContextMenu={(event) => onContextMenu(event, commit)}
             style={{
                 height: ROW_HEIGHT,
+                width: `calc(100% - ${graphWidth}px)`,
+                minWidth: 0,
+                boxSizing: "border-box",
                 display: "flex",
                 alignItems: "center",
                 marginLeft: graphWidth,

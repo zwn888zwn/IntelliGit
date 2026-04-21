@@ -1,33 +1,44 @@
-// Main file tree component for the commit panel. Renders tracked changes
-// and unversioned files as collapsible sections with directory grouping.
+// Main file tree component for the commit panel. Renders workspace changes
+// grouped by repository, then by tracked/unversioned sections and folders.
 
-import React, { useState, useMemo, useCallback, useRef } from "react";
-import { Box } from "@chakra-ui/react";
+import React, { useMemo, useCallback, useRef, useState } from "react";
+import { Box, Flex } from "@chakra-ui/react";
 import { SectionHeader } from "./SectionHeader";
 import { FolderRow } from "./FolderRow";
 import { FileRow } from "./FileRow";
 import { useFileTree, collectAllDirPaths } from "../hooks/useFileTree";
-import type { ThemeFolderIconMap, ThemeTreeIcon, WorkingFile } from "../../../../types";
+import { getCheckedFileKey } from "../hooks/useCheckedFiles";
+import type {
+    RepositoryContextInfo,
+    ThemeFolderIconMap,
+    ThemeTreeIcon,
+    WorkingFile,
+} from "../../../../types";
 import type { TreeEntry } from "../types";
 
 interface Props {
+    repositories: RepositoryContextInfo[];
+    currentRepository: RepositoryContextInfo | null;
     files: WorkingFile[];
     groupByDir: boolean;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
     checkedPaths: Set<string>;
-    onToggleFile: (path: string) => void;
+    onToggleFile: (file: WorkingFile) => void;
     onToggleFolder: (files: WorkingFile[]) => void;
     onToggleSection: (files: WorkingFile[]) => void;
     isAllChecked: (files: WorkingFile[]) => boolean;
     isSomeChecked: (files: WorkingFile[]) => boolean;
-    onFileClick: (path: string) => void;
+    onSelectRepository: (repoRoot: string) => void;
+    onFileClick: (file: WorkingFile) => void;
     expandAllSignal: number;
     collapseAllSignal: number;
 }
 
 export function FileTree({
+    repositories,
+    currentRepository,
     files,
     groupByDir,
     folderIcon,
@@ -39,80 +50,23 @@ export function FileTree({
     onToggleSection,
     isAllChecked,
     isSomeChecked,
+    onSelectRepository,
     onFileClick,
     expandAllSignal,
     collapseAllSignal,
 }: Props): React.ReactElement {
-    const [changesOpen, setChangesOpen] = useState(true);
-    const [unversionedOpen, setUnversionedOpen] = useState(true);
-    const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
-    const lastExpandSignal = useRef(0);
-    const lastCollapseSignal = useRef(0);
-    const seenDirsRef = useRef<Set<string>>(new Set());
+    const groupedRepositories = useMemo(
+        () =>
+            repositories
+                .map((repository) => ({
+                    repository,
+                    files: files.filter((file) => file.repoRoot === repository.root),
+                }))
+                .filter((group) => group.files.length > 0),
+        [repositories, files],
+    );
 
-    const tracked = useMemo(() => files.filter((f) => f.status !== "?"), [files]);
-    const unversioned = useMemo(() => files.filter((f) => f.status === "?"), [files]);
-
-    const trackedTree = useFileTree(tracked, groupByDir);
-    const unversionedTree = useFileTree(unversioned, groupByDir);
-
-    // Respond to expand/collapse all signals
-    React.useEffect(() => {
-        if (expandAllSignal === 0 || expandAllSignal === lastExpandSignal.current) return;
-        lastExpandSignal.current = expandAllSignal;
-        setChangesOpen(true);
-        setUnversionedOpen(true);
-        const allDirs = [
-            ...collectAllDirPaths(trackedTree),
-            ...collectAllDirPaths(unversionedTree),
-        ];
-        for (const dir of allDirs) {
-            seenDirsRef.current.add(dir);
-        }
-        setExpandedDirs(new Set(allDirs));
-    }, [expandAllSignal, trackedTree, unversionedTree]);
-
-    React.useEffect(() => {
-        if (collapseAllSignal === 0 || collapseAllSignal === lastCollapseSignal.current) return;
-        lastCollapseSignal.current = collapseAllSignal;
-        // Keep top-level sections visible; collapse only nested directory expansion state.
-        setChangesOpen(true);
-        setUnversionedOpen(true);
-        setExpandedDirs(new Set());
-    }, [collapseAllSignal]);
-
-    // Auto-expand new dirs when files come in and sections are open
-    React.useEffect(() => {
-        if (!changesOpen && !unversionedOpen) return;
-        const allDirs = [
-            ...collectAllDirPaths(trackedTree),
-            ...collectAllDirPaths(unversionedTree),
-        ];
-        setExpandedDirs((prev) => {
-            const next = new Set(prev);
-            let changed = false;
-            for (const d of allDirs) {
-                // Auto-expand only directories that appear for the first time.
-                if (!seenDirsRef.current.has(d)) {
-                    seenDirsRef.current.add(d);
-                    next.add(d);
-                    changed = true;
-                }
-            }
-            return changed ? next : prev;
-        });
-    }, [trackedTree, unversionedTree, changesOpen, unversionedOpen]);
-
-    const toggleDir = useCallback((dirPath: string) => {
-        setExpandedDirs((prev) => {
-            const next = new Set(prev);
-            if (next.has(dirPath)) next.delete(dirPath);
-            else next.add(dirPath);
-            return next;
-        });
-    }, []);
-
-    if (files.length === 0) {
+    if (groupedRepositories.length === 0) {
         return (
             <Box
                 color="var(--vscode-descriptionForeground)"
@@ -127,19 +81,175 @@ export function FileTree({
 
     return (
         <>
+            {groupedRepositories.map(({ repository, files: repoFiles }) => (
+                <RepositorySection
+                    key={repository.root}
+                    repository={repository}
+                    isCurrent={currentRepository?.root === repository.root}
+                    files={repoFiles}
+                    groupByDir={groupByDir}
+                    folderIcon={folderIcon}
+                    folderExpandedIcon={folderExpandedIcon}
+                    folderIconsByName={folderIconsByName}
+                    checkedPaths={checkedPaths}
+                    onToggleFile={onToggleFile}
+                    onToggleFolder={onToggleFolder}
+                    onToggleSection={onToggleSection}
+                    isAllChecked={isAllChecked}
+                    isSomeChecked={isSomeChecked}
+                    onSelectRepository={onSelectRepository}
+                    onFileClick={onFileClick}
+                    expandAllSignal={expandAllSignal}
+                    collapseAllSignal={collapseAllSignal}
+                />
+            ))}
+        </>
+    );
+}
+
+interface RepositorySectionProps extends Omit<Props, "repositories" | "currentRepository"> {
+    repository: RepositoryContextInfo;
+    isCurrent: boolean;
+}
+
+function RepositorySection({
+    repository,
+    isCurrent,
+    files,
+    groupByDir,
+    folderIcon,
+    folderExpandedIcon,
+    folderIconsByName,
+    checkedPaths,
+    onToggleFile,
+    onToggleFolder,
+    onToggleSection,
+    isAllChecked,
+    isSomeChecked,
+    onSelectRepository,
+    onFileClick,
+    expandAllSignal,
+    collapseAllSignal,
+}: RepositorySectionProps): React.ReactElement {
+    const [trackedOpen, setTrackedOpen] = useState(true);
+    const [unversionedOpen, setUnversionedOpen] = useState(true);
+    const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
+    const lastExpandSignal = useRef(0);
+    const lastCollapseSignal = useRef(0);
+    const seenDirsRef = useRef<Set<string>>(new Set());
+
+    const tracked = useMemo(() => files.filter((f) => f.status !== "?"), [files]);
+    const unversioned = useMemo(() => files.filter((f) => f.status === "?"), [files]);
+    const trackedTree = useFileTree(tracked, groupByDir);
+    const unversionedTree = useFileTree(unversioned, groupByDir);
+
+    React.useEffect(() => {
+        if (expandAllSignal === 0 || expandAllSignal === lastExpandSignal.current) return;
+        lastExpandSignal.current = expandAllSignal;
+        setTrackedOpen(true);
+        setUnversionedOpen(true);
+        const allDirs = [
+            ...collectAllDirPaths(trackedTree),
+            ...collectAllDirPaths(unversionedTree),
+        ].map((dirPath) => `${repository.root}\u0000${dirPath}`);
+        for (const dir of allDirs) {
+            seenDirsRef.current.add(dir);
+        }
+        setExpandedDirs(new Set(allDirs));
+    }, [expandAllSignal, repository.root, trackedTree, unversionedTree]);
+
+    React.useEffect(() => {
+        if (collapseAllSignal === 0 || collapseAllSignal === lastCollapseSignal.current) return;
+        lastCollapseSignal.current = collapseAllSignal;
+        setTrackedOpen(true);
+        setUnversionedOpen(true);
+        setExpandedDirs(new Set());
+    }, [collapseAllSignal]);
+
+    React.useEffect(() => {
+        const allDirs = [
+            ...collectAllDirPaths(trackedTree),
+            ...collectAllDirPaths(unversionedTree),
+        ].map((dirPath) => `${repository.root}\u0000${dirPath}`);
+        setExpandedDirs((prev) => {
+            const next = new Set(prev);
+            let changed = false;
+            for (const dir of allDirs) {
+                if (!seenDirsRef.current.has(dir)) {
+                    seenDirsRef.current.add(dir);
+                    next.add(dir);
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
+    }, [repository.root, trackedTree, unversionedTree]);
+
+    const toggleDir = useCallback((dirPath: string) => {
+        const key = `${repository.root}\u0000${dirPath}`;
+        setExpandedDirs((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    }, [repository.root]);
+
+    return (
+        <Box borderBottom="1px solid var(--vscode-panel-border, #444)">
+            <Flex
+                align="center"
+                gap="8px"
+                px="10px"
+                py="6px"
+                bg={isCurrent ? "rgba(90, 143, 233, 0.12)" : "transparent"}
+                borderLeft={isCurrent ? "2px solid var(--vscode-focusBorder, #5a8fe9)" : "2px solid transparent"}
+                cursor="pointer"
+                onClick={() => onSelectRepository(repository.root)}
+                title={repository.root}
+                _hover={{ bg: "var(--vscode-list-hoverBackground)" }}
+            >
+                <Box
+                    w="10px"
+                    h="10px"
+                    borderRadius="2px"
+                    flexShrink={0}
+                    bg={repository.color}
+                    boxShadow={`0 0 0 1px ${repository.color}55`}
+                />
+                <Box flex={1} minW={0}>
+                    <Box fontSize="12px" fontWeight={700} color="var(--vscode-foreground)">
+                        {repository.name}
+                    </Box>
+                    <Box
+                        fontSize="11px"
+                        color="var(--vscode-descriptionForeground)"
+                        whiteSpace="nowrap"
+                        overflow="hidden"
+                        textOverflow="ellipsis"
+                    >
+                        {repository.relativePath ?? repository.root}
+                    </Box>
+                </Box>
+                <Box fontSize="11px" color="var(--vscode-descriptionForeground)" flexShrink={0}>
+                    {files.length} {files.length === 1 ? "file" : "files"}
+                </Box>
+            </Flex>
+
             {tracked.length > 0 && (
                 <>
                     <SectionHeader
                         label="Changes"
                         count={tracked.length}
-                        isOpen={changesOpen}
+                        isOpen={trackedOpen}
                         isAllChecked={isAllChecked(tracked)}
                         isSomeChecked={isSomeChecked(tracked)}
-                        onToggleOpen={() => setChangesOpen((o) => !o)}
+                        onToggleOpen={() => setTrackedOpen((o) => !o)}
                         onToggleCheck={() => onToggleSection(tracked)}
                     />
-                    {changesOpen && (
+                    {trackedOpen && (
                         <TreeEntries
+                            repositoryRoot={repository.root}
                             entries={trackedTree}
                             depth={0}
                             groupByDir={groupByDir}
@@ -158,6 +268,7 @@ export function FileTree({
                     )}
                 </>
             )}
+
             {unversioned.length > 0 && (
                 <>
                     <SectionHeader
@@ -171,6 +282,7 @@ export function FileTree({
                     />
                     {unversionedOpen && (
                         <TreeEntries
+                            repositoryRoot={repository.root}
                             entries={unversionedTree}
                             depth={0}
                             groupByDir={groupByDir}
@@ -189,11 +301,12 @@ export function FileTree({
                     )}
                 </>
             )}
-        </>
+        </Box>
     );
 }
 
 interface TreeEntriesProps {
+    repositoryRoot: string;
     entries: TreeEntry[];
     depth: number;
     groupByDir: boolean;
@@ -202,15 +315,16 @@ interface TreeEntriesProps {
     folderIconsByName?: ThemeFolderIconMap;
     expandedDirs: Set<string>;
     checkedPaths: Set<string>;
-    onToggleFile: (path: string) => void;
+    onToggleFile: (file: WorkingFile) => void;
     onToggleFolder: (files: WorkingFile[]) => void;
     isAllChecked: (files: WorkingFile[]) => boolean;
     isSomeChecked: (files: WorkingFile[]) => boolean;
     onToggleDir: (dirPath: string) => void;
-    onFileClick: (path: string) => void;
+    onFileClick: (file: WorkingFile) => void;
 }
 
 function TreeEntries({
+    repositoryRoot,
     entries,
     depth,
     groupByDir,
@@ -232,10 +346,10 @@ function TreeEntries({
                 if (entry.type === "file") {
                     return (
                         <FileRow
-                            key={`${entry.file.path}:${entry.file.staged ? "staged" : "unstaged"}`}
+                            key={`${entry.file.repoRoot}:${entry.file.path}:${entry.file.staged ? "staged" : "unstaged"}`}
                             file={entry.file}
                             depth={depth}
-                            isChecked={checkedPaths.has(entry.file.path)}
+                            isChecked={checkedPaths.has(getCheckedFileKey(entry.file))}
                             groupByDir={groupByDir}
                             onToggle={onToggleFile}
                             onClick={onFileClick}
@@ -243,11 +357,11 @@ function TreeEntries({
                     );
                 }
 
-                const isExpanded = expandedDirs.has(entry.path);
+                const isExpanded = expandedDirs.has(`${repositoryRoot}\u0000${entry.path}`);
                 const dirFiles = entry.descendantFiles;
 
                 return (
-                    <React.Fragment key={entry.path}>
+                    <React.Fragment key={`${repositoryRoot}:${entry.path}`}>
                         <FolderRow
                             name={entry.name}
                             dirPath={entry.path}
@@ -264,6 +378,7 @@ function TreeEntries({
                         />
                         {isExpanded && (
                             <TreeEntries
+                                repositoryRoot={repositoryRoot}
                                 entries={entry.children}
                                 depth={depth + 1}
                                 groupByDir={groupByDir}

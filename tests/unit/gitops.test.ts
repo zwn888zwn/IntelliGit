@@ -812,6 +812,8 @@ describe("GitOps", () => {
 
             expect(files).toEqual([
                 {
+                    repoId: ".",
+                    repoRoot: "",
                     path: "src/a.ts",
                     status: "M",
                     staged: false,
@@ -819,6 +821,8 @@ describe("GitOps", () => {
                     deletions: 1,
                 },
                 {
+                    repoId: ".",
+                    repoRoot: "",
                     path: "src/new.ts",
                     status: "R",
                     staged: false,

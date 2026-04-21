@@ -5,7 +5,7 @@ import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
 import type { RepositoryContextInfo } from "../types";
 
-type RepositoryEntry = {
+export type RepositoryEntry = {
     root: string;
     uri: vscode.Uri;
     info: RepositoryContextInfo;
@@ -19,6 +19,19 @@ const IGNORED_DIRECTORY_NAMES = new Set([
     ".hg",
     ".svn",
 ]);
+
+const REPOSITORY_COLOR_PALETTE = [
+    "#4CAF50",
+    "#2196F3",
+    "#FF9800",
+    "#E91E63",
+    "#9C27B0",
+    "#00BCD4",
+    "#FF5722",
+    "#8BC34A",
+    "#3F51B5",
+    "#FFC107",
+];
 
 export class RepositoryContextService {
     private repositories: RepositoryEntry[] = [];
@@ -47,14 +60,18 @@ export class RepositoryContextService {
                 continue;
             }
 
+            const info = buildRepositoryContextInfo(this.workspaceRoot.fsPath, root);
             const executor = new GitExecutor(root);
-            const gitOps = new GitOps(executor);
+            const gitOps = new GitOps(executor, undefined, {
+                repoId: info.repoId,
+                repoRoot: info.root,
+            });
             if (!(await gitOps.isRepository())) continue;
 
             nextRepositories.set(root, {
                 root,
                 uri: vscode.Uri.file(root),
-                info: buildRepositoryContextInfo(this.workspaceRoot.fsPath, root),
+                info,
                 executor,
                 gitOps,
             });
@@ -117,6 +134,10 @@ export class RepositoryContextService {
         return this.getCurrentRepository()?.info ?? null;
     }
 
+    getRepositoryInfoByRoot(root: string): RepositoryContextInfo | null {
+        return this.findByRoot(root)?.info ?? null;
+    }
+
     requireCurrentRepository(): RepositoryEntry {
         const repo = this.getCurrentRepository();
         if (!repo) {
@@ -172,7 +193,6 @@ async function discoverGitRepositories(root: string): Promise<string[]> {
 
         if (entries.some((entry) => entry.name === ".git")) {
             results.push(dir);
-            return;
         }
 
         for (const entry of entries) {
@@ -186,11 +206,22 @@ async function discoverGitRepositories(root: string): Promise<string[]> {
 function buildRepositoryContextInfo(workspaceRoot: string, repoRoot: string): RepositoryContextInfo {
     const relativePath = path.relative(workspaceRoot, repoRoot);
     const normalizedRelative = relativePath && relativePath !== "." ? relativePath : undefined;
+    const repoId = normalizedRelative ?? ".";
     return {
+        repoId,
         name: path.basename(repoRoot) || repoRoot,
         root: repoRoot,
         relativePath: normalizedRelative,
+        color: REPOSITORY_COLOR_PALETTE[stableColorIndex(repoId) % REPOSITORY_COLOR_PALETTE.length],
     };
+}
+
+function stableColorIndex(value: string): number {
+    let hash = 0;
+    for (let i = 0; i < value.length; i++) {
+        hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+    }
+    return hash;
 }
 
 function isPathInsideRepository(filePath: string, repoRoot: string): boolean {

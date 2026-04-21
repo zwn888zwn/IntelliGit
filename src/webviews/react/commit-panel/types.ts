@@ -2,6 +2,7 @@
 // and the extension host. Defines all inbound and outbound message shapes.
 
 import type {
+    RepoPathRef,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -18,28 +19,30 @@ import type {
 export type OutboundMessage =
     | { type: "ready" }
     | { type: "refresh" }
-    | { type: "stageFiles"; paths: string[] }
-    | { type: "unstageFiles"; paths: string[] }
-    | { type: "commitSelected"; paths: string[]; message: string; amend: boolean; push: boolean }
+    | { type: "stageFiles"; targets: RepoPathRef[] }
+    | { type: "unstageFiles"; targets: RepoPathRef[] }
+    | { type: "commitSelected"; targets: RepoPathRef[]; message: string; amend: boolean; push: boolean }
     | { type: "commit"; message: string; amend: boolean }
     | { type: "commitAndPush"; message: string; amend: boolean }
     | { type: "getLastCommitMessage" }
-    | { type: "rollback"; paths: string[] }
-    | { type: "showDiff"; path: string }
-    | { type: "shelveSave"; name?: string; paths?: string[] }
+    | { type: "rollback"; targets: RepoPathRef[] }
+    | { type: "showDiff"; target: RepoPathRef }
+    | { type: "shelveSave"; name?: string; targets?: RepoPathRef[] }
     | { type: "shelfPop"; index: number }
     | { type: "shelfApply"; index: number }
     | { type: "shelfDelete"; index: number }
     | { type: "shelfSelect"; index: number }
     | { type: "showShelfDiff"; index: number; path: string }
-    | { type: "openFile"; path: string }
-    | { type: "deleteFile"; path: string }
-    | { type: "showHistory"; path: string };
+    | { type: "openFile"; target: RepoPathRef }
+    | { type: "deleteFile"; target: RepoPathRef }
+    | { type: "showHistory"; target: RepoPathRef }
+    | { type: "setCurrentRepository"; repoRoot: string };
 
 /** Messages sent FROM the extension host TO the webview. */
 export type InboundMessage =
     | {
           type: "update";
+          repositories: RepositoryContextInfo[];
           files: WorkingFile[];
           stashes: StashEntry[];
           shelfFiles: WorkingFile[];
@@ -57,6 +60,7 @@ export type InboundMessage =
 
 /** Reducer state for the commit panel app. */
 export interface CommitPanelState {
+    repositories: RepositoryContextInfo[];
     files: WorkingFile[];
     stashes: StashEntry[];
     shelfFiles: WorkingFile[];
@@ -76,6 +80,7 @@ export interface CommitPanelState {
 export type CommitPanelAction =
     | {
           type: "SET_FILES_AND_STASHES";
+          repositories: RepositoryContextInfo[];
           files: WorkingFile[];
           stashes: StashEntry[];
           shelfFiles: WorkingFile[];

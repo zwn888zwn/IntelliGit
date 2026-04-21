@@ -6,7 +6,7 @@ import type { CommitDetail, ThemeFolderIconMap, ThemeIconFont, ThemeTreeIcon } f
 /** Messages sent FROM the webview TO the extension host. */
 export type CommitInfoOutbound =
     | { type: "ready" }
-    | { type: "openCommitFileDiff"; commitHash: string; filePath: string };
+    | { type: "openCommitFileDiff"; commitHash: string; filePath: string; repoRoot: string };
 
 /** Messages sent FROM the extension host TO the webview. */
 export type CommitInfoInbound =

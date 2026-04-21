@@ -138,6 +138,8 @@ describe("CommitList integration", () => {
                 date: "2026-02-19T00:00:00Z",
                 parentHashes: ["p1"],
                 refs: ["HEAD -> main"],
+                repoId: "repo-a",
+                repoRoot: "/repo-a",
             },
             {
                 hash: "bbb2222",
@@ -148,6 +150,8 @@ describe("CommitList integration", () => {
                 date: "2026-02-18T00:00:00Z",
                 parentHashes: ["p1", "p2"],
                 refs: [],
+                repoId: "repo-a",
+                repoRoot: "/repo-a",
             },
         ];
         const onSelectCommit = vi.fn();
@@ -157,11 +161,29 @@ describe("CommitList integration", () => {
         const { root, container } = mount(
             <CommitList
                 commits={commits}
+                repositories={[
+                    {
+                        root: "/repo-a",
+                        name: "repo-a",
+                        relativePath: "repo-a",
+                        repoId: "repo-a",
+                        color: "#4CAF50",
+                    },
+                ]}
+                repository={{
+                    root: "/repo-a",
+                    name: "repo-a",
+                    relativePath: "repo-a",
+                    repoId: "repo-a",
+                    color: "#4CAF50",
+                }}
                 selectedHash={null}
                 filterText=""
                 hasMore={true}
                 unpushedHashes={new Set(["aaa1111"])}
                 selectedBranch="main"
+                repoRailExpanded={false}
+                onToggleRepoRail={vi.fn()}
                 onSelectCommit={onSelectCommit}
                 onFilterText={onFilterText}
                 onLoadMore={onLoadMore}

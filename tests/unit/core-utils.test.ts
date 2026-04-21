@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { GitOps } from "../../src/git/operations";
-import { computeGraph } from "../../src/webviews/react/graph";
+import { computeGraph, MAX_RENDER_COLUMNS } from "../../src/webviews/react/graph";
 import { formatDateTime } from "../../src/webviews/react/shared/date";
 import {
     FILE_TYPE_BADGES,
@@ -210,6 +210,25 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
         expect(merge[0].connectionsDown.length).toBeGreaterThan(1);
+    });
+
+    it("graph compute compresses wide histories into overflow arrows", () => {
+        const wide = computeGraph([
+            { hash: "merge", parentHashes: ["a", "b", "c", "d", "e", "f", "g"] },
+            { hash: "a", parentHashes: ["base"] },
+            { hash: "b", parentHashes: ["base"] },
+            { hash: "c", parentHashes: ["base"] },
+            { hash: "d", parentHashes: ["base"] },
+            { hash: "e", parentHashes: ["base"] },
+            { hash: "f", parentHashes: ["base"] },
+            { hash: "g", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(wide.some((row) => row.numColumns === MAX_RENDER_COLUMNS)).toBe(true);
+        expect(
+            wide.some((row) => row.overflowAbove.length > 0 || row.overflowBelow.length > 0),
+        ).toBe(true);
     });
 
     it("date formatting falls back safely on invalid date", () => {

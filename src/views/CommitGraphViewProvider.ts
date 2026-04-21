@@ -21,6 +21,11 @@ import { getErrorMessage } from "../utils/errors";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import { buildWebviewShellHtml } from "./webviewHtml";
+import type { RepositoryEntry } from "../services/RepositoryContextService";
+
+interface CommitGraphRefreshOptions {
+    reset?: boolean;
+}
 
 export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = "intelligit.commitGraph";
@@ -45,7 +50,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
 
-    private readonly _onCommitSelected = new vscode.EventEmitter<string>();
+    private readonly _onCommitSelected = new vscode.EventEmitter<{ hash: string; repoRoot: string }>();
     readonly onCommitSelected = this._onCommitSelected.event;
 
     private readonly _onBranchFilterChanged = new vscode.EventEmitter<string | null>();
@@ -60,18 +65,22 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private readonly _onCommitAction = new vscode.EventEmitter<{
         action: CommitAction;
         hash: string;
+        repoRoot: string;
     }>();
     readonly onCommitAction = this._onCommitAction.event;
 
     private readonly _onOpenCommitFileDiff = new vscode.EventEmitter<{
         commitHash: string;
         filePath: string;
+        repoRoot: string;
     }>();
     readonly onOpenCommitFileDiff = this._onOpenCommitFileDiff.event;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
         private readonly gitOps: GitOps,
+        private readonly listRepositories: () => RepositoryEntry[] = () => [],
+        private readonly getRepositoryByRoot: (root: string) => RepositoryEntry | null = () => null,
     ) {
         this.iconTheme = new IconThemeService(this.extensionUri);
     }
@@ -120,7 +129,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         }
                         break;
                     case "selectCommit":
-                        this._onCommitSelected.fire(msg.hash);
+                        if (msg.repoRoot) {
+                            this._onCommitSelected.fire({ hash: msg.hash, repoRoot: msg.repoRoot });
+                        } else {
+                            this._onCommitSelected.fire(msg.hash as never);
+                        }
                         break;
                     case "loadMore":
                         await this.loadMore();
@@ -143,16 +156,32 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         });
                         break;
                     case "commitAction":
-                        this._onCommitAction.fire({
-                            action: msg.action,
-                            hash: msg.hash,
-                        });
+                        if (msg.repoRoot) {
+                            this._onCommitAction.fire({
+                                action: msg.action,
+                                hash: msg.hash,
+                                repoRoot: msg.repoRoot,
+                            });
+                        } else {
+                            this._onCommitAction.fire({
+                                action: msg.action,
+                                hash: msg.hash,
+                            } as never);
+                        }
                         break;
                     case "openCommitFileDiff":
-                        this._onOpenCommitFileDiff.fire({
-                            commitHash: msg.commitHash,
-                            filePath: msg.filePath,
-                        });
+                        if (msg.repoRoot) {
+                            this._onOpenCommitFileDiff.fire({
+                                commitHash: msg.commitHash,
+                                filePath: msg.filePath,
+                                repoRoot: msg.repoRoot,
+                            });
+                        } else {
+                            this._onOpenCommitFileDiff.fire({
+                                commitHash: msg.commitHash,
+                                filePath: msg.filePath,
+                            } as never);
+                        }
                         break;
                 }
             } catch (err) {
@@ -201,10 +230,14 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         await this.loadInitial();
     }
 
-    async refresh(): Promise<void> {
+    async refresh(options: CommitGraphRefreshOptions = {}): Promise<void> {
         await this.iconTheme.initIconThemeData();
         await this.sendBranches();
-        await this.loadInitial();
+        if (options.reset) {
+            await this.loadInitial();
+            return;
+        }
+        await this.reloadCurrentWindow();
     }
 
     setCommitDetail(detail: CommitDetail): void {
@@ -226,10 +259,24 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this.postCommitDetailState();
     }
 
+    private getRepositories(): RepositoryEntry[] {
+        const repositories = this.listRepositories();
+        if (repositories.length > 0) return repositories;
+        if (!this.repository) return [];
+        return [
+            {
+                root: this.repository.root,
+                uri: { fsPath: this.repository.root, path: this.repository.root } as vscode.Uri,
+                info: this.repository,
+                gitOps: this.gitOps,
+                executor: {} as RepositoryEntry["executor"],
+            },
+        ];
+    }
+
     async revealCommit(hash: string): Promise<void> {
         this.pendingRevealHash = hash;
         if (!this.webviewReady) return;
-        if (!this.repository) return;
 
         const requestId = ++this.requestSeq;
         this.loadingMore = false;
@@ -241,7 +288,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         try {
             const [loadResult, unpushedHashes] = await Promise.all([
                 this.loadCommitsUntilHash(hash, requestId),
-                this.gitOps.getUnpushedCommitHashes(),
+                this.getUnpushedHashes(),
             ]);
             if (requestId !== this.requestSeq) return;
             const commits = loadResult.commits;
@@ -270,7 +317,9 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             }
 
             try {
-                const detail = await this.gitOps.getCommitDetail(hash);
+                const detail = foundCommit.repoRoot
+                    ? await this.getRepositoryEntry(foundCommit.repoRoot).gitOps.getCommitDetail(hash)
+                    : await this.gitOps.getCommitDetail(hash);
                 if (requestId !== this.requestSeq) return;
                 this.setCommitDetail(detail);
             } catch (err) {
@@ -290,6 +339,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private async sendBranches(): Promise<void> {
         this.branchFolderIconsByName = await this.iconTheme.getFolderIconsByBranches(this.branches);
         const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
+        this.postToWebview({
+            type: "setRepositories",
+            repositories: this.getRepositories().map((entry) => entry.info),
+        });
         this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.postToWebview({
             type: "setBranches",
@@ -306,7 +359,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this.offset = 0;
         this.loadingMore = false;
 
-        if (!this.repository) {
+        if (this.getRepositories().length === 0) {
             this.loadedCommits = [];
             this.postToWebview({
                 type: "loadCommits",
@@ -325,13 +378,8 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
         try {
             const [commits, unpushedHashes] = await Promise.all([
-                this.gitOps.getLog(
-                    this.PAGE_SIZE,
-                    this.currentBranch ?? undefined,
-                    this.filterText || undefined,
-                    0,
-                ),
-                this.gitOps.getUnpushedCommitHashes(),
+                this.loadPage(0),
+                this.getUnpushedHashes(),
             ]);
             if (requestId !== this.requestSeq) return;
             this.offset = commits.length;
@@ -351,19 +399,68 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private async reloadCurrentWindow(): Promise<void> {
+        if (this.loadedCommits.length === 0) {
+            await this.loadInitial();
+            return;
+        }
+
+        const requestId = ++this.requestSeq;
+        this.loadingMore = false;
+
+        if (this.getRepositories().length === 0) {
+            this.loadedCommits = [];
+            this.offset = 0;
+            this.postToWebview({
+                type: "loadCommits",
+                commits: [],
+                hasMore: false,
+                append: false,
+                unpushedHashes: [],
+            });
+            return;
+        }
+
+        if (this.currentBranch && !this.branches.some((branch) => branch.name === this.currentBranch)) {
+            this.currentBranch = null;
+            this.postToWebview({ type: "setSelectedBranch", branch: null });
+            await this.loadInitial();
+            return;
+        }
+
+        const windowSize = Math.max(this.loadedCommits.length, this.offset, this.PAGE_SIZE);
+
+        try {
+            const [loadResult, unpushedHashes] = await Promise.all([
+                this.loadWindow(windowSize),
+                this.getUnpushedHashes(),
+            ]);
+            if (requestId !== this.requestSeq) return;
+            this.loadedCommits = loadResult.commits;
+            this.offset = loadResult.commits.length;
+            this.postToWebview({
+                type: "loadCommits",
+                commits: loadResult.commits,
+                hasMore: loadResult.hasMore,
+                append: false,
+                unpushedHashes,
+            });
+        } catch (err) {
+            if (requestId !== this.requestSeq) return;
+            const message = getErrorMessage(err);
+            vscode.window.showErrorMessage(`Git log error: ${message}`);
+            this.postToWebview({ type: "loadError", message });
+        }
+    }
+
     private async loadMore(): Promise<void> {
-        if (!this.repository || this.loadingMore) return;
+        if (this.getRepositories().length === 0 || this.loadingMore) return;
         this.loadingMore = true;
         const requestId = ++this.requestSeq;
         try {
             const [commits, unpushedHashes] = await Promise.all([
-                this.gitOps.getLog(
-                    this.PAGE_SIZE,
-                    this.currentBranch ?? undefined,
-                    this.filterText || undefined,
-                    this.offset,
-                ),
-                this.gitOps.getUnpushedCommitHashes(),
+                this.loadPage(this.offset),
+                this.getUnpushedHashes(),
             ]);
             if (requestId !== this.requestSeq) return;
             this.offset += commits.length;
@@ -396,11 +493,18 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         hash: string,
         requestId: number,
     ): Promise<{ commits: Commit[]; hasMore: boolean }> {
+        if (this.currentBranch) {
+            const commits = await this.loadPage(0);
+            return {
+                commits,
+                hasMore: commits.length >= this.PAGE_SIZE,
+            };
+        }
         const commits: Commit[] = [];
         let skip = 0;
 
         for (;;) {
-            const page = await this.gitOps.getLog(this.PAGE_SIZE, undefined, undefined, skip);
+            const page = await this.loadPage(skip);
             if (requestId !== this.requestSeq) return { commits, hasMore: false };
             commits.push(...page);
             if (page.some((commit) => commit.hash === hash)) {
@@ -411,6 +515,84 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             }
             skip += page.length;
         }
+    }
+
+    private async loadWindow(count: number): Promise<{ commits: Commit[]; hasMore: boolean }> {
+        const limit = Math.max(count, 1);
+        if (this.currentBranch) {
+            if (!this.repository) return { commits: [], hasMore: false };
+            const commits = await this.gitOps.getLog(
+                limit + 1,
+                this.currentBranch ?? undefined,
+                this.filterText || undefined,
+                0,
+            );
+            return {
+                commits: commits.slice(0, limit),
+                hasMore: commits.length > limit,
+            };
+        }
+
+        const pages = await Promise.all(
+            this.getRepositories().map(async (entry) =>
+                entry.gitOps.getLog(limit + 1, undefined, this.filterText || undefined, 0),
+            ),
+        );
+
+        const merged = pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+        return {
+            commits: merged.slice(0, limit),
+            hasMore: merged.length > limit,
+        };
+    }
+
+    private async loadPage(skip: number): Promise<Commit[]> {
+        if (this.currentBranch) {
+            if (!this.repository) return [];
+            return this.gitOps.getLog(
+                this.PAGE_SIZE,
+                this.currentBranch ?? undefined,
+                this.filterText || undefined,
+                skip,
+            );
+        }
+
+        const pages = await Promise.all(
+            this.getRepositories().map(async (entry) =>
+                entry.gitOps.getLog(
+                    this.PAGE_SIZE + skip,
+                    undefined,
+                    this.filterText || undefined,
+                    0,
+                ),
+            ),
+        );
+
+        return pages
+            .flat()
+            .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+            .slice(skip, skip + this.PAGE_SIZE);
+    }
+
+    private async getUnpushedHashes(): Promise<string[]> {
+        if (this.currentBranch) {
+            return this.gitOps.getUnpushedCommitHashes();
+        }
+        const hashes = await Promise.all(
+            this.getRepositories().map((entry) => entry.gitOps.getUnpushedCommitHashes()),
+        );
+        return Array.from(new Set(hashes.flat()));
+    }
+
+    private getRepositoryEntry(root: string): RepositoryEntry {
+        const repository =
+            this.getRepositoryByRoot(root) ??
+            this.getRepositories().find((entry) => entry.root === root) ??
+            null;
+        if (!repository) {
+            throw new Error(`No repository found for '${root}'.`);
+        }
+        return repository;
     }
 
     private postToWebview(msg: CommitGraphInbound): void {

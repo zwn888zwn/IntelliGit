@@ -9,7 +9,7 @@ import { TabBar } from "./components/TabBar";
 import { CommitTab } from "./components/CommitTab";
 import { ShelfTab } from "./components/ShelfTab";
 import { useExtensionMessages } from "./hooks/useExtensionMessages";
-import { useCheckedFiles } from "./hooks/useCheckedFiles";
+import { getCheckedFileKey, useCheckedFiles } from "./hooks/useCheckedFiles";
 import { getVsCodeApi } from "./hooks/useVsCodeApi";
 import { useDragResize } from "./hooks/useDragResize";
 import { ThemeIconFontFaces } from "../shared/components";
@@ -50,9 +50,12 @@ function App(): React.ReactElement {
     const stageCheckedAndCommit = useCallback(
         (push: boolean) => {
             const msg = state.commitMessage.trim();
+            const targets = state.files
+                .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
+                .map((file) => ({ repoRoot: file.repoRoot, path: file.path }));
             vscode.postMessage({
                 type: "commitSelected",
-                paths: Array.from(checkedPaths),
+                targets,
                 message: msg,
                 amend: state.isAmend,
                 push,
@@ -96,6 +99,8 @@ function App(): React.ReactElement {
                     commitContent={
                         <CommitTab
                             files={state.files}
+                            repositories={state.repositories}
+                            currentRepository={state.repository}
                             commitMessage={state.commitMessage}
                             isAmend={state.isAmend}
                             isRefreshing={state.isRefreshing}

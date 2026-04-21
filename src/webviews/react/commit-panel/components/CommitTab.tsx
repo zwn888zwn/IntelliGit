@@ -8,10 +8,19 @@ import { FileTree } from "./FileTree";
 import { CommitArea } from "./CommitArea";
 import { useDragResize } from "../hooks/useDragResize";
 import { getVsCodeApi } from "../hooks/useVsCodeApi";
-import type { ThemeFolderIconMap, ThemeTreeIcon, WorkingFile } from "../../../../types";
+import type {
+    RepoPathRef,
+    RepositoryContextInfo,
+    ThemeFolderIconMap,
+    ThemeTreeIcon,
+    WorkingFile,
+} from "../../../../types";
+import { getCheckedFileKey } from "../hooks/useCheckedFiles";
 
 interface Props {
     files: WorkingFile[];
+    repositories: RepositoryContextInfo[];
+    currentRepository: RepositoryContextInfo | null;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
@@ -19,7 +28,7 @@ interface Props {
     isAmend: boolean;
     isRefreshing: boolean;
     checkedPaths: Set<string>;
-    onToggleFile: (path: string) => void;
+    onToggleFile: (file: WorkingFile) => void;
     onToggleFolder: (files: WorkingFile[]) => void;
     onToggleSection: (files: WorkingFile[]) => void;
     isAllChecked: (files: WorkingFile[]) => boolean;
@@ -34,6 +43,8 @@ interface Props {
 
 export function CommitTab({
     files,
+    repositories,
+    currentRepository,
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
@@ -68,27 +79,38 @@ export function CommitTab({
     }, [vscode]);
 
     const handleRollback = useCallback(() => {
-        vscode.postMessage({ type: "rollback", paths: Array.from(checkedPaths) });
-    }, [vscode, checkedPaths]);
+        const targets = files
+            .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
+            .map<RepoPathRef>((file) => ({ repoRoot: file.repoRoot, path: file.path }));
+        vscode.postMessage({ type: "rollback", targets });
+    }, [vscode, checkedPaths, files]);
 
     const handleShelve = useCallback(() => {
-        const selected = Array.from(checkedPaths);
+        const selected = files
+            .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
+            .map<RepoPathRef>((file) => ({ repoRoot: file.repoRoot, path: file.path }));
         vscode.postMessage({
             type: "shelveSave",
-            paths: selected.length > 0 ? selected : undefined,
+            targets: selected.length > 0 ? selected : undefined,
         });
-    }, [vscode, checkedPaths]);
+    }, [vscode, checkedPaths, files]);
 
     const handleShowDiff = useCallback(() => {
-        const selected = Array.from(checkedPaths);
+        const selected = files.filter((file) => checkedPaths.has(getCheckedFileKey(file)));
         if (selected.length > 0) {
-            vscode.postMessage({ type: "showDiff", path: selected[0] });
+            vscode.postMessage({
+                type: "showDiff",
+                target: { repoRoot: selected[0].repoRoot, path: selected[0].path },
+            });
         }
-    }, [vscode, checkedPaths]);
+    }, [vscode, checkedPaths, files]);
 
     const handleFileClick = useCallback(
-        (path: string) => {
-            vscode.postMessage({ type: "showDiff", path });
+        (file: WorkingFile) => {
+            vscode.postMessage({
+                type: "showDiff",
+                target: { repoRoot: file.repoRoot, path: file.path },
+            });
         },
         [vscode],
     );
@@ -108,6 +130,8 @@ export function CommitTab({
 
             <Box flex="1 1 auto" overflowY="auto" minH="40px">
                 <FileTree
+                    repositories={repositories}
+                    currentRepository={currentRepository}
                     files={files}
                     groupByDir={groupByDir}
                     folderIcon={folderIcon}
@@ -119,6 +143,9 @@ export function CommitTab({
                     onToggleSection={onToggleSection}
                     isAllChecked={isAllChecked}
                     isSomeChecked={isSomeChecked}
+                    onSelectRepository={(repoRoot) =>
+                        vscode.postMessage({ type: "setCurrentRepository", repoRoot })
+                    }
                     onFileClick={handleFileClick}
                     expandAllSignal={expandAllSignal}
                     collapseAllSignal={collapseAllSignal}

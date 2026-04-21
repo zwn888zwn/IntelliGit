@@ -16,8 +16,8 @@ interface Props {
     depth: number;
     isChecked: boolean;
     groupByDir: boolean;
-    onToggle: (path: string) => void;
-    onClick: (path: string) => void;
+    onToggle: (file: WorkingFile) => void;
+    onClick: (file: WorkingFile) => void;
 }
 
 function FileRowInner({
@@ -48,17 +48,18 @@ function FileRowInner({
             data-vscode-context={JSON.stringify({
                 webviewSection: "file",
                 filePath: file.path,
+                repoRoot: file.repoRoot,
                 preventDefaultContextMenuItems: true,
             })}
             onClick={(e) => {
                 if ((e.target as HTMLElement).tagName === "INPUT") return;
-                onClick(file.path);
+                onClick(file);
             }}
             title={file.path}
         >
             <IndentGuides treeDepth={depth} />
             <Box as="span" w="14px" flexShrink={0} />
-            <VscCheckbox isChecked={isChecked} onChange={() => onToggle(file.path)} />
+            <VscCheckbox isChecked={isChecked} onChange={() => onToggle(file)} />
             <FileTypeIcon status={file.status} icon={file.icon} />
             <Box
                 as="span"

@@ -9,6 +9,7 @@ export const ROOT_STYLE: CSSProperties = {
     display: "flex",
     flexDirection: "column",
     height: "100%",
+    minHeight: 0,
 };
 
 export const FILTER_BAR_STYLE: CSSProperties = {
@@ -89,7 +90,8 @@ export function headerRowStyle(graphWidth: number): CSSProperties {
 }
 
 export const SCROLL_VIEWPORT_STYLE: CSSProperties = {
-    flex: 1,
+    height: "100%",
+    minHeight: 0,
     overflow: "auto",
 };
 

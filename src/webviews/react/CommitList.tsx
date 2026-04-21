@@ -3,7 +3,7 @@
 // Includes a text search filter bar. Branch filtering is handled by the sidebar.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LuSearch, LuX } from "react-icons/lu";
+import { LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
 import type { Commit, RepositoryContextInfo } from "../../types";
 import { computeGraph, LANE_WIDTH, ROW_HEIGHT } from "./graph";
 import { ContextMenu } from "./shared/components/ContextMenu";
@@ -30,9 +30,11 @@ import {
 
 const MIN_PREFIX_LENGTH = 7;
 const MAX_GRAPH_WIDTH = 200;
+const PRELOAD_ROWS = 80;
 
 interface Props {
     commits: Commit[];
+    repositories: RepositoryContextInfo[];
     repository: RepositoryContextInfo | null;
     selectedHash: string | null;
     revealHash: string | null;
@@ -40,6 +42,8 @@ interface Props {
     hasMore: boolean;
     unpushedHashes: Set<string>;
     selectedBranch: string | null;
+    repoRailExpanded: boolean;
+    onToggleRepoRail: () => void;
     onSelectCommit: (hash: string) => void;
     onFilterText: (text: string) => void;
     onLoadMore: () => void | Promise<void>;
@@ -48,6 +52,7 @@ interface Props {
 
 export function CommitList({
     commits,
+    repositories,
     repository,
     selectedHash,
     revealHash,
@@ -55,6 +60,8 @@ export function CommitList({
     hasMore,
     unpushedHashes,
     selectedBranch,
+    repoRailExpanded,
+    onToggleRepoRail,
     onSelectCommit,
     onFilterText,
     onLoadMore,
@@ -67,7 +74,7 @@ export function CommitList({
     );
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
-    const isLoadingMoreRef = useRef(false);
+    const [loadMoreDebug, setLoadMoreDebug] = useState({ count: 0, lastVisibleEnd: 0 });
 
     const graphRows = useMemo(() => computeGraph(commits), [commits]);
     const maxCols = useMemo(
@@ -75,12 +82,19 @@ export function CommitList({
         [graphRows],
     );
     const graphWidth = Math.min(maxCols * LANE_WIDTH + 12, MAX_GRAPH_WIDTH);
+    const repoRailWidth = repoRailExpanded ? 168 : 16;
+    const totalGraphWidth = repoRailWidth + graphWidth;
+    const repositoryLookup = useMemo(
+        () => new Map(repositories.map((item) => [item.root, item])),
+        [repositories],
+    );
 
     useCommitGraphCanvas({
         canvasRef,
         viewportRef,
         rows: graphRows,
         graphWidth,
+        graphOffset: repoRailWidth,
     });
 
     useEffect(() => {
@@ -139,29 +153,42 @@ export function CommitList({
         [contextMenu, onCommitAction],
     );
 
+    const maybeLoadMore = useCallback(
+        (visibleEnd: number) => {
+            if (!hasMore) return;
+            if (visibleEnd < Math.max(0, commits.length - PRELOAD_ROWS)) return;
+            setLoadMoreDebug((current) => ({
+                count: current.count + 1,
+                lastVisibleEnd: visibleEnd,
+            }));
+            void onLoadMore();
+        },
+        [commits.length, hasMore, onLoadMore],
+    );
+
     const handleScroll = useCallback(
         (event: React.UIEvent<HTMLDivElement>) => {
-            const el = event.currentTarget;
-            setScrollTop(el.scrollTop);
-            if (
-                hasMore &&
-                !isLoadingMoreRef.current &&
-                el.scrollTop + el.clientHeight >= el.scrollHeight - 100
-            ) {
-                isLoadingMoreRef.current = true;
-                Promise.resolve(onLoadMore())
-                    .catch(() => undefined)
-                    .finally(() => {
-                        isLoadingMoreRef.current = false;
-                    });
-            }
+            const viewport = event.currentTarget;
+            const nextScrollTop = viewport.scrollTop;
+            setScrollTop(nextScrollTop);
+
+            if (viewport.clientHeight <= 0) return;
+            const overscan = 8;
+            const nextVisibleEnd = Math.min(
+                commits.length,
+                Math.ceil((nextScrollTop + viewport.clientHeight) / ROW_HEIGHT) + overscan,
+            );
+            maybeLoadMore(nextVisibleEnd);
         },
-        [hasMore, onLoadMore],
+        [commits.length, maybeLoadMore],
     );
 
     const visibleRange = useMemo(() => {
         if (commits.length === 0) {
             return { start: 0, end: 0 };
+        }
+        if (viewportHeight <= 0) {
+            return { start: 0, end: Math.min(commits.length, 40) };
         }
         const overscan = 8;
         const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - overscan);
@@ -169,6 +196,12 @@ export function CommitList({
             commits.length,
             Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + overscan,
         );
+        if (end <= start) {
+            return {
+                start: Math.max(0, Math.min(commits.length - 1, start)),
+                end: Math.min(commits.length, Math.max(1, start + 1)),
+            };
+        }
         return { start, end };
     }, [commits.length, scrollTop, viewportHeight]);
 
@@ -176,6 +209,10 @@ export function CommitList({
         () => commits.slice(visibleRange.start, visibleRange.end),
         [commits, visibleRange.end, visibleRange.start],
     );
+
+    useEffect(() => {
+        maybeLoadMore(visibleRange.end);
+    }, [maybeLoadMore, visibleRange.end]);
 
     useEffect(() => {
         if (!revealHash) return;
@@ -229,9 +266,22 @@ export function CommitList({
                 >
                     Branch: {selectedBranch ?? "All branches"}
                 </span>
+                <span
+                    style={{
+                        ...BRANCH_SCOPE_STYLE,
+                        maxWidth: "none",
+                        marginLeft: "auto",
+                        opacity: 0.6,
+                        fontFamily: "var(--vscode-editor-font-family, monospace)",
+                    }}
+                    title={`commits=${commits.length}, visible=${visibleCommits.length}, height=${viewportHeight}, top=${scrollTop}, start=${visibleRange.start}, end=${visibleRange.end}, hasMore=${hasMore}, loadMoreCount=${loadMoreDebug.count}, lastVisibleEnd=${loadMoreDebug.lastVisibleEnd}`}
+                >
+                    dbg {commits.length}/{visibleCommits.length} h{viewportHeight} y{scrollTop} m
+                    {hasMore ? 1 : 0} l{loadMoreDebug.count}@{loadMoreDebug.lastVisibleEnd}
+                </span>
             </div>
 
-            <div style={headerRowStyle(graphWidth)}>
+            <div style={headerRowStyle(totalGraphWidth)}>
                 <span style={{ flex: 1 }}>Commit</span>
                 <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
                 <span style={{ width: DATE_COL_WIDTH, textAlign: "right", marginLeft: 4 }}>
@@ -239,69 +289,161 @@ export function CommitList({
                 </span>
             </div>
 
-            <div
-                ref={viewportRef}
-                data-testid="commit-list-viewport"
-                style={SCROLL_VIEWPORT_STYLE}
-                onScroll={handleScroll}
-            >
-                <div style={contentContainerStyle(commits.length + (hasMore ? 1 : 0))}>
-                    <canvas ref={canvasRef} style={CANVAS_STYLE} />
+            <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
+                <div
+                    ref={viewportRef}
+                    data-testid="commit-list-viewport"
+                    style={SCROLL_VIEWPORT_STYLE}
+                    onScroll={handleScroll}
+                >
+                    <div style={contentContainerStyle(commits.length + (hasMore ? 1 : 0))}>
+                        <canvas ref={canvasRef} style={CANVAS_STYLE} />
 
-                    {!repository && commits.length === 0 && (
                         <div
                             style={{
-                                ...LOADING_MORE_STYLE,
+                                position: "absolute",
+                                left: 0,
+                                top: 0,
+                                transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)`,
+                                width: repoRailWidth,
+                                zIndex: 3,
+                            }}
+                        >
+                            {visibleCommits.map((commit, offset) => {
+                                const repo = repositoryLookup.get(commit.repoRoot);
+                                const top = offset * ROW_HEIGHT;
+                                return (
+                                    <button
+                                        key={`repo-rail:${commit.repoRoot}:${commit.hash}:${top}`}
+                                        type="button"
+                                        title={repo?.root ?? commit.repoRoot}
+                                        onClick={onToggleRepoRail}
+                                        style={{
+                                            position: "absolute",
+                                            left: 0,
+                                            top,
+                                            width: repoRailWidth,
+                                            height: ROW_HEIGHT,
+                                            border: "none",
+                                            borderRight: "1px solid rgba(255,255,255,0.08)",
+                                            background: repo?.color ?? "#666",
+                                            color: "rgba(255,255,255,0.92)",
+                                            padding: repoRailExpanded ? "0 8px" : 0,
+                                            textAlign: "left",
+                                            overflow: "hidden",
+                                            cursor: "pointer",
+                                            opacity: selectedHash === commit.hash ? 1 : 0.72,
+                                        }}
+                                    >
+                                        {repoRailExpanded && (
+                                            <span
+                                                style={{
+                                                    display: "block",
+                                                    overflow: "hidden",
+                                                    textOverflow: "ellipsis",
+                                                    whiteSpace: "nowrap",
+                                                    fontSize: "11px",
+                                                    fontWeight: 700,
+                                                }}
+                                            >
+                                                {repo?.name ?? commit.repoId}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        {!repository && commits.length === 0 && (
+                            <div
+                                style={{
+                                    ...LOADING_MORE_STYLE,
+                                    position: "absolute",
+                                    left: 0,
+                                    right: 0,
+                                    top: 0,
+                                }}
+                            >
+                                No git repository found in this workspace.
+                            </div>
+                        )}
+
+                        <div
+                            style={{
                                 position: "absolute",
                                 left: 0,
                                 right: 0,
                                 top: 0,
+                                transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)`,
+                                zIndex: 2,
                             }}
                         >
-                            No git repository found in this workspace.
+                            {visibleCommits.map((commit, offset) => {
+                                const idx = visibleRange.start + offset;
+                                return (
+                                    <CommitRow
+                                        key={`${commit.repoRoot}:${commit.hash}:${idx}`}
+                                        commit={commit}
+                                        graphWidth={totalGraphWidth}
+                                        isSelected={selectedHash === commit.hash}
+                                        isUnpushed={isUnpushedCommit(commit.hash)}
+                                        laneColor={graphRows[idx]?.color}
+                                        onSelect={onSelectCommit}
+                                        onContextMenu={handleRowContextMenu}
+                                    />
+                                );
+                            })}
                         </div>
-                    )}
 
-                    <div
-                        style={{
-                            position: "absolute",
-                            left: 0,
-                            right: 0,
-                            top: visibleRange.start * ROW_HEIGHT,
-                            zIndex: 2,
-                        }}
-                    >
-                        {visibleCommits.map((commit, offset) => {
-                            const idx = visibleRange.start + offset;
-                            return (
-                                <CommitRow
-                                    key={commit.hash}
-                                    commit={commit}
-                                    graphWidth={graphWidth}
-                                    isSelected={selectedHash === commit.hash}
-                                    isUnpushed={isUnpushedCommit(commit.hash)}
-                                    laneColor={graphRows[idx]?.color}
-                                    onSelect={onSelectCommit}
-                                    onContextMenu={handleRowContextMenu}
-                                />
-                            );
-                        })}
+                        {hasMore && (
+                            <div
+                                style={{
+                                    ...LOADING_MORE_STYLE,
+                                    position: "absolute",
+                                    left: 0,
+                                    right: 0,
+                                    top: commits.length * ROW_HEIGHT,
+                                }}
+                            >
+                                Loading more...
+                            </div>
+                        )}
                     </div>
-
-                    {hasMore && (
-                        <div
-                            style={{
-                                ...LOADING_MORE_STYLE,
-                                position: "absolute",
-                                left: 0,
-                                right: 0,
-                                top: commits.length * ROW_HEIGHT,
-                            }}
-                        >
-                            Loading more...
-                        </div>
-                    )}
                 </div>
+
+                <button
+                    type="button"
+                    aria-label={repoRailExpanded ? "Collapse repository rail" : "Expand repository rail"}
+                    title={repoRailExpanded ? "Collapse repository rail" : "Expand repository rail"}
+                    onClick={onToggleRepoRail}
+                    style={{
+                        position: "absolute",
+                        left: 0,
+                        bottom: 8,
+                        width: repoRailWidth,
+                        height: 22,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: repoRailExpanded ? "space-between" : "center",
+                        gap: 6,
+                        padding: repoRailExpanded ? "0 8px" : 0,
+                        border: "none",
+                        borderTop: "1px solid rgba(255,255,255,0.08)",
+                        background: "var(--vscode-sideBarSectionHeader-background, rgba(255,255,255,0.06))",
+                        color: "var(--vscode-foreground)",
+                        zIndex: 4,
+                        cursor: "pointer",
+                    }}
+                >
+                    {repoRailExpanded ? (
+                        <>
+                            <span style={{ fontSize: "10px", whiteSpace: "nowrap" }}>Repos</span>
+                            <LuPanelLeftClose size={12} />
+                        </>
+                    ) : (
+                        <LuPanelLeftOpen size={12} />
+                    )}
+                </button>
             </div>
 
             {contextMenu && (

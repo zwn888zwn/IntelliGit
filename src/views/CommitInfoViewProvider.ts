@@ -17,6 +17,7 @@ export class CommitInfoViewProvider implements vscode.WebviewViewProvider {
     private readonly _onOpenCommitFileDiff = new vscode.EventEmitter<{
         commitHash: string;
         filePath: string;
+        repoRoot: string;
     }>();
     readonly onOpenCommitFileDiff = this._onOpenCommitFileDiff.event;
 
@@ -54,6 +55,7 @@ export class CommitInfoViewProvider implements vscode.WebviewViewProvider {
                     this._onOpenCommitFileDiff.fire({
                         commitHash: msg.commitHash,
                         filePath: msg.filePath,
+                        repoRoot: msg.repoRoot,
                     });
                     break;
             }

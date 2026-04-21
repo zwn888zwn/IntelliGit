@@ -6,6 +6,7 @@ import { getVsCodeApi } from "./useVsCodeApi";
 import type { CommitPanelState, CommitPanelAction, InboundMessage } from "../types";
 
 const initialState: CommitPanelState = {
+    repositories: [],
     files: [],
     stashes: [],
     shelfFiles: [],
@@ -26,6 +27,7 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
         case "SET_FILES_AND_STASHES":
             return {
                 ...state,
+                repositories: action.repositories,
                 files: action.files,
                 stashes: action.stashes,
                 shelfFiles: action.shelfFiles,
@@ -65,6 +67,7 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                 case "update":
                     dispatch({
                         type: "SET_FILES_AND_STASHES",
+                        repositories: msg.repositories,
                         files: msg.files,
                         stashes: msg.stashes,
                         shelfFiles: msg.shelfFiles,

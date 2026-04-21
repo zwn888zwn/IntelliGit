@@ -20,6 +20,7 @@ const OUTPUT_CHANNEL_NAME = "IntelliGit";
 type VsCodeApi = typeof import("vscode");
 type OutputChannelLike = { appendLine: (value: string) => void };
 type ConfirmSetUpstreamPush = (remote: string, branch: string) => Promise<boolean>;
+type RepoMetadata = { repoId: string; repoRoot: string };
 
 let cachedVsCodeApi: VsCodeApi | null | undefined;
 let outputChannel: OutputChannelLike | undefined;
@@ -77,6 +78,7 @@ export class GitOps {
     constructor(
         private readonly executor: GitExecutor,
         private readonly confirmSetUpstreamPush?: ConfirmSetUpstreamPush,
+        private readonly repoMetadata?: RepoMetadata,
     ) {}
 
     async isRepository(): Promise<boolean> {
@@ -171,6 +173,8 @@ export class GitOps {
             if (parts.length < 7) continue;
 
             commits.push({
+                repoId: this.repoMetadata?.repoId ?? ".",
+                repoRoot: this.repoMetadata?.repoRoot ?? "",
                 hash: parts[0],
                 shortHash: parts[1],
                 message: parts[2],
@@ -284,6 +288,8 @@ export class GitOps {
         }
 
         return {
+            repoId: this.repoMetadata?.repoId ?? ".",
+            repoRoot: this.repoMetadata?.repoRoot ?? "",
             hash: parts[0] || hash,
             shortHash: parts[1] || hash.slice(0, 7),
             message: parts[2] || "",
@@ -334,6 +340,8 @@ export class GitOps {
             if (hasStaged && hasUnstaged) {
                 if (stagedStatus) {
                     files.push({
+                        repoId: this.repoMetadata?.repoId ?? ".",
+                        repoRoot: this.repoMetadata?.repoRoot ?? "",
                         path,
                         status: stagedStatus,
                         staged: true,
@@ -347,6 +355,8 @@ export class GitOps {
                 // (e.g. "D" for a staged-add then deleted) must still be shown.
                 if (unstagedStatus && !(index === "A" && unstagedStatus === "M")) {
                     files.push({
+                        repoId: this.repoMetadata?.repoId ?? ".",
+                        repoRoot: this.repoMetadata?.repoRoot ?? "",
                         path,
                         status: unstagedStatus,
                         staged: false,
@@ -356,6 +366,8 @@ export class GitOps {
                 }
             } else if (hasStaged && stagedStatus) {
                 files.push({
+                    repoId: this.repoMetadata?.repoId ?? ".",
+                    repoRoot: this.repoMetadata?.repoRoot ?? "",
                     path,
                     status: stagedStatus,
                     staged: true,
@@ -364,6 +376,8 @@ export class GitOps {
                 });
             } else if (hasUnstaged && unstagedStatus) {
                 files.push({
+                    repoId: this.repoMetadata?.repoId ?? ".",
+                    repoRoot: this.repoMetadata?.repoRoot ?? "",
                     path,
                     status: unstagedStatus,
                     staged: false,
@@ -654,6 +668,8 @@ export class GitOps {
             const existing = files.get(path);
             if (existing) return existing;
             const created: WorkingFile = {
+                repoId: this.repoMetadata?.repoId ?? ".",
+                repoRoot: this.repoMetadata?.repoRoot ?? "",
                 path,
                 status,
                 staged: false,

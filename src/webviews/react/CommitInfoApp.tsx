@@ -52,8 +52,8 @@ function App(): React.ReactElement {
         return () => window.removeEventListener("message", handler);
     }, []);
 
-    const handleOpenDiff = useCallback((commitHash: string, filePath: string) => {
-        vscode.postMessage({ type: "openCommitFileDiff", commitHash, filePath });
+    const handleOpenDiff = useCallback((commitHash: string, filePath: string, repoRoot: string) => {
+        vscode.postMessage({ type: "openCommitFileDiff", commitHash, filePath, repoRoot });
     }, []);
 
     return (

@@ -30,12 +30,18 @@ export class RefreshService implements vscode.Disposable {
 
     constructor(
         private readonly deps: RefreshServiceDeps,
-        private repoRoot: string | null,
+        private repoRoots: string[] = [],
     ) {}
 
-    updateRepositoryRoot(repoRoot: string | null): void {
-        if (this.repoRoot === repoRoot) return;
-        this.repoRoot = repoRoot;
+    updateRepositoryRoots(repoRoots: string[]): void {
+        const normalized = [...repoRoots].sort();
+        if (
+            this.repoRoots.length === normalized.length &&
+            this.repoRoots.every((value, index) => value === normalized[index])
+        ) {
+            return;
+        }
+        this.repoRoots = normalized;
         this.disposeGitDirWatchers();
         this.registerGitDirWatchers();
     }
@@ -98,11 +104,8 @@ export class RefreshService implements vscode.Disposable {
         this.registerGitDirWatchers();
     }
 
-    private resolveGitDir(): string {
-        if (!this.repoRoot) {
-            return "";
-        }
-        const dotGit = path.join(this.repoRoot, ".git");
+    private resolveGitDir(repoRoot: string): string {
+        const dotGit = path.join(repoRoot, ".git");
         try {
             const stat = fs.statSync(dotGit);
             if (stat.isFile()) {
@@ -110,7 +113,7 @@ export class RefreshService implements vscode.Disposable {
                 const match = content.match(/^gitdir:\s*(.+)$/);
                 if (match) {
                     const gitDir = match[1];
-                    return path.isAbsolute(gitDir) ? gitDir : path.resolve(this.repoRoot, gitDir);
+                    return path.isAbsolute(gitDir) ? gitDir : path.resolve(repoRoot, gitDir);
                 }
             }
         } catch {
@@ -120,8 +123,6 @@ export class RefreshService implements vscode.Disposable {
     }
 
     private registerGitDirWatchers(): void {
-        if (!this.repoRoot) return;
-        const gitDir = this.resolveGitDir();
         const gitStateFiles = new Set([
             "HEAD",
             "FETCH_HEAD",
@@ -131,48 +132,48 @@ export class RefreshService implements vscode.Disposable {
             "index",
         ]);
 
-        try {
-            const dirWatcher = fs.watch(gitDir, (_event, filename) => {
-                if (!filename) {
-                    this.debouncedFullRefresh();
-                    return;
-                }
-                if (gitStateFiles.has(filename)) {
-                    if (filename === "index") {
-                        this.debouncedLightRefresh();
-                    } else {
+        for (const repoRoot of this.repoRoots) {
+            const gitDir = this.resolveGitDir(repoRoot);
+            try {
+                const dirWatcher = fs.watch(gitDir, (_event, filename) => {
+                    if (!filename) {
                         this.debouncedFullRefresh();
+                        return;
                     }
-                }
-            });
-            this.fsWatchers.push(dirWatcher);
-        } catch {
-            /* .git dir may not be watchable */
-        }
-
-        try {
-            // fs.watch with recursive: true is only supported on macOS and Windows.
-            // On Linux, use vscode.workspace.createFileSystemWatcher for cross-platform
-            // recursive watching of the refs directory.
-            const refsPath = path.join(gitDir, "refs");
-            if (process.platform === "linux") {
-                const pattern = new vscode.RelativePattern(vscode.Uri.file(refsPath), "**/*");
-                const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-                const handler = () => this.debouncedFullRefresh();
-                this.gitWatcherDisposables.push(
-                    watcher.onDidChange(handler),
-                    watcher.onDidCreate(handler),
-                    watcher.onDidDelete(handler),
-                    watcher,
-                );
-            } else {
-                const refsWatcher = fs.watch(refsPath, { recursive: true }, () =>
-                    this.debouncedFullRefresh(),
-                );
-                this.fsWatchers.push(refsWatcher);
+                    if (gitStateFiles.has(filename)) {
+                        if (filename === "index") {
+                            this.debouncedLightRefresh();
+                        } else {
+                            this.debouncedFullRefresh();
+                        }
+                    }
+                });
+                this.fsWatchers.push(dirWatcher);
+            } catch {
+                /* .git dir may not be watchable */
             }
-        } catch {
-            /* refs dir may not exist yet or may not be watchable */
+
+            try {
+                const refsPath = path.join(gitDir, "refs");
+                if (process.platform === "linux") {
+                    const pattern = new vscode.RelativePattern(vscode.Uri.file(refsPath), "**/*");
+                    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+                    const handler = () => this.debouncedFullRefresh();
+                    this.gitWatcherDisposables.push(
+                        watcher.onDidChange(handler),
+                        watcher.onDidCreate(handler),
+                        watcher.onDidDelete(handler),
+                        watcher,
+                    );
+                } else {
+                    const refsWatcher = fs.watch(refsPath, { recursive: true }, () =>
+                        this.debouncedFullRefresh(),
+                    );
+                    this.fsWatchers.push(refsWatcher);
+                }
+            } catch {
+                /* refs dir may not exist yet or may not be watchable */
+            }
         }
     }
 

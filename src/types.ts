@@ -10,9 +10,16 @@ export interface Branch {
 }
 
 export interface RepositoryContextInfo {
+    repoId: string;
     name: string;
     root: string;
     relativePath?: string;
+    color: string;
+}
+
+export interface RepoPathRef {
+    repoRoot: string;
+    path: string;
 }
 
 export interface ThemeTreeIcon {
@@ -41,6 +48,8 @@ export interface ThemeIconFont {
 }
 
 export interface Commit {
+    repoId: string;
+    repoRoot: string;
     hash: string;
     shortHash: string;
     message: string;
@@ -60,6 +69,8 @@ export interface CommitFile {
 }
 
 export interface CommitDetail {
+    repoId: string;
+    repoRoot: string;
     hash: string;
     shortHash: string;
     message: string;
@@ -73,6 +84,8 @@ export interface CommitDetail {
 }
 
 export interface WorkingFile {
+    repoId: string;
+    repoRoot: string;
     path: string;
     status: "M" | "A" | "D" | "U" | "?" | "R" | "C";
     staged: boolean;

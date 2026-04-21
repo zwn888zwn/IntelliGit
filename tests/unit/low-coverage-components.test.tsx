@@ -99,10 +99,10 @@ describe("low coverage components", () => {
             'span[title="feat: row coverage"]',
         ) as HTMLElement;
         expect(messageCell).toBeTruthy();
-        const compactRefCell = container.querySelector("[data-commit-tooltip]") as HTMLElement;
-        expect(compactRefCell?.getAttribute("data-commit-tooltip")).toContain(
-            "Branches: HEAD -> main",
-        );
+        const compactRefCell = container.querySelector(
+            'span[title*="Branches: HEAD -> main"]',
+        ) as HTMLElement;
+        expect(compactRefCell?.getAttribute("title")).toContain("Branches: HEAD -> main");
 
         const row = container.querySelector("div") as HTMLDivElement;
         act(() => {
@@ -392,16 +392,36 @@ describe("low coverage components", () => {
                 date: "2026-02-19T00:00:00Z",
                 parentHashes: ["p1"],
                 refs: [],
+                repoId: "repo-a",
+                repoRoot: "/repo-a",
             },
         ];
         const { root, container } = mount(
             <CommitList
                 commits={commits}
+                repositories={[
+                    {
+                        root: "/repo-a",
+                        name: "repo-a",
+                        relativePath: "repo-a",
+                        repoId: "repo-a",
+                        color: "#4CAF50",
+                    },
+                ]}
+                repository={{
+                    root: "/repo-a",
+                    name: "repo-a",
+                    relativePath: "repo-a",
+                    repoId: "repo-a",
+                    color: "#4CAF50",
+                }}
                 selectedHash={null}
                 filterText=""
                 hasMore={true}
                 unpushedHashes={new Set(["aa11bb22"])}
                 selectedBranch="main"
+                repoRailExpanded={false}
+                onToggleRepoRail={vi.fn()}
                 onSelectCommit={vi.fn()}
                 onFilterText={vi.fn()}
                 onLoadMore={onLoadMore}

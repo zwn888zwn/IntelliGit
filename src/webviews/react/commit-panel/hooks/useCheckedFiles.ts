@@ -7,11 +7,15 @@ import type { WorkingFile } from "../../../../types";
 
 interface CheckedFilesAPI {
     checkedPaths: Set<string>;
-    toggleFile: (path: string) => void;
+    toggleFile: (file: WorkingFile) => void;
     toggleFolder: (files: WorkingFile[]) => void;
     toggleSection: (files: WorkingFile[]) => void;
     isAllChecked: (files: WorkingFile[]) => boolean;
     isSomeChecked: (files: WorkingFile[]) => boolean;
+}
+
+export function getCheckedFileKey(file: Pick<WorkingFile, "repoRoot" | "path">): string {
+    return `${file.repoRoot}\u0000${file.path}`;
 }
 
 export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
@@ -24,7 +28,7 @@ export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
 
     // Prune stale paths when file list changes
     useEffect(() => {
-        const validPaths = new Set(allFiles.map((f) => f.path));
+        const validPaths = new Set(allFiles.map((f) => getCheckedFileKey(f)));
         setCheckedPaths((prev) => {
             const next = new Set<string>();
             for (const p of prev) {
@@ -42,7 +46,8 @@ export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
         vscode.setState({ ...prev, checked: Array.from(checkedPaths) });
     }, [checkedPaths]);
 
-    const toggleFile = useCallback((path: string) => {
+    const toggleFile = useCallback((file: WorkingFile) => {
+        const path = getCheckedFileKey(file);
         setCheckedPaths((prev) => {
             const next = new Set(prev);
             if (next.has(path)) next.delete(path);
@@ -66,7 +71,7 @@ export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
 
     const toggleGroup = useCallback(
         (files: WorkingFile[]) => {
-            toggleMany(files.map((file) => file.path));
+            toggleMany(files.map((file) => getCheckedFileKey(file)));
         },
         [toggleMany],
     );
@@ -77,14 +82,15 @@ export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
     const toggleSection = toggleGroup;
 
     const isAllChecked = useCallback(
-        (files: WorkingFile[]) => files.length > 0 && files.every((f) => checkedPaths.has(f.path)),
+        (files: WorkingFile[]) =>
+            files.length > 0 && files.every((f) => checkedPaths.has(getCheckedFileKey(f))),
         [checkedPaths],
     );
 
     const isSomeChecked = useCallback(
         (files: WorkingFile[]) =>
-            files.some((f) => checkedPaths.has(f.path)) &&
-            !files.every((f) => checkedPaths.has(f.path)),
+            files.some((f) => checkedPaths.has(getCheckedFileKey(f))) &&
+            !files.every((f) => checkedPaths.has(getCheckedFileKey(f))),
         [checkedPaths],
     );
 

@@ -33,6 +33,7 @@ import {
     openCommitDiffSourceFile,
     registerDiffContentProvider,
     getEditorContextFileUri,
+    getCommitInfoFileContext,
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
 import { runWithNotificationProgress } from "./utils/notifications";
@@ -73,12 +74,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // --- Providers ---
 
-    const commitGraph = new CommitGraphViewProvider(context.extensionUri, gitOps);
+    const commitGraph = new CommitGraphViewProvider(
+        context.extensionUri,
+        gitOps,
+        () => repositoryService.listRepositories(),
+        (root) => repositoryService.listRepositories().find((entry) => entry.root === root) ?? null,
+    );
     const commitInfo = new CommitInfoViewProvider(context.extensionUri);
     const commitPanel = new CommitPanelViewProvider(
         context.extensionUri,
         gitOps,
         () => repositoryService.getCurrentRepository()?.uri,
+        () => repositoryService.listRepositories(),
+        (root) => repositoryService.listRepositories().find((entry) => entry.root === root) ?? null,
+        async (root) => {
+            if (repositoryService.switchRepository(root)) {
+                await applyCurrentRepositoryContext({ resetGraph: true });
+            }
+        },
     );
     const mergeConflicts = new MergeConflictsTreeProvider(
         gitOps,
@@ -118,18 +131,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
     };
 
-    const applyCurrentRepositoryContext = async (): Promise<void> => {
+    const applyCurrentRepositoryContext = async (
+        options: { resetGraph?: boolean } = {},
+    ): Promise<void> => {
         const repository = getCurrentRepository();
         const repositoryInfo = repository?.info ?? null;
         commitGraph.setRepositoryContext(repositoryInfo);
         commitPanel.setRepositoryContext(repositoryInfo);
         mergeConflicts.setRepositoryRoot(repository?.uri);
-        refreshService.updateRepositoryRoot(repository?.root ?? null);
+        refreshService.updateRepositoryRoots(
+            repositoryService.listRepositories().map((entry) => entry.root),
+        );
 
         if (!repository) {
             currentBranches = [];
             commitGraph.setBranches([]);
-            await commitGraph.refresh();
+            await commitGraph.refresh({ reset: true });
             await commitPanel.refresh();
             await refreshService.refreshMergeConflicts();
             clearSelection();
@@ -139,7 +156,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
         currentBranches = await repository.gitOps.getBranches();
         commitGraph.setBranches(currentBranches);
-        await commitGraph.refresh();
+        await commitGraph.refresh({ reset: options.resetGraph ?? true });
         await commitPanel.refresh();
         await refreshService.refreshMergeConflicts();
         clearSelection();
@@ -181,7 +198,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 currentBranches = branches;
             },
         },
-        getCurrentRepository()?.root ?? null,
+        repositoryService.listRepositories().map((entry) => entry.root),
     );
 
     // --- Merge conflict helpers ---
@@ -245,10 +262,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // --- Wire data flow ---
 
     context.subscriptions.push(
-        commitGraph.onCommitSelected(async (hash) => {
+        commitGraph.onCommitSelected(async (selection) => {
+            const hash = typeof selection === "string" ? selection : selection.hash;
+            const repoRoot =
+                typeof selection === "string" ? requireCurrentRepository().root : selection.repoRoot;
             const requestId = ++commitDetailRequestSeq;
             try {
-                const detail = await gitOps.getCommitDetail(hash);
+                const repository = repositoryService.listRepositories().find((entry) => entry.root === repoRoot);
+                if (!repository) return;
+                const detail = await repository.gitOps.getCommitDetail(hash);
                 if (requestId !== commitDetailRequestSeq) return;
                 commitGraph.setCommitDetail(detail);
                 commitInfo.setCommitDetail(detail);
@@ -277,14 +299,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        commitGraph.onCommitAction(async ({ action, hash }) => {
+        commitGraph.onCommitAction(async (payload) => {
+            const action = payload.action;
+            const hash = payload.hash;
+            const repoRoot = "repoRoot" in payload ? payload.repoRoot : requireCurrentRepository().root;
             try {
+                const repository =
+                    repositoryService.listRepositories().find((entry) => entry.root === repoRoot) ??
+                    requireCurrentRepository();
                 await handleCommitContextAction({
                     action,
                     hash,
-                    executor,
-                    gitOps,
-                    repoRoot: requireCurrentRepository().root,
+                    executor: repository.executor,
+                    gitOps: repository.gitOps,
+                    repoRoot: repository.root,
                     currentBranches,
                     refreshAll: () => refreshService.refreshAll(),
                 });
@@ -299,14 +327,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const handleOpenCommitFileDiff = async (params: {
         commitHash: string;
         filePath: string;
+        repoRoot: string;
     }): Promise<void> => {
         try {
+            const repository =
+                repositoryService.listRepositories().find((entry) => entry.root === params.repoRoot) ??
+                requireCurrentRepository();
             await openCommitFileDiff(
                 params.commitHash,
                 params.filePath,
-                requireCurrentRepository().root,
-                gitOps,
-                executor,
+                repository.root,
+                repository.gitOps,
+                repository.executor,
             );
         } catch (error) {
             const message = getErrorMessage(error);
@@ -330,8 +362,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         vscode.commands.registerCommand("intelligit.refresh", async () => {
+            const previousRoot = repositoryService.getCurrentRepository()?.root ?? null;
             await repositoryService.refreshRepositories();
-            await applyCurrentRepositoryContext();
+            const nextRoot = repositoryService.getCurrentRepository()?.root ?? null;
+            await applyCurrentRepositoryContext({ resetGraph: previousRoot !== nextRoot });
         }),
 
         vscode.commands.registerCommand(
@@ -343,8 +377,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
 
         vscode.commands.registerCommand("intelligit.showGitLog", async () => {
-            await vscode.commands.executeCommand("intelligit.commitGraph.focus");
-        }),
+                await vscode.commands.executeCommand("intelligit.commitGraph.focus");
+            }),
 
         vscode.commands.registerCommand("intelligit.revealCommitInGraph", async (hash: unknown) => {
             if (typeof hash !== "string" || !hash.trim()) return;
@@ -368,13 +402,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             );
             if (!picked) return;
             if (repositoryService.switchRepository(picked.root)) {
-                await applyCurrentRepositoryContext();
+                await applyCurrentRepositoryContext({ resetGraph: true });
             }
         }),
 
         vscode.commands.registerCommand("intelligit.refreshRepositories", async () => {
+            const previousRoot = repositoryService.getCurrentRepository()?.root ?? null;
             await repositoryService.refreshRepositories();
-            await applyCurrentRepositoryContext();
+            const nextRoot = repositoryService.getCurrentRepository()?.root ?? null;
+            await applyCurrentRepositoryContext({ resetGraph: previousRoot !== nextRoot });
         }),
 
         vscode.commands.registerCommand("intelligit.annotateWithGitBlame", async () => {
@@ -514,17 +550,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand(
             "intelligit.commitFileCompareWithLocal",
             async (ctx: unknown) => {
+                const fileCtx = getCommitInfoFileContext(ctx);
+                const repository =
+                    (fileCtx?.repoRoot
+                        ? repositoryService.listRepositories().find((entry) => entry.root === fileCtx.repoRoot)
+                        : null) ?? requireCurrentRepository();
                 await compareCommitInfoFileWithLocal(
                     ctx,
-                    requireCurrentRepository().root,
-                    gitOps,
+                    repository.root,
+                    repository.gitOps,
                 );
             },
         ),
         vscode.commands.registerCommand(
             "intelligit.commitFileCherryPickChange",
             async (ctx: unknown) => {
-                await applySelectedCommitFileChange(ctx, "cherry-pick", executor, () =>
+                const fileCtx = getCommitInfoFileContext(ctx);
+                const repository =
+                    (fileCtx?.repoRoot
+                        ? repositoryService.listRepositories().find((entry) => entry.root === fileCtx.repoRoot)
+                        : null) ?? requireCurrentRepository();
+                await applySelectedCommitFileChange(ctx, "cherry-pick", repository.executor, () =>
                     refreshService.refreshConflictUi(),
                 );
             },
@@ -532,14 +578,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand(
             "intelligit.commitFileRevertChange",
             async (ctx: unknown) => {
-                await applySelectedCommitFileChange(ctx, "revert", executor, () =>
+                const fileCtx = getCommitInfoFileContext(ctx);
+                const repository =
+                    (fileCtx?.repoRoot
+                        ? repositoryService.listRepositories().find((entry) => entry.root === fileCtx.repoRoot)
+                        : null) ?? requireCurrentRepository();
+                await applySelectedCommitFileChange(ctx, "revert", repository.executor, () =>
                     refreshService.refreshConflictUi(),
                 );
             },
         ),
         vscode.commands.registerCommand(
             "intelligit.fileRollback",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repoRoot?: string }) => {
                 if (!ctx?.filePath) return;
                 const confirm = await vscode.window.showWarningMessage(
                     `Rollback ${ctx.filePath}?`,
@@ -548,7 +599,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
                 if (confirm !== "Rollback") return;
                 try {
-                    await gitOps.rollbackFiles([ctx.filePath]);
+                    const repository =
+                        (ctx.repoRoot
+                            ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
+                            : null) ?? requireCurrentRepository();
+                    await repository.gitOps.rollbackFiles([ctx.filePath]);
                     vscode.window.showInformationMessage("Changes rolled back.");
                 } catch (error) {
                     const message = getErrorMessage(error);
@@ -561,10 +616,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         vscode.commands.registerCommand(
             "intelligit.fileJumpToSource",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repoRoot?: string }) => {
                 if (!ctx?.filePath) return;
+                const repository =
+                    (ctx.repoRoot
+                        ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
+                        : null) ?? requireCurrentRepository();
                 const uri = vscode.Uri.joinPath(
-                    requireCurrentRepository().uri,
+                    repository.uri,
                     assertRepoRelativePath(ctx.filePath),
                 );
                 await vscode.window.showTextDocument(uri);
@@ -578,7 +637,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.commands.registerCommand(
             "intelligit.fileDelete",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repoRoot?: string }) => {
                 if (!ctx?.filePath) return;
                 const safePath = assertRepoRelativePath(ctx.filePath);
                 const confirm = await vscode.window.showWarningMessage(
@@ -588,9 +647,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
                 if (confirm !== "Delete") return;
 
+                const repository =
+                    (ctx.repoRoot
+                        ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
+                        : null) ?? requireCurrentRepository();
                 const deleted = await deleteFileWithFallback(
-                    gitOps,
-                    requireCurrentRepository().uri,
+                    repository.gitOps,
+                    repository.uri,
                     safePath,
                 );
                 if (!deleted) return;
@@ -601,10 +664,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         vscode.commands.registerCommand(
             "intelligit.fileShelve",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repoRoot?: string }) => {
                 if (!ctx?.filePath) return;
                 try {
-                    await gitOps.shelveSave([ctx.filePath]);
+                    const repository =
+                        (ctx.repoRoot
+                            ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
+                            : null) ?? requireCurrentRepository();
+                    await repository.gitOps.shelveSave([ctx.filePath]);
                     vscode.window.showInformationMessage(`Shelved ${ctx.filePath}.`);
                 } catch (error) {
                     const message = getErrorMessage(error);
@@ -617,10 +684,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         vscode.commands.registerCommand(
             "intelligit.fileShowHistory",
-            async (ctx: { filePath?: string }) => {
+            async (ctx: { filePath?: string; repoRoot?: string }) => {
                 if (!ctx?.filePath) return;
                 try {
-                    const history = await gitOps.getFileHistory(ctx.filePath);
+                    const repository =
+                        (ctx.repoRoot
+                            ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
+                            : null) ?? requireCurrentRepository();
+                    const history = await repository.gitOps.getFileHistory(ctx.filePath);
                     const doc = await vscode.workspace.openTextDocument({
                         content: history || "No history found.",
                         language: "git-commit",
@@ -643,20 +714,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // --- Initial load ---
 
-    await applyCurrentRepositoryContext();
+    await applyCurrentRepositoryContext({ resetGraph: true });
     await blameController.initialize();
 
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(async (editor) => {
             if (await repositoryService.followActiveEditor(editor)) {
-                await applyCurrentRepositoryContext();
+                await applyCurrentRepositoryContext({ resetGraph: true });
                 return;
             }
             await updateCommitDiffSourceContext(editor);
         }),
         vscode.workspace.onDidChangeWorkspaceFolders(async () => {
             await repositoryService.refreshRepositories();
-            await applyCurrentRepositoryContext();
+            await applyCurrentRepositoryContext({ resetGraph: true });
         }),
         vscode.workspace.onDidCreateFiles(async () => {
             await updateCommitDiffSourceContext();

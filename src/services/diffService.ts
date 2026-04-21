@@ -250,6 +250,7 @@ export interface CommitInfoFileContext {
     filePath: string;
     commitHash: string;
     commitShortHash?: string;
+    repoRoot?: string;
 }
 
 export function getCommitInfoFileContext(value: unknown): CommitInfoFileContext | null {
@@ -258,14 +259,16 @@ export function getCommitInfoFileContext(value: unknown): CommitInfoFileContext 
         filePath?: unknown;
         commitHash?: unknown;
         commitShortHash?: unknown;
+        repoRoot?: unknown;
     };
     if (typeof maybe.filePath !== "string" || typeof maybe.commitHash !== "string") return null;
     const filePath = maybe.filePath.trim();
     const commitHash = maybe.commitHash.trim();
     const commitShortHash =
         typeof maybe.commitShortHash === "string" ? maybe.commitShortHash.trim() : undefined;
+    const repoRoot = typeof maybe.repoRoot === "string" ? maybe.repoRoot.trim() : undefined;
     if (!filePath || !commitHash) return null;
-    return { filePath, commitHash, commitShortHash };
+    return { filePath, commitHash, commitShortHash, repoRoot };
 }
 
 export async function openDiffAgainstGitRef(

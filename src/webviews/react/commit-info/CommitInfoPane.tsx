@@ -67,7 +67,7 @@ export function CommitInfoPane({
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
-    onOpenDiff?: (commitHash: string, filePath: string) => void;
+    onOpenDiff?: (commitHash: string, filePath: string, repoRoot: string) => void;
 }): React.ReactElement {
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
     const [filesCollapsed, setFilesCollapsed] = useState(false);
@@ -142,6 +142,7 @@ export function CommitInfoPane({
                         depth={0}
                         commitHash={detail.hash}
                         commitShortHash={detail.shortHash}
+                        repoRoot={detail.repoRoot}
                         expandedDirs={expandedDirs}
                         folderIcon={folderIcon}
                         folderExpandedIcon={folderExpandedIcon}
@@ -308,6 +309,7 @@ function TreeRows({
     depth,
     commitHash,
     commitShortHash,
+    repoRoot,
     expandedDirs,
     folderIcon,
     folderExpandedIcon,
@@ -319,12 +321,13 @@ function TreeRows({
     depth: number;
     commitHash: string;
     commitShortHash: string;
+    repoRoot: string;
     expandedDirs: Set<string>;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
     onToggleDir: (path: string) => void;
-    onOpenDiff?: (commitHash: string, filePath: string) => void;
+    onOpenDiff?: (commitHash: string, filePath: string, repoRoot: string) => void;
 }): React.ReactElement {
     return (
         <>
@@ -337,6 +340,7 @@ function TreeRows({
                             depth={depth}
                             commitHash={commitHash}
                             commitShortHash={commitShortHash}
+                            repoRoot={repoRoot}
                             onOpenDiff={onOpenDiff}
                         />
                     );
@@ -361,6 +365,7 @@ function TreeRows({
                                 depth={depth + 1}
                                 commitHash={commitHash}
                                 commitShortHash={commitShortHash}
+                                repoRoot={repoRoot}
                                 expandedDirs={expandedDirs}
                                 folderIcon={folderIcon}
                                 folderExpandedIcon={folderExpandedIcon}
@@ -448,21 +453,23 @@ const CommitFileRow = React.memo(function CommitFileRow({
     depth,
     commitHash,
     commitShortHash,
+    repoRoot,
     onOpenDiff,
 }: {
     file: CommitFile;
     depth: number;
     commitHash: string;
     commitShortHash: string;
-    onOpenDiff?: (commitHash: string, filePath: string) => void;
+    repoRoot: string;
+    onOpenDiff?: (commitHash: string, filePath: string, repoRoot: string) => void;
 }): React.ReactElement {
     const padLeft = INFO_INDENT_BASE + depth * INFO_INDENT_STEP;
     const fileName = getLeafName(file.path);
     const rowRef = useRef<HTMLDivElement>(null);
 
     const openDiff = useCallback(() => {
-        onOpenDiff?.(commitHash, file.path);
-    }, [onOpenDiff, commitHash, file.path]);
+        onOpenDiff?.(commitHash, file.path, repoRoot);
+    }, [onOpenDiff, commitHash, file.path, repoRoot]);
 
     useEffect(() => {
         const el = rowRef.current;
@@ -489,9 +496,10 @@ const CommitFileRow = React.memo(function CommitFileRow({
                 filePath: file.path,
                 commitHash,
                 commitShortHash,
+                repoRoot,
                 preventDefaultContextMenuItems: true,
             }),
-        [file.path, commitHash, commitShortHash],
+        [file.path, commitHash, commitShortHash, repoRoot],
     );
 
     return (

@@ -97,6 +97,7 @@ function useColumnDrag(
 function App(): React.ReactElement {
     const [commits, setCommits] = useState<Commit[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
+    const [repositories, setRepositories] = useState<RepositoryContextInfo[]>([]);
     const [repository, setRepository] = useState<RepositoryContextInfo | null>(null);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
     const [revealHash, setRevealHash] = useState<string | null>(null);
@@ -135,6 +136,14 @@ function App(): React.ReactElement {
             return DEFAULT_INFO_WIDTH;
         }
     });
+    const [repoRailExpanded, setRepoRailExpanded] = useState(() => {
+        try {
+            const value = (vscode.getState() as Record<string, unknown> | undefined)?.repoRailExpanded;
+            return typeof value === "boolean" ? value : false;
+        } catch {
+            return false;
+        }
+    });
     const [unpushedHashes, setUnpushedHashes] = useState<Set<string>>(new Set());
     const loadingMore = useRef(false);
     const onDividerMouseDown = useColumnDrag(
@@ -169,6 +178,7 @@ function App(): React.ReactElement {
                             vscode.postMessage({
                                 type: "selectCommit",
                                 hash: data.commits[0].hash,
+                                repoRoot: data.commits[0].repoRoot,
                             });
                         }
                     }
@@ -184,6 +194,9 @@ function App(): React.ReactElement {
                     break;
                 case "setRepositoryContext":
                     setRepository(data.repository);
+                    break;
+                case "setRepositories":
+                    setRepositories(data.repositories);
                     break;
                 case "setSelectedBranch":
                     setSelectedBranch(data.branch ?? null);
@@ -229,17 +242,19 @@ function App(): React.ReactElement {
     useEffect(() => {
         try {
             const prev = (vscode.getState() ?? {}) as Record<string, unknown>;
-            vscode.setState({ ...prev, branchWidth, infoWidth });
+            vscode.setState({ ...prev, branchWidth, infoWidth, repoRailExpanded });
         } catch {
             /* ignore persistence errors */
         }
-    }, [branchWidth, infoWidth]);
+    }, [branchWidth, infoWidth, repoRailExpanded]);
 
     const handleSelectCommit = useCallback((hash: string) => {
+        const selectedCommit = commits.find((commit) => commit.hash === hash) ?? null;
+        if (!selectedCommit) return;
         setSelectedHash(hash);
         setRevealHash(null);
-        vscode.postMessage({ type: "selectCommit", hash });
-    }, []);
+        vscode.postMessage({ type: "selectCommit", hash, repoRoot: selectedCommit.repoRoot });
+    }, [commits]);
 
     const handleFilterText = useCallback((text: string) => {
         setFilterText(text);
@@ -266,17 +281,24 @@ function App(): React.ReactElement {
     }, []);
 
     const handleCommitAction = useCallback((action: CommitAction, hash: string) => {
-        vscode.postMessage({ type: "commitAction", action, hash });
-    }, []);
+        const commit = commits.find((item) => item.hash === hash);
+        if (!commit) return;
+        vscode.postMessage({ type: "commitAction", action, hash, repoRoot: commit.repoRoot });
+    }, [commits]);
 
-    const handleOpenDiff = useCallback((commitHash: string, filePath: string) => {
-        vscode.postMessage({ type: "openCommitFileDiff", commitHash, filePath });
+    const handleOpenDiff = useCallback((commitHash: string, filePath: string, repoRoot: string) => {
+        vscode.postMessage({
+            type: "openCommitFileDiff",
+            commitHash,
+            filePath,
+            repoRoot,
+        });
     }, []);
 
     return (
         <>
             <ThemeIconFontFaces fonts={iconFonts} />
-            <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
+            <div style={{ display: "flex", height: "100%", overflow: "hidden", minHeight: 0 }}>
                 {/* Branch column */}
                 <div style={{ width: branchWidth, flexShrink: 0, overflow: "hidden" }}>
                     <BranchColumn
@@ -303,10 +325,13 @@ function App(): React.ReactElement {
                 />
 
                 {/* Commit graph + files/details in one unified panel */}
-                <div style={{ flex: 1, overflow: "hidden", display: "flex", minWidth: 0 }}>
-                    <div style={{ flex: 1, overflow: "hidden", minWidth: 0 }}>
+                <div
+                    style={{ flex: 1, overflow: "hidden", display: "flex", minWidth: 0, minHeight: 0 }}
+                >
+                    <div style={{ flex: 1, overflow: "hidden", minWidth: 0, minHeight: 0 }}>
                         <CommitList
                             commits={commits}
+                            repositories={repositories}
                             repository={repository}
                             selectedHash={selectedHash}
                             revealHash={revealHash}
@@ -314,6 +339,8 @@ function App(): React.ReactElement {
                             hasMore={hasMore}
                             unpushedHashes={unpushedHashes}
                             selectedBranch={selectedBranch}
+                            repoRailExpanded={repoRailExpanded}
+                            onToggleRepoRail={() => setRepoRailExpanded((value) => !value)}
                             onSelectCommit={handleSelectCommit}
                             onFilterText={handleFilterText}
                             onLoadMore={handleLoadMore}
@@ -335,6 +362,7 @@ function App(): React.ReactElement {
                             width: infoWidth,
                             flexShrink: 0,
                             overflow: "hidden",
+                            minHeight: 0,
                         }}
                     >
                         <CommitInfoPane
