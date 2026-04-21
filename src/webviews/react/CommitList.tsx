@@ -98,10 +98,18 @@ export function CommitList({
     const visibleJumpMarkers = useMemo(
         () =>
             graphRows.flatMap((row, rowIndex) =>
-                row.jumpBelow.map((jump) => ({
-                    rowIndex,
-                    jump,
-                })),
+                [
+                    ...row.jumpAbove.map((jump) => ({
+                        rowIndex,
+                        direction: "up" as const,
+                        jump,
+                    })),
+                    ...row.jumpBelow.map((jump) => ({
+                        rowIndex,
+                        direction: "down" as const,
+                        jump,
+                    })),
+                ],
             ),
         [graphRows],
     );
@@ -445,17 +453,19 @@ export function CommitList({
                                     ({ rowIndex }) =>
                                         rowIndex >= visibleRange.start && rowIndex < visibleRange.end,
                                 )
-                                .map(({ rowIndex, jump }) => {
+                                .map(({ rowIndex, direction, jump }) => {
                                     const targetCommit = commitByHash.get(jump.targetHash);
                                     if (!targetCommit) return null;
                                     const buttonSize = 18;
                                     const left =
                                         jump.column * LANE_WIDTH + LANE_WIDTH / 2 + 4 - buttonSize / 2;
                                     const top =
-                                        rowIndex * ROW_HEIGHT + ROW_HEIGHT * 0.66 - buttonSize / 2;
+                                        rowIndex * ROW_HEIGHT +
+                                        ROW_HEIGHT * (direction === "down" ? 0.66 : 0.34) -
+                                        buttonSize / 2;
                                     return (
                                         <button
-                                            key={`jump:${rowIndex}:${jump.targetHash}:${jump.rawColumn}`}
+                                            key={`jump:${direction}:${rowIndex}:${jump.targetHash}:${jump.rawColumn}`}
                                             type="button"
                                             title={`Jump to '${targetCommit.shortHash} ${targetCommit.message}'`}
                                             onMouseEnter={() =>
@@ -484,17 +494,23 @@ export function CommitList({
                                                 cursor: "pointer",
                                                 pointerEvents: "auto",
                                             }}
-                                        >
-                                            <svg
-                                                width={buttonSize}
-                                                height={buttonSize}
-                                                viewBox="0 0 18 18"
-                                                fill="none"
-                                                aria-hidden="true"
                                             >
-                                                <path
-                                                    d="M9 2.5V13"
-                                                    stroke="currentColor"
+                                                <svg
+                                                    width={buttonSize}
+                                                    height={buttonSize}
+                                                    viewBox="0 0 18 18"
+                                                    fill="none"
+                                                    aria-hidden="true"
+                                                    style={{
+                                                        transform:
+                                                            direction === "up"
+                                                                ? "rotate(180deg)"
+                                                                : "none",
+                                                    }}
+                                                >
+                                                    <path
+                                                        d="M9 2.5V13"
+                                                        stroke="currentColor"
                                                     strokeWidth="2.4"
                                                     strokeLinecap="round"
                                                 />

@@ -13,6 +13,12 @@ interface GraphLane {
     column: number;
     rawColumn: number;
     color: string;
+    visible: boolean;
+}
+
+interface ActiveLane {
+    hash: string;
+    color: string;
 }
 
 interface GraphConnection extends GraphLane {
@@ -21,6 +27,8 @@ interface GraphConnection extends GraphLane {
     rawFromCol: number;
     rawToCol: number;
     targetHash: string;
+    fromVisible: boolean;
+    toVisible: boolean;
 }
 
 interface RawGraphRow {
@@ -54,12 +62,14 @@ export interface GraphRow {
     connectionsDown: GraphConnection[];
     overflowAbove: GraphLane[];
     overflowBelow: GraphLane[];
+    jumpAbove: GraphJump[];
     jumpBelow: GraphJump[];
 }
 
 export function computeGraph(commits: Array<{ hash: string; parentHashes: string[] }>): GraphRow[] {
-    const lanes: (string | null)[] = [];
+    const lanes: (ActiveLane | null)[] = [];
     const rawRows: RawGraphRow[] = [];
+    let nextColorIndex = 0;
 
     function findFree(): number {
         const i = lanes.indexOf(null);
@@ -67,18 +77,33 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
         lanes.push(null);
         return lanes.length - 1;
     }
+    function allocateColor(): string {
+        const color = COLORS[nextColorIndex % COLORS.length];
+        nextColorIndex += 1;
+        return color;
+    }
+    function findLaneIndex(hash: string): number {
+        return lanes.findIndex((lane) => lane?.hash === hash);
+    }
 
     for (const commit of commits) {
-        let col = lanes.indexOf(commit.hash);
-        if (col === -1) col = findFree();
+        let col = findLaneIndex(commit.hash);
+        if (col === -1) {
+            col = findFree();
+            lanes[col] = { hash: commit.hash, color: allocateColor() };
+        }
+        const currentLane = lanes[col];
+        const currentColor = currentLane?.color ?? allocateColor();
 
         const passThroughLanes: GraphLane[] = [];
         for (let i = 0; i < lanes.length; i++) {
-            if (i !== col && lanes[i] !== null) {
+            const lane = lanes[i];
+            if (i !== col && lane !== null) {
                 passThroughLanes.push({
                     column: i,
                     rawColumn: i,
-                    color: COLORS[i % COLORS.length],
+                    color: lane.color,
+                    visible: true,
                 });
             }
         }
@@ -89,9 +114,10 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
 
         for (let p = 0; p < commit.parentHashes.length; p++) {
             const ph = commit.parentHashes[p];
-            const pCol = lanes.indexOf(ph);
+            const pCol = findLaneIndex(ph);
 
             if (pCol >= 0) {
+                const parentLane = lanes[pCol];
                 connectionsDown.push({
                     column: pCol,
                     rawColumn: pCol,
@@ -100,10 +126,13 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     rawFromCol: col,
                     rawToCol: pCol,
                     targetHash: ph,
-                    color: COLORS[pCol % COLORS.length],
+                    color: parentLane?.color ?? currentColor,
+                    visible: true,
+                    fromVisible: true,
+                    toVisible: true,
                 });
             } else if (p === 0) {
-                lanes[col] = ph;
+                lanes[col] = { hash: ph, color: currentColor };
                 connectionsDown.push({
                     column: col,
                     rawColumn: col,
@@ -112,11 +141,15 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     rawFromCol: col,
                     rawToCol: col,
                     targetHash: ph,
-                    color: COLORS[col % COLORS.length],
+                    color: currentColor,
+                    visible: true,
+                    fromVisible: true,
+                    toVisible: true,
                 });
             } else {
                 const nc = findFree();
-                lanes[nc] = ph;
+                const branchColor = allocateColor();
+                lanes[nc] = { hash: ph, color: branchColor };
                 connectionsDown.push({
                     column: nc,
                     rawColumn: nc,
@@ -125,7 +158,10 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     rawFromCol: col,
                     rawToCol: nc,
                     targetHash: ph,
-                    color: COLORS[nc % COLORS.length],
+                    color: branchColor,
+                    visible: true,
+                    fromVisible: true,
+                    toVisible: true,
                 });
             }
         }
@@ -136,7 +172,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
             commitHash: commit.hash,
             parentHashes: commit.parentHashes,
             column: col,
-            color: COLORS[col % COLORS.length],
+            color: currentColor,
             numColumns: Math.max(lanes.length, col + 1),
             passThroughLanes,
             connectionsDown,
@@ -191,6 +227,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
             column: OVERFLOW_COLUMN,
             rawColumn: lane.rawColumn,
             color: lane.color,
+            visible: false,
         });
 
         const allColumns = new Set<number>();
@@ -240,6 +277,7 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
             column: mapRawColumn(lane.rawColumn),
             rawColumn: lane.rawColumn,
             color: lane.color,
+            visible: selectedColumnSet.has(lane.rawColumn),
         });
 
         rows.push({
@@ -262,6 +300,9 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
                     rawToCol: connection.rawToCol,
                     targetHash: connection.targetHash,
                     color: connection.color,
+                    visible: selectedColumnSet.has(connection.rawToCol),
+                    fromVisible: selectedColumnSet.has(connection.rawFromCol),
+                    toVisible: selectedColumnSet.has(connection.rawToCol),
                 })),
             ),
             overflowAbove: currentHidden
@@ -270,10 +311,31 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
             overflowBelow: currentHidden
                 .filter((lane) => !nextHiddenColumns.has(lane.rawColumn))
                 .map(toOverflowLane),
+            jumpAbove: [],
             jumpBelow: [],
         });
     }
 
+    const rowTouchesLane = (row: GraphRow, rawColumn: number): boolean =>
+        row.rawColumn === rawColumn ||
+        row.passThroughLanes.some((lane) => lane.rawColumn === rawColumn && lane.visible) ||
+        row.connectionsDown.some(
+            (connection) =>
+                (connection.rawFromCol === rawColumn && connection.fromVisible) ||
+                (connection.rawToCol === rawColumn && connection.toVisible),
+        );
+    const laneVisibleBetween = (
+        rawColumn: number,
+        startExclusive: number,
+        endExclusive: number,
+    ): boolean => {
+        for (let index = startExclusive + 1; index < endExclusive; index++) {
+            if (!rowTouchesLane(rows[index], rawColumn)) {
+                return false;
+            }
+        }
+        return true;
+    };
     const dedupeJumpLanes = (lanesToRender: GraphJump[]): GraphJump[] => {
         const deduped = new Map<number, GraphJump>();
         for (const lane of lanesToRender) {
@@ -289,9 +351,18 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
     rows.forEach((row, index) => {
         hashToRowIndex.set(row.commitHash, index);
     });
+    const childRowsByParent = new Map<string, number[]>();
+    rows.forEach((row, index) => {
+        for (const parentHash of row.parentHashes) {
+            const childRows = childRowsByParent.get(parentHash) ?? [];
+            childRows.push(index);
+            childRowsByParent.set(parentHash, childRows);
+        }
+    });
 
     for (let index = 0; index < rows.length; index++) {
         const row = rows[index];
+        const jumpAbove = new Map<number, GraphJump>();
         const jumpBelow = new Map<number, GraphJump>();
         const addJump = (target: Map<number, GraphJump>, lane: GraphJump) => {
             if (!target.has(lane.rawColumn)) {
@@ -304,14 +375,37 @@ export function computeGraph(commits: Array<{ hash: string; parentHashes: string
             if (targetIndex === undefined || targetIndex <= index + 1) continue;
             const hiddenCommitCount = targetIndex - index - 1;
             if (hiddenCommitCount <= JUMP_ARROW_MIN_HIDDEN_COMMITS) continue;
+            if (laneVisibleBetween(connection.rawToCol, index, targetIndex)) continue;
             addJump(jumpBelow, {
                 column: connection.toCol,
                 rawColumn: connection.rawToCol,
                 color: connection.color,
+                visible: true,
                 targetHash: connection.targetHash,
                 targetRowIndex: targetIndex,
             });
         }
+        const childRows = childRowsByParent.get(row.commitHash) ?? [];
+        const incomingChildIndex = [...childRows]
+            .reverse()
+            .find((candidateIndex) => candidateIndex < index);
+        if (incomingChildIndex !== undefined) {
+            const hiddenCommitCount = index - incomingChildIndex - 1;
+            if (
+                hiddenCommitCount > JUMP_ARROW_MIN_HIDDEN_COMMITS &&
+                !laneVisibleBetween(row.rawColumn, incomingChildIndex, index)
+            ) {
+                addJump(jumpAbove, {
+                    column: row.column,
+                    rawColumn: row.rawColumn,
+                    color: row.color,
+                    visible: true,
+                    targetHash: rows[incomingChildIndex].commitHash,
+                    targetRowIndex: incomingChildIndex,
+                });
+            }
+        }
+        row.jumpAbove = dedupeJumpLanes([...jumpAbove.values()]);
         row.jumpBelow = dedupeJumpLanes([...jumpBelow.values()]);
     }
 

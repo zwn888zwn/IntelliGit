@@ -231,26 +231,35 @@ describe("core utilities", () => {
         ).toBe(true);
     });
 
-    it("graph compute marks downward lane jumps", () => {
+    it("graph compute marks jumps only for broken long lanes", () => {
         const filtered = computeGraph([
-            { hash: "keep-head", parentHashes: ["visible-base"] },
-            { hash: "gap-01", parentHashes: [] },
-            { hash: "gap-02", parentHashes: [] },
-            { hash: "gap-03", parentHashes: [] },
-            { hash: "gap-04", parentHashes: [] },
-            { hash: "gap-05", parentHashes: [] },
-            { hash: "gap-06", parentHashes: [] },
-            { hash: "gap-07", parentHashes: [] },
-            { hash: "gap-08", parentHashes: [] },
-            { hash: "gap-09", parentHashes: [] },
-            { hash: "gap-10", parentHashes: [] },
-            { hash: "gap-11", parentHashes: [] },
-            { hash: "other-head", parentHashes: ["other-base"] },
-            { hash: "visible-base", parentHashes: [] },
-            { hash: "other-base", parentHashes: [] },
+            { hash: "m", parentHashes: ["a1", "b1", "c1", "d1", "e1", "f1", "g1"] },
+            { hash: "a1", parentHashes: ["a2"] },
+            { hash: "a2", parentHashes: ["a3"] },
+            { hash: "a3", parentHashes: ["base"] },
+            { hash: "b1", parentHashes: ["b2"] },
+            { hash: "b2", parentHashes: ["b3"] },
+            { hash: "b3", parentHashes: ["base"] },
+            { hash: "c1", parentHashes: ["c2"] },
+            { hash: "c2", parentHashes: ["c3"] },
+            { hash: "c3", parentHashes: ["base"] },
+            { hash: "d1", parentHashes: ["d2"] },
+            { hash: "d2", parentHashes: ["d3"] },
+            { hash: "d3", parentHashes: ["base"] },
+            { hash: "e1", parentHashes: ["e2"] },
+            { hash: "e2", parentHashes: ["e3"] },
+            { hash: "e3", parentHashes: ["base"] },
+            { hash: "f1", parentHashes: ["f2"] },
+            { hash: "f2", parentHashes: ["f3"] },
+            { hash: "f3", parentHashes: ["base"] },
+            { hash: "g1", parentHashes: ["g2"] },
+            { hash: "g2", parentHashes: ["g3"] },
+            { hash: "g3", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
         ]);
 
         expect(filtered[0].jumpBelow.length).toBeGreaterThan(0);
+        expect(filtered[16].jumpAbove.length).toBeGreaterThan(0);
     });
 
     it("graph compute skips short downward jumps", () => {
@@ -265,12 +274,34 @@ describe("core utilities", () => {
         expect(filtered.every((row) => row.jumpBelow.length === 0)).toBe(true);
     });
 
+    it("graph compute skips arrows for continuous long lanes", () => {
+        const filtered = computeGraph([
+            { hash: "top", parentHashes: ["mid"] },
+            { hash: "filler-01", parentHashes: ["filler-02"] },
+            { hash: "filler-02", parentHashes: ["filler-03"] },
+            { hash: "filler-03", parentHashes: ["filler-04"] },
+            { hash: "filler-04", parentHashes: ["filler-05"] },
+            { hash: "filler-05", parentHashes: ["filler-06"] },
+            { hash: "filler-06", parentHashes: ["filler-07"] },
+            { hash: "filler-07", parentHashes: ["filler-08"] },
+            { hash: "filler-08", parentHashes: ["filler-09"] },
+            { hash: "filler-09", parentHashes: ["filler-10"] },
+            { hash: "filler-10", parentHashes: ["filler-11"] },
+            { hash: "filler-11", parentHashes: ["mid"] },
+            { hash: "mid", parentHashes: [] },
+        ]);
+
+        expect(filtered.every((row) => row.jumpAbove.length === 0)).toBe(true);
+        expect(filtered.every((row) => row.jumpBelow.length === 0)).toBe(true);
+    });
+
     it("graph compute skips jump arrows when the target commit is not visible", () => {
         const partial = computeGraph([
             { hash: "head", parentHashes: ["missing-parent"] },
             { hash: "next", parentHashes: [] },
         ]);
 
+        expect(partial.every((row) => row.jumpAbove.length === 0)).toBe(true);
         expect(partial.every((row) => row.jumpBelow.length === 0)).toBe(true);
     });
 
