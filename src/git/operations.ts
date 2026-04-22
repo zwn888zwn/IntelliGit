@@ -1,3 +1,4 @@
+import * as path from "path";
 import { GitExecutor } from "./executor";
 import type {
     Branch,
@@ -9,7 +10,7 @@ import type {
     StashEntry,
     MergeConflictFile,
 } from "../types";
-import { getErrorMessage, sanitizeErrorMessage } from "../utils/errors";
+import { getErrorMessage, isUntrackedPathspecError, sanitizeErrorMessage } from "../utils/errors";
 
 declare const require: (id: string) => unknown;
 
@@ -65,6 +66,24 @@ function assertStashIndex(index: number): void {
     if (!Number.isInteger(index) || index < 0) {
         throw new Error(`Invalid stash index: ${index}`);
     }
+}
+
+function assertGitRelativePath(filePath: string): string {
+    if (!filePath || path.isAbsolute(filePath)) {
+        throw new Error(`Rejected non-relative path: ${filePath}`);
+    }
+    if (filePath.includes("\0") || filePath.includes("\r") || filePath.includes("\n")) {
+        throw new Error(`Rejected path containing control characters: ${filePath}`);
+    }
+    const normalized = path.normalize(filePath);
+    if (normalized === ".") {
+        throw new Error(`Rejected repo root path: ${filePath}`);
+    }
+    const segments = normalized.split(path.sep);
+    if (segments.some((segment) => segment === "..")) {
+        throw new Error(`Rejected path escaping repo root: ${filePath}`);
+    }
+    return normalized.split(path.sep).join("/");
 }
 
 export class UpstreamPushDeclinedError extends Error {
@@ -602,15 +621,41 @@ export class GitOps {
     }
 
     async rollbackFiles(paths: string[]): Promise<void> {
-        if (paths.length === 0) return;
-        // Restore working tree changes
-        await this.executor.run(["checkout", "--", ...paths]);
+        const safePaths = Array.from(new Set(paths.map((filePath) => assertGitRelativePath(filePath))));
+        if (safePaths.length === 0) return;
+
+        const trackedPaths: string[] = [];
+        const untrackedPaths: string[] = [];
+        for (const filePath of safePaths) {
+            if (await this.isTrackedPath(filePath)) {
+                trackedPaths.push(filePath);
+            } else {
+                untrackedPaths.push(filePath);
+            }
+        }
+
+        if (trackedPaths.length > 0) {
+            await this.executor.run(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...trackedPaths]);
+        }
+        if (untrackedPaths.length > 0) {
+            await this.executor.run(["clean", "-fd", "--", ...untrackedPaths]);
+        }
     }
 
     async rollbackAll(): Promise<void> {
-        await this.executor.run(["checkout", "."]);
+        await this.executor.run(["reset", "--hard", "HEAD"]);
         // Also clean untracked files
         await this.executor.run(["clean", "-fd"]);
+    }
+
+    private async isTrackedPath(filePath: string): Promise<boolean> {
+        try {
+            await this.executor.run(["ls-files", "--error-unmatch", "--", filePath]);
+            return true;
+        } catch (error) {
+            if (isUntrackedPathspecError(error)) return false;
+            throw error;
+        }
     }
 
     // --- Shelf operations (implemented via git stash) ---

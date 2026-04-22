@@ -610,13 +610,62 @@ describe("GitOps", () => {
     });
 
     describe("rollbackFiles", () => {
-        it("calls git checkout -- with paths", async () => {
+        it("restores tracked paths with git restore", async () => {
             const executor = createMockExecutor({});
             const ops = new GitOps(executor);
             await ops.rollbackFiles(["src/a.ts"]);
 
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["checkout", "--", "src/a.ts"]);
+            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
+            expect(calls[0][0]).toEqual(["ls-files", "--error-unmatch", "--", "src/a.ts"]);
+            expect(calls[1][0]).toEqual([
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                "src/a.ts",
+            ]);
+        });
+
+        it("cleans untracked paths instead of pretending restore worked", async () => {
+            const executor = {
+                run: vi.fn(async (args: string[]) => {
+                    if (args[0] === "ls-files") {
+                        throw new Error("error: pathspec 'src/new.ts' did not match any file(s) known to git");
+                    }
+                    return "";
+                }),
+            } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+            await ops.rollbackFiles(["src/new.ts"]);
+
+            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
+            expect(calls[0][0]).toEqual(["ls-files", "--error-unmatch", "--", "src/new.ts"]);
+            expect(calls[1][0]).toEqual(["clean", "-fd", "--", "src/new.ts"]);
+        });
+
+        it("splits tracked and untracked paths in one rollback", async () => {
+            const executor = {
+                run: vi.fn(async (args: string[]) => {
+                    if (args[0] === "ls-files" && args[args.length - 1] === "src/new.ts") {
+                        throw new Error("error: pathspec 'src/new.ts' did not match any file(s) known to git");
+                    }
+                    return "";
+                }),
+            } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+            await ops.rollbackFiles(["src/a.ts", "src/new.ts"]);
+
+            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
+            expect(calls[2][0]).toEqual([
+                "restore",
+                "--source=HEAD",
+                "--staged",
+                "--worktree",
+                "--",
+                "src/a.ts",
+            ]);
+            expect(calls[3][0]).toEqual(["clean", "-fd", "--", "src/new.ts"]);
         });
 
         it("skips empty paths array", async () => {
@@ -628,13 +677,13 @@ describe("GitOps", () => {
     });
 
     describe("rollbackAll", () => {
-        it("calls checkout . and clean -fd", async () => {
+        it("calls reset --hard HEAD and clean -fd", async () => {
             const executor = createMockExecutor({});
             const ops = new GitOps(executor);
             await ops.rollbackAll();
 
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
-            expect(calls[0][0]).toEqual(["checkout", "."]);
+            expect(calls[0][0]).toEqual(["reset", "--hard", "HEAD"]);
             expect(calls[1][0]).toEqual(["clean", "-fd"]);
         });
     });
