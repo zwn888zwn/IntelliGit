@@ -61,43 +61,37 @@ export interface CommitGraphLayoutResult {
     arrowMarkers: ArrowMarker[];
 }
 
-interface RowLanePositions {
-    positions: Map<number, number>;
-    visibleLaneCount: number;
+interface RowRenderPositions {
+    nodePosition: number;
+    edgePositions: Map<string, number>;
+    maxPosition: number;
 }
 
 export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutResult {
-    const rowLaneIndexes = graph.rows.map((row) => new Set<number>([row.node.layoutIndex]));
-    const arrowMarkers: ArrowMarker[] = [];
-
-    for (const edge of graph.edges) {
-        if (edge.downRowIndex <= edge.upRowIndex) continue;
-        registerVisibleEdgeLane(rowLaneIndexes, edge);
-    }
-
-    const rowLanePositions = buildRowLanePositions(rowLaneIndexes);
+    const rowRenderPositions = buildRowRenderPositions(graph);
     const rows: RenderRowModel[] = graph.rows.map((row, rowIndex) => ({
         commitHash: row.node.commitHash,
         parentHashes: row.node.parentHashes,
-        nodePosition: getRowLanePosition(rowLanePositions, rowIndex, row.node.layoutIndex),
+        nodePosition: rowRenderPositions[rowIndex]?.nodePosition ?? 0,
         nodeColor: row.node.color,
-        occupiedWidth: widthForLaneCount(1),
+        occupiedWidth: widthForVisibleCount(1),
         elements: [
             {
                 type: "node",
                 laneId: row.node.laneId,
                 color: row.node.color,
-                position: getRowLanePosition(rowLanePositions, rowIndex, row.node.layoutIndex),
+                position: rowRenderPositions[rowIndex]?.nodePosition ?? 0,
             },
         ],
     }));
+    const arrowMarkers: ArrowMarker[] = [];
 
     for (const edge of graph.edges) {
         if (edge.downRowIndex <= edge.upRowIndex) continue;
         if (isLongEdge(edge)) {
-            renderLongEdge(graph, rows, rowLanePositions, edge, arrowMarkers);
+            renderLongEdge(graph, rows, rowRenderPositions, edge, arrowMarkers);
         } else {
-            renderShortEdge(rows, rowLanePositions, edge);
+            renderShortEdge(rows, rowRenderPositions, edge);
         }
     }
 
@@ -107,18 +101,18 @@ export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutRe
 
     return {
         rows,
-        recommendedWidth: calculateReservedWidth(rowLanePositions),
+        recommendedWidth: calculateReservedWidth(rowRenderPositions),
         arrowMarkers,
     };
 }
 
 function renderShortEdge(
     rows: RenderRowModel[],
-    rowLanePositions: RowLanePositions[],
+    rowRenderPositions: RowRenderPositions[],
     edge: PermanentEdge,
 ): void {
     for (let rowIndex = edge.upRowIndex; rowIndex <= edge.downRowIndex; rowIndex += 1) {
-        const element = edgeSegmentForRow(rowLanePositions, edge, rowIndex);
+        const element = edgeSegmentForRow(rowRenderPositions, edge, rowIndex);
         if (!element) continue;
         rows[rowIndex].elements.push(element);
     }
@@ -127,24 +121,24 @@ function renderShortEdge(
 function renderLongEdge(
     graph: PermanentGraphModel,
     rows: RenderRowModel[],
-    rowLanePositions: RowLanePositions[],
+    rowRenderPositions: RowRenderPositions[],
     edge: PermanentEdge,
     arrowMarkers: ArrowMarker[],
 ): void {
     const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
     const bottomStubRow = edge.downRowIndex - LONG_EDGE_VISIBLE_PART_SIZE;
 
-    const startElement = edgeSegmentForRow(rowLanePositions, edge, edge.upRowIndex);
+    const startElement = edgeSegmentForRow(rowRenderPositions, edge, edge.upRowIndex);
     if (startElement) {
         rows[edge.upRowIndex].elements.push(startElement);
     }
-    const endElement = edgeSegmentForRow(rowLanePositions, edge, edge.downRowIndex);
+    const endElement = edgeSegmentForRow(rowRenderPositions, edge, edge.downRowIndex);
     if (endElement) {
         rows[edge.downRowIndex].elements.push(endElement);
     }
 
     if (topStubRow < edge.downRowIndex) {
-        const position = getRowLanePosition(rowLanePositions, topStubRow, edge.downLayoutIndex);
+        const position = getEdgePosition(rowRenderPositions, topStubRow, edge.edgeId);
         rows[topStubRow].elements.push({
             type: "terminal",
             edgeId: edge.edgeId,
@@ -167,11 +161,7 @@ function renderLongEdge(
 
     if (bottomStubRow > edge.upRowIndex) {
         const sourceRow = graph.rows[edge.upRowIndex];
-        const position = getRowLanePosition(
-            rowLanePositions,
-            bottomStubRow,
-            edge.downLayoutIndex,
-        );
+        const position = getEdgePosition(rowRenderPositions, bottomStubRow, edge.edgeId);
         rows[bottomStubRow].elements.push({
             type: "terminal",
             edgeId: edge.edgeId,
@@ -194,7 +184,7 @@ function renderLongEdge(
 }
 
 function edgeSegmentForRow(
-    rowLanePositions: RowLanePositions[],
+    rowRenderPositions: RowRenderPositions[],
     edge: PermanentEdge,
     rowIndex: number,
 ): EdgePrintElement | null {
@@ -207,8 +197,8 @@ function edgeSegmentForRow(
             type: "edge",
             edgeId: edge.edgeId,
             color: edge.color,
-            fromPosition: getRowLanePosition(rowLanePositions, rowIndex, edge.upLayoutIndex),
-            toPosition: getRowLanePosition(rowLanePositions, rowIndex + 1, edge.downLayoutIndex),
+            fromPosition: getNodePosition(rowRenderPositions, rowIndex),
+            toPosition: getEdgePosition(rowRenderPositions, rowIndex + 1, edge.edgeId),
             fromAnchor: "center",
             toAnchor: "bottom",
         };
@@ -219,8 +209,8 @@ function edgeSegmentForRow(
             type: "edge",
             edgeId: edge.edgeId,
             color: edge.color,
-            fromPosition: getRowLanePosition(rowLanePositions, rowIndex, edge.downLayoutIndex),
-            toPosition: getRowLanePosition(rowLanePositions, rowIndex, edge.downLayoutIndex),
+            fromPosition: getEdgePosition(rowRenderPositions, rowIndex, edge.edgeId),
+            toPosition: getNodePosition(rowRenderPositions, rowIndex),
             fromAnchor: "top",
             toAnchor: "center",
         };
@@ -230,71 +220,131 @@ function edgeSegmentForRow(
         type: "edge",
         edgeId: edge.edgeId,
         color: edge.color,
-        fromPosition: getRowLanePosition(rowLanePositions, rowIndex, edge.downLayoutIndex),
-        toPosition: getRowLanePosition(rowLanePositions, rowIndex + 1, edge.downLayoutIndex),
+        fromPosition: getEdgePosition(rowRenderPositions, rowIndex, edge.edgeId),
+        toPosition: getEdgePosition(rowRenderPositions, rowIndex + 1, edge.edgeId),
         fromAnchor: "top",
         toAnchor: "bottom",
     };
+}
+
+function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions[] {
+    const nodePositions = graph.rows.map((row) => row.node.layoutIndex);
+    const rowOccupied = graph.rows.map((row) => new Set<number>([row.node.layoutIndex]));
+    const edgePositions = new Map<string, number>();
+    const visibleRowsByEdge = new Map<string, number[]>();
+
+    for (const edge of graph.edges) {
+        if (edge.downRowIndex <= edge.upRowIndex) continue;
+        visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge));
+    }
+
+    const sortedEdges = [...graph.edges]
+        .filter((edge) => edge.downRowIndex > edge.upRowIndex)
+        .sort((left, right) => {
+            const leftPreferred = preferredEdgePosition(left);
+            const rightPreferred = preferredEdgePosition(right);
+            if (leftPreferred !== rightPreferred) {
+                return leftPreferred - rightPreferred;
+            }
+            if (left.upRowIndex !== right.upRowIndex) {
+                return left.upRowIndex - right.upRowIndex;
+            }
+            return left.downRowIndex - right.downRowIndex;
+        });
+
+    for (const edge of sortedEdges) {
+        const visibleRows = visibleRowsByEdge.get(edge.edgeId) ?? [];
+        const preferredPosition = preferredEdgePosition(edge);
+        let position = preferredPosition;
+
+        if (edge.upLayoutIndex !== edge.downLayoutIndex) {
+            while (visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(position))) {
+                position += 1;
+            }
+        }
+
+        edgePositions.set(edge.edgeId, position);
+        for (const rowIndex of visibleRows) {
+            rowOccupied[rowIndex]?.add(position);
+        }
+    }
+
+    return graph.rows.map((row, rowIndex) => {
+        const rowEdgePositions = new Map<string, number>();
+        let maxPosition = nodePositions[rowIndex] ?? 0;
+
+        for (const edge of graph.edges) {
+            if (edge.downRowIndex <= edge.upRowIndex) continue;
+            const visibleRows = visibleRowsByEdge.get(edge.edgeId);
+            if (!visibleRows?.includes(rowIndex)) continue;
+            const position = edgePositions.get(edge.edgeId) ?? preferredEdgePosition(edge);
+            rowEdgePositions.set(edge.edgeId, position);
+            maxPosition = Math.max(maxPosition, position);
+        }
+
+        return {
+            nodePosition: nodePositions[rowIndex] ?? 0,
+            edgePositions: rowEdgePositions,
+            maxPosition,
+        };
+    });
+}
+
+function preferredEdgePosition(edge: PermanentEdge): number {
+    if (edge.upLayoutIndex === edge.downLayoutIndex) {
+        return edge.upLayoutIndex;
+    }
+    return Math.max(edge.upLayoutIndex, edge.downLayoutIndex);
+}
+
+function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
+    if (!isLongEdge(edge)) {
+        return Array.from(
+            { length: edge.downRowIndex - edge.upRowIndex + 1 },
+            (_, index) => edge.upRowIndex + index,
+        );
+    }
+
+    const rows = new Set<number>([edge.upRowIndex, edge.downRowIndex]);
+    const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
+    const bottomStubRow = edge.downRowIndex - LONG_EDGE_VISIBLE_PART_SIZE;
+    if (topStubRow < edge.downRowIndex) {
+        rows.add(topStubRow);
+    }
+    if (bottomStubRow > edge.upRowIndex) {
+        rows.add(bottomStubRow);
+    }
+    return [...rows].sort((left, right) => left - right);
+}
+
+function getNodePosition(rowRenderPositions: RowRenderPositions[], rowIndex: number): number {
+    return rowRenderPositions[rowIndex]?.nodePosition ?? 0;
+}
+
+function getEdgePosition(
+    rowRenderPositions: RowRenderPositions[],
+    rowIndex: number,
+    edgeId: string,
+): number {
+    const row = rowRenderPositions[rowIndex];
+    if (!row) return 0;
+    return row.edgePositions.get(edgeId) ?? row.nodePosition;
 }
 
 function isLongEdge(edge: PermanentEdge): boolean {
     return edge.downRowIndex - edge.upRowIndex >= LONG_EDGE_SIZE;
 }
 
-function registerVisibleEdgeLane(rowLaneIndexes: Set<number>[], edge: PermanentEdge): void {
-    if (isLongEdge(edge)) {
-        rowLaneIndexes[edge.upRowIndex]?.add(edge.downLayoutIndex);
-        const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
-        const bottomStubRow = edge.downRowIndex - LONG_EDGE_VISIBLE_PART_SIZE;
-        if (topStubRow < edge.downRowIndex) {
-            rowLaneIndexes[topStubRow]?.add(edge.downLayoutIndex);
-        }
-        if (bottomStubRow > edge.upRowIndex) {
-            rowLaneIndexes[bottomStubRow]?.add(edge.downLayoutIndex);
-        }
-        return;
-    }
-
-    for (let rowIndex = edge.upRowIndex; rowIndex < edge.downRowIndex; rowIndex += 1) {
-        rowLaneIndexes[rowIndex]?.add(edge.downLayoutIndex);
-    }
-}
-
-function buildRowLanePositions(rowLaneIndexes: Set<number>[]): RowLanePositions[] {
-    return rowLaneIndexes.map((laneIndexes) => {
-        const sorted = Array.from(laneIndexes).sort((left, right) => left - right);
-        return {
-            positions: new Map(sorted.map((layoutIndex, position) => [layoutIndex, position])),
-            visibleLaneCount: sorted.length,
-        };
-    });
-}
-
-function getRowLanePosition(
-    rowLanePositions: RowLanePositions[],
-    rowIndex: number,
-    layoutIndex: number,
-): number {
-    const row = rowLanePositions[rowIndex];
-    if (!row) {
-        return 0;
-    }
-    return row.positions.get(layoutIndex) ?? 0;
-}
-
-function calculateReservedWidth(rowLanePositions: RowLanePositions[]): number {
-    if (rowLanePositions.length === 0) {
+function calculateReservedWidth(rowRenderPositions: RowRenderPositions[]): number {
+    if (rowRenderPositions.length === 0) {
         return 40;
     }
-    const maxVisibleLaneCount = Math.max(
-        1,
-        ...rowLanePositions.map((row) => row.visibleLaneCount),
-    );
-    return widthForLaneCount(maxVisibleLaneCount);
+    const maxPosition = Math.max(0, ...rowRenderPositions.map((row) => row.maxPosition));
+    return widthForVisibleCount(maxPosition + 1);
 }
 
-function widthForLaneCount(laneCount: number): number {
-    return Math.max(40, laneCount * LANE_WIDTH + GRAPH_SIDE_PADDING);
+function widthForVisibleCount(visibleCount: number): number {
+    return Math.max(40, visibleCount * LANE_WIDTH + GRAPH_SIDE_PADDING);
 }
 
 function calculateRowOccupiedWidth(row: RenderRowModel): number {
@@ -312,5 +362,5 @@ function calculateRowOccupiedWidth(row: RenderRowModel): number {
                 break;
         }
     }
-    return widthForLaneCount(maxPosition + 1);
+    return widthForVisibleCount(maxPosition + 1);
 }

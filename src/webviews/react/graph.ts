@@ -17,7 +17,7 @@ export type {
 } from "./commit-list/graphRouter";
 
 export function computeGraph(
-    commits: Array<{ hash: string; parentHashes: string[] }>,
+    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[] }>,
 ): CommitGraphLayoutResult {
     const permanentGraph = buildPermanentGraph(commits);
     return buildRenderRows(permanentGraph);

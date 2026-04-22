@@ -43,207 +43,56 @@ export interface PermanentGraphModel {
     maxLayoutIndex: number;
 }
 
-type PendingPermanentEdge = Omit<PermanentEdge, "downRowIndex" | "downLayoutIndex">;
-
-interface ActiveLane {
-    laneId: string;
-    hash: string;
-    color: string;
-    layoutIndex: number;
-}
-
 const COLORS = GRAPH_LANE_COLORS;
 
 export function buildPermanentGraph(
-    commits: Array<{ hash: string; parentHashes: string[] }>,
+    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[] }>,
 ): PermanentGraphModel {
-    const lanes: Array<ActiveLane | null> = [];
+    const { layoutIndexByHash, colorIndexByHash } = buildGraphAssignments(commits);
     const laneColors = new Map<string, string>();
-    const rows: PermanentRow[] = [];
-    const pendingEdges: Array<Omit<PermanentEdge, "downRowIndex" | "downLayoutIndex">> = [];
-    let nextLaneId = 0;
-    let nextLayoutIndex = 0;
-    let nextColorIndex = 0;
-    let generatedColorIndex = 0;
-
-    function makeLaneId(): string {
-        const laneId = `lane-${nextLaneId}`;
-        nextLaneId += 1;
-        return laneId;
-    }
-
-    function findFreeColumn(): number {
-        const freeIndex = lanes.indexOf(null);
-        if (freeIndex >= 0) return freeIndex;
-        lanes.push(null);
-        return lanes.length - 1;
-    }
-
-    function findLaneIndex(hash: string): number {
-        return lanes.findIndex((lane) => lane?.hash === hash);
-    }
-
-    function snapshotActiveLanes(): PermanentLaneRef[] {
-        const activeLanes: PermanentLaneRef[] = [];
-        for (let rawOrder = 0; rawOrder < lanes.length; rawOrder += 1) {
-            const lane = lanes[rawOrder];
-            if (!lane) continue;
-            activeLanes.push({
-                laneId: lane.laneId,
-                rawOrder: lane.layoutIndex,
-                color: lane.color,
-                hash: lane.hash,
-            });
-        }
-        return activeLanes;
-    }
-
-    function allocateColor(extraAvoidColors: Iterable<string> = []): string {
-        const usedColors = new Set<string>(extraAvoidColors);
-        for (const lane of lanes) {
-            if (lane) usedColors.add(lane.color);
-        }
-        for (let i = 0; i < COLORS.length; i += 1) {
-            const color = COLORS[(nextColorIndex + i) % COLORS.length];
-            if (!usedColors.has(color)) {
-                nextColorIndex = (nextColorIndex + i + 1) % COLORS.length;
-                return color;
-            }
-        }
-        for (;;) {
-            const hue = Math.round((generatedColorIndex * 137.508) % 360);
-            generatedColorIndex += 1;
-            const color = `hsl(${hue} 62% 58%)`;
-            if (!usedColors.has(color)) {
-                return color;
-            }
-        }
-    }
-
-    for (const commit of commits) {
-        const reservedColors = new Set<string>();
-        let currentRawOrder = findLaneIndex(commit.hash);
-        if (currentRawOrder === -1) {
-            currentRawOrder = findFreeColumn();
-            const laneId = makeLaneId();
-            const color = allocateColor(reservedColors);
-            lanes[currentRawOrder] = {
-                laneId,
-                hash: commit.hash,
-                color,
-                layoutIndex: nextLayoutIndex,
-            };
-            nextLayoutIndex += 1;
-            laneColors.set(laneId, color);
-        }
-
-        const currentLane = lanes[currentRawOrder];
-        if (!currentLane) continue;
-
-        reservedColors.add(currentLane.color);
-        const topLanes = snapshotActiveLanes();
-        const edges: PendingPermanentEdge[] = [];
-
-        lanes[currentRawOrder] = null;
-
-        for (let parentIndex = 0; parentIndex < commit.parentHashes.length; parentIndex += 1) {
-            const parentHash = commit.parentHashes[parentIndex];
-            const existingRawOrder = findLaneIndex(parentHash);
-
-            if (existingRawOrder >= 0) {
-                const existingLane = lanes[existingRawOrder];
-                if (!existingLane) continue;
-                reservedColors.add(existingLane.color);
-                edges.push({
-                    edgeId: `${commit.hash}:${parentHash}:${parentIndex}`,
-                    laneId: existingLane.laneId,
-                    fromLaneId: currentLane.laneId,
-                    toLaneId: existingLane.laneId,
-                    targetHash: parentHash,
-                    upRowIndex: rows.length,
-                    upLayoutIndex: currentLane.layoutIndex,
-                    color: existingLane.color,
-                    isPrimary: parentIndex === 0,
-                });
-                continue;
-            }
-
-            if (parentIndex === 0) {
-                lanes[currentRawOrder] = {
-                    laneId: currentLane.laneId,
-                    hash: parentHash,
-                    color: currentLane.color,
-                    layoutIndex: currentLane.layoutIndex,
-                };
-                edges.push({
-                    edgeId: `${commit.hash}:${parentHash}:${parentIndex}`,
-                    laneId: currentLane.laneId,
-                    fromLaneId: currentLane.laneId,
-                    toLaneId: currentLane.laneId,
-                    targetHash: parentHash,
-                    upRowIndex: rows.length,
-                    upLayoutIndex: currentLane.layoutIndex,
-                    color: currentLane.color,
-                    isPrimary: true,
-                });
-                continue;
-            }
-
-            const rawOrder = findFreeColumn();
-            const laneId = makeLaneId();
-            const color = allocateColor(reservedColors);
-            reservedColors.add(color);
-            lanes[rawOrder] = {
-                laneId,
-                hash: parentHash,
-                color,
-                layoutIndex: nextLayoutIndex,
-            };
-            nextLayoutIndex += 1;
-            laneColors.set(laneId, color);
-            edges.push({
-                edgeId: `${commit.hash}:${parentHash}:${parentIndex}`,
-                laneId,
-                fromLaneId: currentLane.laneId,
-                toLaneId: laneId,
-                targetHash: parentHash,
-                upRowIndex: rows.length,
-                upLayoutIndex: currentLane.layoutIndex,
-                color,
-                isPrimary: false,
-            });
-        }
-
-        while (lanes.length > 0 && lanes[lanes.length - 1] === null) {
-            lanes.pop();
-        }
-
-        rows.push({
-            rowIndex: rows.length,
+    const rows: PermanentRow[] = commits.map((commit, rowIndex) => {
+        const layoutIndex = layoutIndexByHash.get(commit.hash) ?? 0;
+        const laneId = `lane-${layoutIndex}`;
+        const color = colorForLayoutIndex(colorIndexByHash.get(commit.hash) ?? layoutIndex);
+        laneColors.set(laneId, color);
+        return {
+            rowIndex,
             node: {
                 commitHash: commit.hash,
                 parentHashes: commit.parentHashes,
-                laneId: currentLane.laneId,
-                layoutIndex: currentLane.layoutIndex,
-                color: currentLane.color,
+                laneId,
+                layoutIndex,
+                color,
             },
-            topLanes,
+            topLanes: [],
             edges: [],
-        });
-        pendingEdges.push(...edges);
-    }
+        };
+    });
 
     const hashToRow = new Map(rows.map((row) => [row.node.commitHash, row]));
-    const edges: PermanentEdge[] = pendingEdges.flatMap((edge) => {
-        const targetRow = hashToRow.get(edge.targetHash);
-        if (!targetRow) return [];
-        return [
-            {
-                ...edge,
-                downRowIndex: targetRow.rowIndex,
-                downLayoutIndex: targetRow.node.layoutIndex,
-            },
-        ];
+    const edges: PermanentEdge[] = commits.flatMap((commit, rowIndex) => {
+        const currentRow = rows[rowIndex];
+        return commit.parentHashes.flatMap((parentHash, parentIndex) => {
+            const targetRow = hashToRow.get(parentHash);
+            if (!targetRow) return [];
+            const laneId = `lane-${targetRow.node.layoutIndex}`;
+            const color = parentIndex === 0 ? currentRow.node.color : targetRow.node.color;
+            return [
+                {
+                    edgeId: `${commit.hash}:${parentHash}:${parentIndex}`,
+                    laneId,
+                    fromLaneId: currentRow.node.laneId,
+                    toLaneId: targetRow.node.laneId,
+                    targetHash: parentHash,
+                    upRowIndex: rowIndex,
+                    downRowIndex: targetRow.rowIndex,
+                    upLayoutIndex: currentRow.node.layoutIndex,
+                    downLayoutIndex: targetRow.node.layoutIndex,
+                    color,
+                    isPrimary: parentIndex === 0,
+                },
+            ];
+        });
     });
 
     const edgesByRow = new Map<number, PermanentEdge[]>();
@@ -264,4 +113,81 @@ export function buildPermanentGraph(
         edges,
         maxLayoutIndex: Math.max(-1, ...normalizedRows.map((row) => row.node.layoutIndex)),
     };
+}
+
+function buildGraphAssignments(
+    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[] }>,
+): { layoutIndexByHash: Map<string, number>; colorIndexByHash: Map<string, number> } {
+    const layoutIndexByHash = new Map<string, number>();
+    const colorIndexByHash = new Map<string, number>();
+    const visibleHashes = new Set(commits.map((commit) => commit.hash));
+    const rowIndexByHash = new Map(commits.map((commit, rowIndex) => [commit.hash, rowIndex]));
+    const referencedAsParent = new Set<string>();
+
+    for (const commit of commits) {
+        for (const parentHash of commit.parentHashes) {
+            if (visibleHashes.has(parentHash)) {
+                referencedAsParent.add(parentHash);
+            }
+        }
+    }
+
+    const refSeeds = commits
+        .map((commit, rowIndex) => ({ commit, rowIndex }))
+        .filter(({ commit }) => (commit.refs?.length ?? 0) > 0)
+        .sort((left, right) => {
+            const scoreDelta = getHeadScore(right.commit) - getHeadScore(left.commit);
+            if (scoreDelta !== 0) return scoreDelta;
+            return left.rowIndex - right.rowIndex;
+        });
+
+    const heads = commits
+        .map((commit, rowIndex) => ({ commit, rowIndex }))
+        .filter(({ commit }) => !referencedAsParent.has(commit.hash))
+        .sort((left, right) => {
+            const scoreDelta = getHeadScore(right.commit) - getHeadScore(left.commit);
+            if (scoreDelta !== 0) return scoreDelta;
+            return left.rowIndex - right.rowIndex;
+        });
+
+    let nextLayoutIndex = 0;
+    let nextColorIndex = 0;
+
+    const assignFrom = (startHash: string): void => {
+        const colorIndex = nextColorIndex;
+        nextColorIndex += 1;
+        let currentHash: string | undefined = startHash;
+        while (currentHash && !layoutIndexByHash.has(currentHash)) {
+            layoutIndexByHash.set(currentHash, nextLayoutIndex);
+            colorIndexByHash.set(currentHash, colorIndex);
+            const rowIndex = rowIndexByHash.get(currentHash);
+            if (typeof rowIndex !== "number") break;
+            const currentCommit = commits[rowIndex];
+            currentHash = currentCommit.parentHashes.find(
+                (parentHash) =>
+                    visibleHashes.has(parentHash) && !layoutIndexByHash.has(parentHash),
+            );
+        }
+        nextLayoutIndex += 1;
+    };
+
+    for (const { commit } of [...refSeeds, ...heads]) {
+        if (layoutIndexByHash.has(commit.hash)) continue;
+        assignFrom(commit.hash);
+    }
+
+    for (const commit of commits) {
+        if (layoutIndexByHash.has(commit.hash)) continue;
+        assignFrom(commit.hash);
+    }
+
+    return { layoutIndexByHash, colorIndexByHash };
+}
+
+function getHeadScore(commit: { refs?: string[] }): number {
+    return commit.refs?.length ?? 0;
+}
+
+function colorForLayoutIndex(layoutIndex: number): string {
+    return COLORS[((layoutIndex % COLORS.length) + COLORS.length) % COLORS.length];
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { GitOps } from "../../src/git/operations";
 import { computeGraph } from "../../src/webviews/react/graph";
+import { buildPermanentGraph } from "../../src/webviews/react/commit-list/graphModel";
 import { formatDateTime } from "../../src/webviews/react/shared/date";
 import {
     FILE_TYPE_BADGES,
@@ -213,6 +214,125 @@ describe("core utilities", () => {
         expect(
             merge.rows[0].elements.filter((element) => element.type === "edge"),
         ).toHaveLength(2);
+    });
+
+    it("graph keeps the first-parent lane stable even when that parent is already active", () => {
+        const permanent = buildPermanentGraph([
+            { hash: "top", parentHashes: ["main"] },
+            { hash: "merge", parentHashes: ["main", "side"] },
+            { hash: "main", parentHashes: ["base"] },
+            { hash: "side", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(permanent.rows[0].node.layoutIndex).toBe(0);
+        expect(permanent.rows[1].node.layoutIndex).toBe(1);
+        expect(permanent.rows[2].node.layoutIndex).toBe(1);
+    });
+
+    it("graph can assign a denser-ref head as the stable trunk before a lighter side head", () => {
+        const permanent = buildPermanentGraph([
+            { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
+            {
+                hash: "merge",
+                parentHashes: ["alpha-prev", "side-prev"],
+                refs: ["alpha", "origin/alpha", "tag:v1"],
+            },
+            { hash: "side-prev", parentHashes: ["base"] },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(permanent.rows[0].node.layoutIndex).toBe(1);
+        expect(permanent.rows[1].node.layoutIndex).toBe(0);
+        expect(permanent.rows[3].node.layoutIndex).toBe(0);
+    });
+
+    it("graph compute forwards refs so head-priority layout can affect rendered rows", () => {
+        const graph = computeGraph([
+            { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
+            {
+                hash: "merge",
+                parentHashes: ["alpha-prev", "side-prev"],
+                refs: ["alpha", "origin/alpha", "tag:v1"],
+            },
+            { hash: "side-prev", parentHashes: ["base"] },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[0].nodePosition).toBe(1);
+        expect(graph.rows[1].nodePosition).toBe(0);
+    });
+
+    it("graph seeds layout from ref-bearing commits before plain topological heads", () => {
+        const permanent = buildPermanentGraph([
+            { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
+            { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
+            { hash: "side-prev", parentHashes: ["base"] },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(permanent.rows[1].node.layoutIndex).toBe(0);
+        expect(permanent.rows[0].node.layoutIndex).toBe(1);
+    });
+
+    it("graph can keep adjacent rendered rows in one column while coloring them differently", () => {
+        const graph = computeGraph([
+            { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
+            { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
+            { hash: "side-prev", parentHashes: ["base"] },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[0].nodePosition).toBe(graph.rows[1].nodePosition);
+        expect(graph.rows[0].nodeColor).not.toBe(graph.rows[1].nodeColor);
+    });
+
+    it("graph compute can render merge rows with an extra edge column", () => {
+        const graph = computeGraph([
+            { hash: "top", parentHashes: ["merge"], refs: ["feature/demo"] },
+            {
+                hash: "merge",
+                parentHashes: ["alpha-prev", "side-prev"],
+                refs: ["alpha", "origin/alpha", "tag:v1"],
+            },
+            { hash: "side-prev", parentHashes: ["side-base"] },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "side-base", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[1].occupiedWidth).toBeGreaterThan(graph.rows[0].occupiedWidth);
+        expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBe(2);
+    });
+
+    it("graph compute keeps cross-lane edge columns stable across intermediate rows", () => {
+        const graph = computeGraph([
+            { hash: "feature-head", parentHashes: ["merge-2"], refs: ["feature/demo"] },
+            { hash: "merge-2", parentHashes: ["feature-2", "alpha-2"] },
+            { hash: "feature-2", parentHashes: ["merge-1"] },
+            { hash: "merge-1", parentHashes: ["feature-1", "alpha-1"] },
+            { hash: "feature-1", parentHashes: ["base"] },
+            { hash: "alpha-2", parentHashes: ["alpha-1"], refs: ["alpha"] },
+            { hash: "alpha-1", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        const edgeId = "merge-2:alpha-2:1";
+        const intermediateSegments = graph.rows
+            .flatMap((row, rowIndex) =>
+                row.elements.flatMap((element) =>
+                    element.type === "edge" && element.edgeId === edgeId ? [{ rowIndex, element }] : [],
+                ),
+            )
+            .filter(({ rowIndex }) => rowIndex > 1 && rowIndex < 5);
+
+        expect(intermediateSegments.length).toBeGreaterThan(0);
+        expect(new Set(intermediateSegments.map(({ element }) => element.fromPosition)).size).toBe(1);
+        expect(new Set(intermediateSegments.map(({ element }) => element.toPosition)).size).toBe(1);
     });
 
     it("graph compute uses dynamic recommended width for wide histories", () => {
