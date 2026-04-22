@@ -1,7 +1,7 @@
 import { buildPermanentGraph } from "./commit-list/graphModel";
 import { buildRenderRows, type CommitGraphLayoutResult } from "./commit-list/graphRouter";
 
-export const LANE_WIDTH = 20;
+export const LANE_WIDTH = 18;
 export const DOT_RADIUS = 3.25;
 export const ROW_HEIGHT = 28;
 

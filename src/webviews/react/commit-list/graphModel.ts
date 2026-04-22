@@ -163,6 +163,20 @@ function buildGraphAssignments(
         assignLayoutFrom(commit.hash);
     }
 
+    const branchSeeds = commits
+        .map((commit, rowIndex) => ({ commit, rowIndex }))
+        .filter(({ commit }) => (commit.refs?.length ?? 0) > 0)
+        .sort((left, right) => {
+            const scoreDelta = getHeadScore(right.commit) - getHeadScore(left.commit);
+            if (scoreDelta !== 0) return scoreDelta;
+            return left.rowIndex - right.rowIndex;
+        });
+
+    for (const { commit } of branchSeeds) {
+        if (layoutIndexByHash.has(commit.hash)) continue;
+        assignLayoutFrom(commit.hash);
+    }
+
     for (const commit of commits) {
         if (layoutIndexByHash.has(commit.hash)) continue;
         assignLayoutFrom(commit.hash);

@@ -1,6 +1,6 @@
 import type { PermanentGraphModel, PermanentEdge } from "./graphModel";
 
-const LANE_WIDTH = 20;
+const LANE_WIDTH = 18;
 const LONG_EDGE_SIZE = 30;
 const LONG_EDGE_VISIBLE_PART_SIZE = 1;
 const GRAPH_SIDE_PADDING = 12;
@@ -254,6 +254,11 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
             if (leftPreferred !== rightPreferred) {
                 return leftPreferred - rightPreferred;
             }
+            const rightSpan = right.downRowIndex - right.upRowIndex;
+            const leftSpan = left.downRowIndex - left.upRowIndex;
+            if (leftSpan !== rightSpan) {
+                return rightSpan - leftSpan;
+            }
             if (left.upRowIndex !== right.upRowIndex) {
                 return left.upRowIndex - right.upRowIndex;
             }
@@ -263,13 +268,10 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
     for (const edge of sortedEdges) {
         const visibleRows = visibleRowsByEdge.get(edge.edgeId) ?? [];
         const preferredColumn = preferredEdgeColumn(edge, compactLayoutIndex);
-        let column = preferredColumn;
-
-        if (edge.upLayoutIndex !== edge.downLayoutIndex) {
-            while (visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(column))) {
-                column += 2;
-            }
-        }
+        const column =
+            edge.upLayoutIndex === edge.downLayoutIndex
+                ? preferredColumn
+                : findClosestFreeEdgeColumn(preferredColumn, visibleRows, rowOccupied);
 
         edgeColumns.set(edge.edgeId, column);
         for (const rowIndex of visibleRows) {
@@ -322,18 +324,47 @@ function preferredEdgeColumn(
     if (upColumn === downColumn) {
         return upColumn;
     }
-    return Math.max(upColumn, downColumn) - 1;
+    const span = edge.downRowIndex - edge.upRowIndex;
+    const baseColumn = Math.max(upColumn, downColumn) - 1;
+    return span <= 2 ? Math.max(1, baseColumn - 1) : baseColumn;
+}
+
+function findClosestFreeEdgeColumn(
+    preferredColumn: number,
+    visibleRows: number[],
+    rowOccupied: Array<Set<number>>,
+): number {
+    if (!visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(preferredColumn))) {
+        return preferredColumn;
+    }
+
+    for (let offset = 2; offset < 128; offset += 2) {
+        const inwardColumn = preferredColumn - offset;
+        if (
+            inwardColumn >= 1 &&
+            !visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(inwardColumn))
+        ) {
+            return inwardColumn;
+        }
+
+        const outwardColumn = preferredColumn + offset;
+        if (!visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(outwardColumn))) {
+            return outwardColumn;
+        }
+    }
+
+    return preferredColumn;
 }
 
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
     if (!isLongEdge(edge)) {
         return Array.from(
-            { length: edge.downRowIndex - edge.upRowIndex + 1 },
-            (_, index) => edge.upRowIndex + index,
+            { length: Math.max(0, edge.downRowIndex - edge.upRowIndex - 1) },
+            (_, index) => edge.upRowIndex + index + 1,
         );
     }
 
-    const rows = new Set<number>([edge.upRowIndex, edge.downRowIndex]);
+    const rows = new Set<number>();
     const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
     const bottomStubRow = edge.downRowIndex - LONG_EDGE_VISIBLE_PART_SIZE;
     if (topStubRow < edge.downRowIndex) {
