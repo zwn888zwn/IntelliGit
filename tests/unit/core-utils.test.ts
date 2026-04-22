@@ -288,6 +288,43 @@ describe("core utilities", () => {
         ).toBe(true);
     });
 
+    it("graph compute bases width on typical visible lanes instead of peak historical width", () => {
+        const compacted = computeGraph([
+            {
+                hash: "merge",
+                parentHashes: [
+                    "main-01",
+                    "side-01",
+                    "side-02",
+                    "side-03",
+                    "side-04",
+                    "side-05",
+                    "side-06",
+                    "side-07",
+                    "side-08",
+                ],
+            },
+            ...Array.from({ length: 36 }, (_, index) => ({
+                hash: `main-${String(index + 1).padStart(2, "0")}`,
+                parentHashes:
+                    index === 35
+                        ? ["base"]
+                        : [`main-${String(index + 2).padStart(2, "0")}`],
+            })),
+            { hash: "side-01", parentHashes: ["base"] },
+            { hash: "side-02", parentHashes: ["base"] },
+            { hash: "side-03", parentHashes: ["base"] },
+            { hash: "side-04", parentHashes: ["base"] },
+            { hash: "side-05", parentHashes: ["base"] },
+            { hash: "side-06", parentHashes: ["base"] },
+            { hash: "side-07", parentHashes: ["base"] },
+            { hash: "side-08", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(compacted.recommendedWidth).toBeLessThan(120);
+    });
+
     it("graph compute skips arrows for continuous long lanes", () => {
         const filtered = computeGraph([
             { hash: "top", parentHashes: ["mid"] },
