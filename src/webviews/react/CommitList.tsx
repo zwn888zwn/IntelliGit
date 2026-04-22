@@ -546,12 +546,20 @@ export function CommitList({
                                     boxShadow: "0 4px 16px rgba(0,0,0,0.24)",
                                     fontSize: "11px",
                                     lineHeight: 1.4,
-                                    whiteSpace: "nowrap",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
+                                    whiteSpace: "normal",
+                                    wordBreak: "break-word",
                                 }}
                             >
-                                {`Jump to '${jumpTargetCommit.shortHash} ${jumpTargetCommit.message}'`}
+                                <div
+                                    style={{
+                                        opacity: 0.7,
+                                        fontFamily: "var(--vscode-editor-font-family, monospace)",
+                                        marginBottom: 2,
+                                    }}
+                                >
+                                    {jumpTargetCommit.shortHash}
+                                </div>
+                                <div>{jumpTargetCommit.message}</div>
                             </div>
                         )}
                     </div>

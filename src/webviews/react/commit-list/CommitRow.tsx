@@ -159,6 +159,10 @@ function CommitRowInner({
                 borderLeft: isUnpushed
                     ? `2px solid ${laneColor ?? "#4CAF50"}`
                     : "2px solid transparent",
+                background: isSelected
+                    ? "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 36%, transparent)"
+                    : "transparent",
+                borderRadius: isSelected ? 4 : 0,
                 color: isSelected
                     ? "var(--vscode-list-activeSelectionForeground)"
                     : isMergeCommit
@@ -175,10 +179,6 @@ function CommitRowInner({
                     paddingLeft: messageIndent,
                     paddingRight: 6,
                     boxSizing: "border-box",
-                    background: isSelected
-                        ? "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 58%, transparent)"
-                        : "transparent",
-                    borderRadius: isSelected ? 4 : 0,
                 }}
             >
                 <CommitMessageCell message={commit.message} refs={commit.refs} />
