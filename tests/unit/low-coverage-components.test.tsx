@@ -93,7 +93,9 @@ describe("low coverage components", () => {
             />,
         );
 
-        const branchCount = container.querySelector('span[title="3 branch labels"]');
+        const branchCount = container.querySelector(
+            'span[title*="Branches (3):"][title*="HEAD -> main"][title*="origin/main"][title*="feature/demo"]',
+        );
         expect(branchCount).toBeTruthy();
         expect(container.textContent).toContain("v1.0.0");
         const messageCell = container.querySelector(

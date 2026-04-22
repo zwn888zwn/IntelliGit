@@ -62,6 +62,10 @@ function CommitMessageCell({
     const visibleTagRefs = tagRefs.slice(0, 2);
     const hiddenTagCount = Math.max(0, tagRefs.length - visibleTagRefs.length);
     const refSummaryLines: string[] = [];
+    const branchTooltipText =
+        branchRefs.length > 0
+            ? `Branches (${branchRefsCount}):\n${branchRefs.join("\n")}`
+            : `${branchRefsCount} branch label${branchRefsCount === 1 ? "" : "s"}`;
     if (branchRefs.length > 0) refSummaryLines.push(`Branches: ${branchRefs.join(" • ")}`);
     if (tagRefs.length > 0) refSummaryLines.push(`Tags: ${tagRefs.join(" • ")}`);
     const tooltipText =
@@ -96,7 +100,7 @@ function CommitMessageCell({
                         opacity: 0.85,
                         color: "var(--vscode-charts-blue, #6eb3ff)",
                     }}
-                    title={`${branchRefsCount} branch label${branchRefsCount === 1 ? "" : "s"}`}
+                    title={branchTooltipText}
                 >
                     <RefTypeIcon kind="branch" size={12} />
                     {branchRefsCount}
