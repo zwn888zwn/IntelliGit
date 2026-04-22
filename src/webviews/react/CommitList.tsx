@@ -566,29 +566,21 @@ export function CommitList({
                         position: "absolute",
                         left: 0,
                         bottom: 8,
-                        width: repoRailWidth,
+                        width: repoRailExpanded ? 22 : repoRailWidth,
                         height: 22,
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: repoRailExpanded ? "space-between" : "center",
-                        gap: 6,
-                        padding: repoRailExpanded ? "0 8px" : 0,
+                        justifyContent: "center",
+                        padding: 0,
                         border: "none",
-                        borderTop: "1px solid rgba(255,255,255,0.08)",
-                        background: "var(--vscode-sideBarSectionHeader-background, rgba(255,255,255,0.06))",
+                        borderRadius: 4,
+                        background: "rgba(255,255,255,0.06)",
                         color: "var(--vscode-foreground)",
                         zIndex: 4,
                         cursor: "pointer",
                     }}
                 >
-                    {repoRailExpanded ? (
-                        <>
-                            <span style={{ fontSize: "10px", whiteSpace: "nowrap" }}>Repos</span>
-                            <LuPanelLeftClose size={12} />
-                        </>
-                    ) : (
-                        <LuPanelLeftOpen size={12} />
-                    )}
+                    {repoRailExpanded ? <LuPanelLeftClose size={12} /> : <LuPanelLeftOpen size={12} />}
                 </button>
             </div>
 
