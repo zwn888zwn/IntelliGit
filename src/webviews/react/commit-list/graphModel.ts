@@ -132,15 +132,6 @@ function buildGraphAssignments(
         }
     }
 
-    const refSeeds = commits
-        .map((commit, rowIndex) => ({ commit, rowIndex }))
-        .filter(({ commit }) => (commit.refs?.length ?? 0) > 0)
-        .sort((left, right) => {
-            const scoreDelta = getHeadScore(right.commit) - getHeadScore(left.commit);
-            if (scoreDelta !== 0) return scoreDelta;
-            return left.rowIndex - right.rowIndex;
-        });
-
     const heads = commits
         .map((commit, rowIndex) => ({ commit, rowIndex }))
         .filter(({ commit }) => !referencedAsParent.has(commit.hash))
@@ -151,15 +142,11 @@ function buildGraphAssignments(
         });
 
     let nextLayoutIndex = 0;
-    let nextColorIndex = 0;
 
-    const assignFrom = (startHash: string): void => {
-        const colorIndex = nextColorIndex;
-        nextColorIndex += 1;
+    const assignLayoutFrom = (startHash: string): void => {
         let currentHash: string | undefined = startHash;
         while (currentHash && !layoutIndexByHash.has(currentHash)) {
             layoutIndexByHash.set(currentHash, nextLayoutIndex);
-            colorIndexByHash.set(currentHash, colorIndex);
             const rowIndex = rowIndexByHash.get(currentHash);
             if (typeof rowIndex !== "number") break;
             const currentCommit = commits[rowIndex];
@@ -171,14 +158,49 @@ function buildGraphAssignments(
         nextLayoutIndex += 1;
     };
 
-    for (const { commit } of [...refSeeds, ...heads]) {
+    for (const { commit } of heads) {
         if (layoutIndexByHash.has(commit.hash)) continue;
-        assignFrom(commit.hash);
+        assignLayoutFrom(commit.hash);
     }
 
     for (const commit of commits) {
         if (layoutIndexByHash.has(commit.hash)) continue;
-        assignFrom(commit.hash);
+        assignLayoutFrom(commit.hash);
+    }
+
+    let nextColorIndex = 0;
+    const colorSeeds = commits
+        .map((commit, rowIndex) => ({ commit, rowIndex }))
+        .filter(({ commit }) => (commit.refs?.length ?? 0) > 0)
+        .sort((left, right) => {
+            const scoreDelta = getHeadScore(right.commit) - getHeadScore(left.commit);
+            if (scoreDelta !== 0) return scoreDelta;
+            return left.rowIndex - right.rowIndex;
+        });
+
+    const assignColorFrom = (startHash: string): void => {
+        const colorIndex = nextColorIndex;
+        nextColorIndex += 1;
+        let currentHash: string | undefined = startHash;
+        while (currentHash && !colorIndexByHash.has(currentHash)) {
+            colorIndexByHash.set(currentHash, colorIndex);
+            const rowIndex = rowIndexByHash.get(currentHash);
+            if (typeof rowIndex !== "number") break;
+            const currentCommit = commits[rowIndex];
+            currentHash = currentCommit.parentHashes.find(
+                (parentHash) => visibleHashes.has(parentHash) && !colorIndexByHash.has(parentHash),
+            );
+        }
+    };
+
+    for (const { commit } of [...colorSeeds, ...heads]) {
+        if (colorIndexByHash.has(commit.hash)) continue;
+        assignColorFrom(commit.hash);
+    }
+
+    for (const commit of commits) {
+        if (colorIndexByHash.has(commit.hash)) continue;
+        assignColorFrom(commit.hash);
     }
 
     return { layoutIndexByHash, colorIndexByHash };

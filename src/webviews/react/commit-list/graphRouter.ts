@@ -228,9 +228,17 @@ function edgeSegmentForRow(
 }
 
 function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions[] {
-    const nodePositions = graph.rows.map((row) => row.node.layoutIndex);
-    const rowOccupied = graph.rows.map((row) => new Set<number>([row.node.layoutIndex]));
-    const edgePositions = new Map<string, number>();
+    const layoutOrder = Array.from(new Set(graph.rows.map((row) => row.node.layoutIndex))).sort(
+        (left, right) => left - right,
+    );
+    const compactLayoutIndex = new Map(
+        layoutOrder.map((layoutIndex, index) => [layoutIndex, index * 2]),
+    );
+    const nodeColumns = graph.rows.map(
+        (row) => compactLayoutIndex.get(row.node.layoutIndex) ?? row.node.layoutIndex * 2,
+    );
+    const rowOccupied = graph.rows.map((_, rowIndex) => new Set<number>([nodeColumns[rowIndex]]));
+    const edgeColumns = new Map<string, number>();
     const visibleRowsByEdge = new Map<string, number[]>();
 
     for (const edge of graph.edges) {
@@ -241,8 +249,8 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
     const sortedEdges = [...graph.edges]
         .filter((edge) => edge.downRowIndex > edge.upRowIndex)
         .sort((left, right) => {
-            const leftPreferred = preferredEdgePosition(left);
-            const rightPreferred = preferredEdgePosition(right);
+            const leftPreferred = preferredEdgeColumn(left, compactLayoutIndex);
+            const rightPreferred = preferredEdgeColumn(right, compactLayoutIndex);
             if (leftPreferred !== rightPreferred) {
                 return leftPreferred - rightPreferred;
             }
@@ -254,47 +262,67 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
 
     for (const edge of sortedEdges) {
         const visibleRows = visibleRowsByEdge.get(edge.edgeId) ?? [];
-        const preferredPosition = preferredEdgePosition(edge);
-        let position = preferredPosition;
+        const preferredColumn = preferredEdgeColumn(edge, compactLayoutIndex);
+        let column = preferredColumn;
 
         if (edge.upLayoutIndex !== edge.downLayoutIndex) {
-            while (visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(position))) {
-                position += 1;
+            while (visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(column))) {
+                column += 2;
             }
         }
 
-        edgePositions.set(edge.edgeId, position);
+        edgeColumns.set(edge.edgeId, column);
         for (const rowIndex of visibleRows) {
-            rowOccupied[rowIndex]?.add(position);
+            rowOccupied[rowIndex]?.add(column);
         }
     }
 
     return graph.rows.map((row, rowIndex) => {
+        const visibleColumns = new Set<number>([nodeColumns[rowIndex] ?? 0]);
         const rowEdgePositions = new Map<string, number>();
-        let maxPosition = nodePositions[rowIndex] ?? 0;
 
         for (const edge of graph.edges) {
             if (edge.downRowIndex <= edge.upRowIndex) continue;
             const visibleRows = visibleRowsByEdge.get(edge.edgeId);
             if (!visibleRows?.includes(rowIndex)) continue;
-            const position = edgePositions.get(edge.edgeId) ?? preferredEdgePosition(edge);
+            visibleColumns.add(
+                edgeColumns.get(edge.edgeId) ?? preferredEdgeColumn(edge, compactLayoutIndex),
+            );
+        }
+
+        const rowDenseColumns = Array.from(visibleColumns).sort((left, right) => left - right);
+        const denseColumnIndex = new Map(rowDenseColumns.map((column, index) => [column, index]));
+
+        for (const edge of graph.edges) {
+            if (edge.downRowIndex <= edge.upRowIndex) continue;
+            const visibleRows = visibleRowsByEdge.get(edge.edgeId);
+            if (!visibleRows?.includes(rowIndex)) continue;
+            const position =
+                denseColumnIndex.get(
+                    edgeColumns.get(edge.edgeId) ??
+                        preferredEdgeColumn(edge, compactLayoutIndex),
+                ) ?? 0;
             rowEdgePositions.set(edge.edgeId, position);
-            maxPosition = Math.max(maxPosition, position);
         }
 
         return {
-            nodePosition: nodePositions[rowIndex] ?? 0,
+            nodePosition: denseColumnIndex.get(nodeColumns[rowIndex]) ?? 0,
             edgePositions: rowEdgePositions,
-            maxPosition,
+            maxPosition: Math.max(0, rowDenseColumns.length - 1),
         };
     });
 }
 
-function preferredEdgePosition(edge: PermanentEdge): number {
-    if (edge.upLayoutIndex === edge.downLayoutIndex) {
-        return edge.upLayoutIndex;
+function preferredEdgeColumn(
+    edge: PermanentEdge,
+    compactLayoutIndex: Map<number, number>,
+): number {
+    const upColumn = compactLayoutIndex.get(edge.upLayoutIndex) ?? edge.upLayoutIndex * 2;
+    const downColumn = compactLayoutIndex.get(edge.downLayoutIndex) ?? edge.downLayoutIndex * 2;
+    if (upColumn === downColumn) {
+        return upColumn;
     }
-    return Math.max(edge.upLayoutIndex, edge.downLayoutIndex);
+    return Math.max(upColumn, downColumn) - 1;
 }
 
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {

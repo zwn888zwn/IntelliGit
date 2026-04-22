@@ -230,7 +230,7 @@ describe("core utilities", () => {
         expect(permanent.rows[2].node.layoutIndex).toBe(1);
     });
 
-    it("graph can assign a denser-ref head as the stable trunk before a lighter side head", () => {
+    it("graph layout follows visible topological heads instead of mid-graph refs", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -243,12 +243,13 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(1);
+        expect(permanent.rows[0].node.layoutIndex).toBe(0);
         expect(permanent.rows[1].node.layoutIndex).toBe(0);
         expect(permanent.rows[3].node.layoutIndex).toBe(0);
+        expect(permanent.rows[2].node.layoutIndex).toBe(1);
     });
 
-    it("graph compute forwards refs so head-priority layout can affect rendered rows", () => {
+    it("graph compute keeps a head row and its merge below in one rendered column", () => {
         const graph = computeGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -261,11 +262,11 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(graph.rows[0].nodePosition).toBe(1);
+        expect(graph.rows[0].nodePosition).toBe(0);
         expect(graph.rows[1].nodePosition).toBe(0);
     });
 
-    it("graph seeds layout from ref-bearing commits before plain topological heads", () => {
+    it("graph colors can still diverge even when layout stays on the head column", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
@@ -274,8 +275,8 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[1].node.layoutIndex).toBe(0);
-        expect(permanent.rows[0].node.layoutIndex).toBe(1);
+        expect(permanent.rows[0].node.layoutIndex).toBe(permanent.rows[1].node.layoutIndex);
+        expect(permanent.rows[0].node.color).not.toBe(permanent.rows[1].node.color);
     });
 
     it("graph can keep adjacent rendered rows in one column while coloring them differently", () => {
@@ -333,6 +334,22 @@ describe("core utilities", () => {
         expect(intermediateSegments.length).toBeGreaterThan(0);
         expect(new Set(intermediateSegments.map(({ element }) => element.fromPosition)).size).toBe(1);
         expect(new Set(intermediateSegments.map(({ element }) => element.toPosition)).size).toBe(1);
+    });
+
+    it("graph compute compresses rows to nearby visible columns even when other rows are wider", () => {
+        const graph = computeGraph([
+            { hash: "top-left", parentHashes: ["left-1"], refs: ["feature/left"] },
+            { hash: "top-right", parentHashes: ["right-1"], refs: ["feature/right"] },
+            { hash: "left-1", parentHashes: ["merge"] },
+            { hash: "right-1", parentHashes: ["merge"] },
+            { hash: "merge", parentHashes: ["base", "side"] },
+            { hash: "side", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[0].nodePosition).toBe(0);
+        expect(graph.rows[1].nodePosition).toBe(1);
+        expect(graph.rows[0].occupiedWidth).toBeLessThan(graph.recommendedWidth);
     });
 
     it("graph compute uses dynamic recommended width for wide histories", () => {
