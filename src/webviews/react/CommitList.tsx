@@ -86,7 +86,7 @@ export function CommitList({
     const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
     const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
     const repoRailWidth = repoRailExpanded ? 168 : 16;
-    const totalGraphWidth = repoRailWidth + graphWidth;
+    const headerGraphWidth = repoRailWidth + Math.min(graphWidth, 44);
     const repositoryLookup = useMemo(
         () => new Map(repositories.map((item) => [item.root, item])),
         [repositories],
@@ -308,7 +308,7 @@ export function CommitList({
                 </span>
             </div>
 
-            <div style={headerRowStyle(totalGraphWidth)}>
+            <div style={headerRowStyle(headerGraphWidth)}>
                 <span style={{ flex: 1 }}>Commit</span>
                 <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
                 <span style={{ width: DATE_COL_WIDTH, textAlign: "right", marginLeft: 4 }}>
@@ -411,7 +411,8 @@ export function CommitList({
                                     <CommitRow
                                         key={`${commit.repoRoot}:${commit.hash}:${idx}`}
                                         commit={commit}
-                                        graphWidth={totalGraphWidth}
+                                        rowLeftOffset={repoRailWidth}
+                                        messageIndent={(graphRows[idx]?.occupiedWidth ?? 40) * graphScale}
                                         isSelected={selectedHash === commit.hash}
                                         isUnpushed={isUnpushedCommit(commit.hash)}
                                         laneColor={graphRows[idx]?.nodeColor}

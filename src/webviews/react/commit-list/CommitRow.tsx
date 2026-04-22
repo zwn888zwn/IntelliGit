@@ -9,7 +9,8 @@ import { ROW_HEIGHT } from "../graph";
 
 interface Props {
     commit: Commit;
-    graphWidth: number;
+    rowLeftOffset: number;
+    messageIndent: number;
     isSelected: boolean;
     isUnpushed: boolean;
     laneColor?: string;
@@ -129,7 +130,8 @@ function CommitMessageCell({
 
 function CommitRowInner({
     commit,
-    graphWidth,
+    rowLeftOffset,
+    messageIndent,
     isSelected,
     isUnpushed,
     laneColor,
@@ -144,12 +146,12 @@ function CommitRowInner({
             onContextMenu={(event) => onContextMenu(event, commit)}
             style={{
                 height: ROW_HEIGHT,
-                width: `calc(100% - ${graphWidth}px)`,
+                width: `calc(100% - ${rowLeftOffset}px)`,
                 minWidth: 0,
                 boxSizing: "border-box",
                 display: "flex",
                 alignItems: "center",
-                marginLeft: graphWidth,
+                marginLeft: rowLeftOffset,
                 paddingRight: ROW_SIDE_PADDING,
                 cursor: "pointer",
                 fontSize: "12px",
@@ -167,7 +169,18 @@ function CommitRowInner({
                       : "inherit",
             }}
         >
-            <CommitMessageCell message={commit.message} refs={commit.refs} />
+            <span
+                style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    paddingLeft: messageIndent,
+                    boxSizing: "border-box",
+                }}
+            >
+                <CommitMessageCell message={commit.message} refs={commit.refs} />
+            </span>
 
             <span
                 style={{
@@ -210,7 +223,8 @@ function areEqual(prev: Props, next: Props): boolean {
         prev.isSelected === next.isSelected &&
         prev.isUnpushed === next.isUnpushed &&
         prev.laneColor === next.laneColor &&
-        prev.graphWidth === next.graphWidth &&
+        prev.rowLeftOffset === next.rowLeftOffset &&
+        prev.messageIndent === next.messageIndent &&
         prev.onSelect === next.onSelect &&
         prev.onContextMenu === next.onContextMenu
     );

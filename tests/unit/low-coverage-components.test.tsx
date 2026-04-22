@@ -83,7 +83,8 @@ describe("low coverage components", () => {
         const { root, container } = mount(
             <CommitRow
                 commit={commit}
-                graphWidth={100}
+                rowLeftOffset={16}
+                messageIndent={84}
                 isSelected={false}
                 isUnpushed={true}
                 laneColor="#00ff00"
@@ -123,7 +124,8 @@ describe("low coverage components", () => {
             root.render(
                 <CommitRow
                     commit={commit}
-                    graphWidth={100}
+                    rowLeftOffset={16}
+                    messageIndent={84}
                     isSelected={true}
                     isUnpushed={false}
                     laneColor="#00ff00"

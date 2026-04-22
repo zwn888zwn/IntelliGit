@@ -288,7 +288,7 @@ describe("core utilities", () => {
         ).toBe(true);
     });
 
-    it("graph compute bases width on typical visible lanes instead of peak historical width", () => {
+    it("graph compute reserves width from compressed visible lanes instead of historical layout ids", () => {
         const compacted = computeGraph([
             {
                 hash: "merge",
@@ -322,7 +322,8 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(compacted.recommendedWidth).toBeLessThan(120);
+        expect(compacted.recommendedWidth).toBeLessThan(220);
+        expect(compacted.recommendedWidth).toBeGreaterThan(140);
     });
 
     it("graph compute skips arrows for continuous long lanes", () => {

@@ -4,8 +4,6 @@ const LANE_WIDTH = 20;
 const LONG_EDGE_SIZE = 30;
 const LONG_EDGE_VISIBLE_PART_SIZE = 1;
 const GRAPH_SIDE_PADDING = 12;
-const WIDTH_SAMPLE_SIZE = 20_000;
-const WIDTH_WEIGHT_K = 0.1;
 
 export type EdgeAnchor = "top" | "center" | "bottom";
 
@@ -53,6 +51,7 @@ export interface RenderRowModel {
     parentHashes: string[];
     nodePosition: number;
     nodeColor: string;
+    occupiedWidth: number;
     elements: PrintElement[];
 }
 
@@ -82,6 +81,7 @@ export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutRe
         parentHashes: row.node.parentHashes,
         nodePosition: getRowLanePosition(rowLanePositions, rowIndex, row.node.layoutIndex),
         nodeColor: row.node.color,
+        occupiedWidth: widthForLaneCount(1),
         elements: [
             {
                 type: "node",
@@ -101,9 +101,13 @@ export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutRe
         }
     }
 
+    for (const row of rows) {
+        row.occupiedWidth = calculateRowOccupiedWidth(row);
+    }
+
     return {
         rows,
-        recommendedWidth: calculateRecommendedWidth(rowLanePositions),
+        recommendedWidth: calculateReservedWidth(rowLanePositions),
         arrowMarkers,
     };
 }
@@ -278,33 +282,35 @@ function getRowLanePosition(
     return row.positions.get(layoutIndex) ?? 0;
 }
 
-function calculateRecommendedWidth(rowLanePositions: RowLanePositions[]): number {
+function calculateReservedWidth(rowLanePositions: RowLanePositions[]): number {
     if (rowLanePositions.length === 0) {
         return 40;
     }
-
-    const sampleSize = Math.min(WIDTH_SAMPLE_SIZE, rowLanePositions.length);
-    if (sampleSize === 1) {
-        return widthForLaneCount(rowLanePositions[0].visibleLaneCount);
-    }
-
-    let weightedSum = 0;
-    let weightedSquares = 0;
-
-    for (let index = 0; index < sampleSize; index += 1) {
-        const laneCount = rowLanePositions[index].visibleLaneCount;
-        const weight =
-            (2 / (sampleSize * (WIDTH_WEIGHT_K + 1))) *
-            (1 + ((WIDTH_WEIGHT_K - 1) * index) / (sampleSize - 1));
-        weightedSum += laneCount * weight;
-        weightedSquares += laneCount * laneCount * weight;
-    }
-
-    const average = weightedSum;
-    const deviation = Math.sqrt(Math.max(0, weightedSquares - average * average));
-    return widthForLaneCount(Math.max(1, Math.round(average + deviation)));
+    const maxVisibleLaneCount = Math.max(
+        1,
+        ...rowLanePositions.map((row) => row.visibleLaneCount),
+    );
+    return widthForLaneCount(maxVisibleLaneCount);
 }
 
 function widthForLaneCount(laneCount: number): number {
     return Math.max(40, laneCount * LANE_WIDTH + GRAPH_SIDE_PADDING);
+}
+
+function calculateRowOccupiedWidth(row: RenderRowModel): number {
+    let maxPosition = row.nodePosition;
+    for (const element of row.elements) {
+        switch (element.type) {
+            case "node":
+                maxPosition = Math.max(maxPosition, element.position);
+                break;
+            case "terminal":
+                maxPosition = Math.max(maxPosition, element.position);
+                break;
+            case "edge":
+                maxPosition = Math.max(maxPosition, element.fromPosition, element.toPosition);
+                break;
+        }
+    }
+    return widthForLaneCount(maxPosition + 1);
 }
