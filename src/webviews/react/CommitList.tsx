@@ -37,6 +37,7 @@ interface Props {
     repositories: RepositoryContextInfo[];
     repository: RepositoryContextInfo | null;
     selectedHash: string | null;
+    currentHash: string | null;
     revealHash: string | null;
     filterText: string;
     hasMore: boolean;
@@ -55,6 +56,7 @@ export function CommitList({
     repositories,
     repository,
     selectedHash,
+    currentHash,
     revealHash,
     filterText,
     hasMore,
@@ -118,6 +120,7 @@ export function CommitList({
         canvasRef,
         viewportRef,
         rows: graphRows,
+        currentHash,
         graphWidth,
         graphScale,
         graphOffset: repoRailWidth,

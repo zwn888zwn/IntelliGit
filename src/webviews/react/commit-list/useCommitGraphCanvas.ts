@@ -15,15 +15,22 @@ interface Args {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
     viewportRef: React.RefObject<HTMLDivElement | null>;
     rows: RenderRowModel[];
+    currentHash: string | null;
     graphWidth: number;
     graphScale: number;
     graphOffset: number;
+}
+
+function isHashMatch(a: string, b: string): boolean {
+    if (a.length === 40 && b.length === 40) return a === b;
+    return a.startsWith(b) || b.startsWith(a);
 }
 
 export function useCommitGraphCanvas({
     canvasRef,
     viewportRef,
     rows,
+    currentHash,
     graphWidth,
     graphScale,
     graphOffset,
@@ -131,6 +138,19 @@ export function useCommitGraphCanvas({
                 if (node) {
                     const cx = positionX(node.position);
                     const cy = y + ROW_HEIGHT / 2;
+                    if (currentHash && isHashMatch(row.commitHash, currentHash)) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = node.color;
+                        ctx.lineWidth = Math.max(2, 2 * graphScale);
+                        ctx.arc(
+                            cx,
+                            cy,
+                            Math.max(6, (DOT_RADIUS + 3) * graphScale),
+                            0,
+                            Math.PI * 2,
+                        );
+                        ctx.stroke();
+                    }
                     ctx.beginPath();
                     ctx.fillStyle = node.color;
                     ctx.arc(cx, cy, Math.max(2.5, DOT_RADIUS * graphScale), 0, Math.PI * 2);
@@ -169,5 +189,5 @@ export function useCommitGraphCanvas({
             viewport.removeEventListener("scroll", scheduleDraw);
             window.removeEventListener("resize", scheduleDraw);
         };
-    }, [canvasRef, viewportRef, graphOffset, graphScale, graphWidth, rows]);
+    }, [canvasRef, viewportRef, currentHash, graphOffset, graphScale, graphWidth, rows]);
 }

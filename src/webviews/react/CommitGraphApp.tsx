@@ -2,7 +2,7 @@
 // Layout: [BranchColumn (resizable)] | [drag-handle] | [CommitList + search bar] | [drag-handle] | [CommitInfoPane].
 // Branch filtering from the inline branch tree posts back to the extension host.
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { ChakraProvider } from "@chakra-ui/react";
 import { BranchColumn } from "./BranchColumn";
@@ -159,6 +159,10 @@ function App(): React.ReactElement {
         MIN_INFO_WIDTH,
         MAX_INFO_WIDTH,
         true,
+    );
+    const currentCommitHash = useMemo(
+        () => branches.find((branch) => branch.isCurrent)?.hash ?? null,
+        [branches],
     );
 
     useEffect(() => {
@@ -334,6 +338,7 @@ function App(): React.ReactElement {
                             repositories={repositories}
                             repository={repository}
                             selectedHash={selectedHash}
+                            currentHash={currentCommitHash}
                             revealHash={revealHash}
                             filterText={filterText}
                             hasMore={hasMore}
