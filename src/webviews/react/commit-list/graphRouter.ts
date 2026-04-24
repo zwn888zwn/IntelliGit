@@ -1,6 +1,6 @@
 import type { PermanentGraphModel, PermanentEdge } from "./graphModel";
 
-const LANE_WIDTH = 14;
+const LANE_WIDTH = 16;
 const LONG_EDGE_SIZE = 30;
 const LONG_EDGE_VISIBLE_PART_SIZE = 1;
 const GRAPH_SIDE_PADDING = 6;

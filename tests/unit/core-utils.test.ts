@@ -550,6 +550,20 @@ describe("core utilities", () => {
         expect(typeof formatDateTime("2026-02-19T08:00:00Z")).toBe("string");
     });
 
+    it("date formatting matches commit list relative labels", () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(new Date("2026-04-24T12:00:00"));
+
+            expect(formatDateTime("2026-04-24T11:34:00")).toBe("26 minutes ago");
+            expect(formatDateTime("2026-04-24T10:59:00")).toBe("1 hour ago");
+            expect(formatDateTime("2026-04-23T21:34:00")).toBe("Yesterday 21:34");
+            expect(formatDateTime("2026-04-22T18:26:00")).toBe("2026/4/22 18:26");
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("error helpers classify and format errors", () => {
         expect(getErrorMessage(new Error("boom"))).toBe("boom");
         expect(getErrorMessage(42)).toBe("42");
