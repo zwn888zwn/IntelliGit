@@ -1,9 +1,9 @@
 import type { PermanentGraphModel, PermanentEdge } from "./graphModel";
 
-const LANE_WIDTH = 18;
+const LANE_WIDTH = 14;
 const LONG_EDGE_SIZE = 30;
 const LONG_EDGE_VISIBLE_PART_SIZE = 1;
-const GRAPH_SIDE_PADDING = 12;
+const GRAPH_SIDE_PADDING = 6;
 
 export type EdgeAnchor = "top" | "center" | "bottom";
 
@@ -67,9 +67,9 @@ interface RowRenderPositions {
     maxPosition: number;
 }
 
-type VisibleGraphElement =
-    | { type: "node"; rowIndex: number; layoutIndex: number }
-    | { type: "edge"; edge: PermanentEdge };
+interface ActiveLane {
+    hash: string;
+}
 
 export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutResult {
     const rowRenderPositions = buildRowRenderPositions(graph);
@@ -233,40 +233,78 @@ function edgeSegmentForRow(
 
 function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions[] {
     const visibleRowsByEdge = new Map<string, number[]>();
+    const edgeByTargetRow = new Map<number, PermanentEdge[]>();
 
     for (const edge of graph.edges) {
         if (edge.downRowIndex <= edge.upRowIndex) continue;
         visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge));
+        const rowEdges = edgeByTargetRow.get(edge.upRowIndex) ?? [];
+        rowEdges.push(edge);
+        edgeByTargetRow.set(edge.upRowIndex, rowEdges);
     }
 
+    const activeLanes: ActiveLane[] = [];
     return graph.rows.map((row, rowIndex) => {
-        const visibleElements: VisibleGraphElement[] = [
-            { type: "node", rowIndex, layoutIndex: row.node.layoutIndex },
-        ];
-        const rowEdgePositions = new Map<string, number>();
+        let nodePosition = activeLanes.findIndex((lane) => lane.hash === row.node.commitHash);
+        if (nodePosition < 0) {
+            nodePosition = activeLanes.length;
+            activeLanes.push({ hash: row.node.commitHash });
+        }
+
+        const rawEdgePositions = new Map<string, number>();
+        const visiblePositions = new Set<number>([nodePosition]);
 
         for (const edge of graph.edges) {
             if (edge.downRowIndex <= edge.upRowIndex) continue;
             const visibleRows = visibleRowsByEdge.get(edge.edgeId);
             if (!visibleRows?.includes(rowIndex)) continue;
-            visibleElements.push({ type: "edge", edge });
+            const edgePosition = activeLanes.findIndex((lane) => lane.hash === edge.targetHash);
+            if (edgePosition >= 0) {
+                rawEdgePositions.set(edge.edgeId, edgePosition);
+                visiblePositions.add(edgePosition);
+            }
         }
 
-        visibleElements.sort(compareVisibleElements);
+        const densePositions = new Map(
+            [...visiblePositions]
+                .sort((left, right) => left - right)
+                .map((position, index) => [position, index]),
+        );
+        const denseNodePosition = densePositions.get(nodePosition) ?? 0;
+        const rowEdgePositions = new Map<string, number>();
+        for (const [edgeId, edgePosition] of rawEdgePositions) {
+            rowEdgePositions.set(edgeId, densePositions.get(edgePosition) ?? denseNodePosition);
+        }
 
-        let nodePosition = 0;
-        visibleElements.forEach((element, position) => {
-            if (element.type === "node") {
-                nodePosition = position;
+        const rowEdges = edgeByTargetRow.get(rowIndex) ?? [];
+        const firstParentEdge = rowEdges.find((edge) => edge.isPrimary);
+        if (firstParentEdge) {
+            const existingFirstParentIndex = activeLanes.findIndex(
+                (lane, index) => index !== nodePosition && lane.hash === firstParentEdge.targetHash,
+            );
+            if (existingFirstParentIndex >= 0) {
+                activeLanes.splice(nodePosition, 1);
             } else {
-                rowEdgePositions.set(element.edge.edgeId, position);
+                activeLanes[nodePosition] = { hash: firstParentEdge.targetHash };
             }
-        });
+        } else {
+            activeLanes.splice(nodePosition, 1);
+        }
+
+        let insertPosition = Math.min(
+            firstParentEdge ? nodePosition + 1 : nodePosition,
+            activeLanes.length,
+        );
+        for (const edge of rowEdges.filter((item) => !item.isPrimary)) {
+            if (activeLanes.some((lane) => lane.hash === edge.targetHash)) continue;
+            activeLanes.splice(insertPosition, 0, { hash: edge.targetHash });
+            insertPosition += 1;
+        }
 
         return {
-            nodePosition,
+            nodePosition: denseNodePosition,
             edgePositions: rowEdgePositions,
-            maxPosition: Math.max(0, visibleElements.length - 1),
+            maxPosition: Math.max(0, visiblePositions.size - 1),
         };
     });
 }
@@ -289,68 +327,6 @@ function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
         rows.add(bottomStubRow);
     }
     return [...rows].sort((left, right) => left - right);
-}
-
-function compareVisibleElements(left: VisibleGraphElement, right: VisibleGraphElement): number {
-    if (left.type === "node" && right.type === "node") {
-        return left.layoutIndex - right.layoutIndex;
-    }
-
-    if (left.type === "edge" && right.type === "node") {
-        return compareEdgeToNode(left.edge, right);
-    }
-
-    if (left.type === "node" && right.type === "edge") {
-        return -compareEdgeToNode(right.edge, left);
-    }
-
-    if (left.type === "edge" && right.type === "edge") {
-        return compareEdges(left.edge, right.edge);
-    }
-
-    return 0;
-}
-
-function compareEdges(left: PermanentEdge, right: PermanentEdge): number {
-    if (left.upRowIndex === right.upRowIndex) {
-        if (left.downRowIndex < right.downRowIndex) {
-            return -compareEdgeToNode(right, {
-                type: "node",
-                rowIndex: left.downRowIndex,
-                layoutIndex: left.downLayoutIndex,
-            });
-        }
-        return compareEdgeToNode(left, {
-            type: "node",
-            rowIndex: right.downRowIndex,
-            layoutIndex: right.downLayoutIndex,
-        });
-    }
-
-    if (left.upRowIndex < right.upRowIndex) {
-        return compareEdgeToNode(left, {
-            type: "node",
-            rowIndex: right.upRowIndex,
-            layoutIndex: right.upLayoutIndex,
-        });
-    }
-
-    return -compareEdgeToNode(right, {
-        type: "node",
-        rowIndex: left.upRowIndex,
-        layoutIndex: left.upLayoutIndex,
-    });
-}
-
-function compareEdgeToNode(
-    edge: PermanentEdge,
-    node: Extract<VisibleGraphElement, { type: "node" }>,
-): number {
-    const maxLayoutIndex = Math.max(edge.upLayoutIndex, edge.downLayoutIndex);
-    if (maxLayoutIndex !== node.layoutIndex) {
-        return maxLayoutIndex - node.layoutIndex;
-    }
-    return edge.upRowIndex - node.rowIndex;
 }
 
 function getNodePosition(rowRenderPositions: RowRenderPositions[], rowIndex: number): number {

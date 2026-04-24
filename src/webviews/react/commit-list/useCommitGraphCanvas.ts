@@ -8,7 +8,7 @@ import {
     type RenderRowModel,
 } from "../graph";
 
-const GRAPH_LEFT_PAD = 4;
+const GRAPH_LEFT_PAD = 0;
 const OVERSCAN_ROWS = 8;
 
 interface Args {

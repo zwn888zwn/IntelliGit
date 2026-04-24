@@ -445,7 +445,7 @@ export function CommitList({
                                     if (!targetCommit) return null;
                                     const buttonSize = 18;
                                     const left =
-                                        (arrow.position * LANE_WIDTH + LANE_WIDTH / 2 + 4) * graphScale -
+                                        (arrow.position * LANE_WIDTH + LANE_WIDTH / 2) * graphScale -
                                         buttonSize / 2;
                                     const top =
                                         arrow.rowIndex * ROW_HEIGHT +
