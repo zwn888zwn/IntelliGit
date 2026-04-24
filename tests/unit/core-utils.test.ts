@@ -370,7 +370,7 @@ describe("core utilities", () => {
         expect(graph.rows[4].occupiedWidth).toBeLessThanOrEqual(graph.recommendedWidth);
     });
 
-    it("graph compute keeps short parent edges continuous without reserving endpoint columns", () => {
+    it("graph compute keeps short parent edges continuous by reserving endpoint columns", () => {
         const graph = computeGraph([
             { hash: "head", parentHashes: ["merge"] },
             { hash: "merge", parentHashes: ["main", "side"] },
@@ -379,11 +379,15 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        const directEdge = graph.rows[1].elements.find(
-            (element) => element.type === "edge" && element.edgeId === "merge:side:1",
+        const directEdge = graph.rows.flatMap((row) => row.elements).find(
+            (element) =>
+                element.type === "edge" &&
+                element.edgeId === "merge:side:1" &&
+                element.toAnchor === "nextCenter",
         );
 
         expect(directEdge && directEdge.type === "edge").toBe(true);
+        expect(directEdge && directEdge.type === "edge" && directEdge.toAnchor).toBe("nextCenter");
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
     });
 

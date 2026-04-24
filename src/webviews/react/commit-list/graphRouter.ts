@@ -5,7 +5,7 @@ const LONG_EDGE_SIZE = 30;
 const LONG_EDGE_VISIBLE_PART_SIZE = 1;
 const GRAPH_SIDE_PADDING = 6;
 
-export type EdgeAnchor = "top" | "center" | "bottom";
+export type EdgeAnchor = "top" | "center" | "bottom" | "nextCenter";
 
 export interface NodePrintElement {
     type: "node";
@@ -196,6 +196,25 @@ function edgeSegmentForRow(
         return null;
     }
 
+    if (!isLongEdge(edge) && rowIndex === edge.downRowIndex) {
+        return null;
+    }
+
+    if (!isLongEdge(edge) && rowIndex === edge.downRowIndex - 1) {
+        return {
+            type: "edge",
+            edgeId: edge.edgeId,
+            color: edge.color,
+            fromPosition:
+                rowIndex === edge.upRowIndex
+                    ? getNodePosition(rowRenderPositions, rowIndex)
+                    : getEdgePosition(rowRenderPositions, rowIndex, edge.edgeId),
+            toPosition: getNodePosition(rowRenderPositions, edge.downRowIndex),
+            fromAnchor: rowIndex === edge.upRowIndex ? "center" : "top",
+            toAnchor: "nextCenter",
+        };
+    }
+
     if (rowIndex === edge.upRowIndex) {
         return {
             type: "edge",
@@ -310,14 +329,18 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
 }
 
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
+    const rows = new Set<number>([edge.upRowIndex, edge.downRowIndex]);
+
     if (!isLongEdge(edge)) {
-        return Array.from(
+        for (const rowIndex of Array.from(
             { length: Math.max(0, edge.downRowIndex - edge.upRowIndex - 1) },
             (_, index) => edge.upRowIndex + index + 1,
-        );
+        )) {
+            rows.add(rowIndex);
+        }
+        return [...rows].sort((left, right) => left - right);
     }
 
-    const rows = new Set<number>();
     const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
     const bottomStubRow = edge.downRowIndex - LONG_EDGE_VISIBLE_PART_SIZE;
     if (topStubRow < edge.downRowIndex) {

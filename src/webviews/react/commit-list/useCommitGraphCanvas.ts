@@ -62,6 +62,8 @@ export function useCommitGraphCanvas({
                     return rowTop + ROW_HEIGHT / 2;
                 case "bottom":
                     return rowTop + ROW_HEIGHT;
+                case "nextCenter":
+                    return rowTop + ROW_HEIGHT + ROW_HEIGHT / 2;
             }
         };
         const drawEdgeElement = (
