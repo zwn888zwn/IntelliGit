@@ -67,6 +67,10 @@ interface RowRenderPositions {
     maxPosition: number;
 }
 
+type VisibleGraphElement =
+    | { type: "node"; rowIndex: number; layoutIndex: number }
+    | { type: "edge"; edge: PermanentEdge };
+
 export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutResult {
     const rowRenderPositions = buildRowRenderPositions(graph);
     const rows: RenderRowModel[] = graph.rows.map((row, rowIndex) => ({
@@ -228,17 +232,6 @@ function edgeSegmentForRow(
 }
 
 function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions[] {
-    const layoutOrder = Array.from(new Set(graph.rows.map((row) => row.node.layoutIndex))).sort(
-        (left, right) => left - right,
-    );
-    const compactLayoutIndex = new Map(
-        layoutOrder.map((layoutIndex, index) => [layoutIndex, index * 2]),
-    );
-    const nodeColumns = graph.rows.map(
-        (row) => compactLayoutIndex.get(row.node.layoutIndex) ?? row.node.layoutIndex * 2,
-    );
-    const rowOccupied = graph.rows.map((_, rowIndex) => new Set<number>([nodeColumns[rowIndex]]));
-    const edgeColumns = new Map<string, number>();
     const visibleRowsByEdge = new Map<string, number[]>();
 
     for (const edge of graph.edges) {
@@ -246,114 +239,36 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
         visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge));
     }
 
-    const sortedEdges = [...graph.edges]
-        .filter((edge) => edge.downRowIndex > edge.upRowIndex)
-        .sort((left, right) => {
-            const leftPreferred = preferredEdgeColumn(left, compactLayoutIndex);
-            const rightPreferred = preferredEdgeColumn(right, compactLayoutIndex);
-            if (leftPreferred !== rightPreferred) {
-                return leftPreferred - rightPreferred;
-            }
-            const rightSpan = right.downRowIndex - right.upRowIndex;
-            const leftSpan = left.downRowIndex - left.upRowIndex;
-            if (leftSpan !== rightSpan) {
-                return rightSpan - leftSpan;
-            }
-            if (left.upRowIndex !== right.upRowIndex) {
-                return left.upRowIndex - right.upRowIndex;
-            }
-            return left.downRowIndex - right.downRowIndex;
-        });
-
-    for (const edge of sortedEdges) {
-        const visibleRows = visibleRowsByEdge.get(edge.edgeId) ?? [];
-        const preferredColumn = preferredEdgeColumn(edge, compactLayoutIndex);
-        const column =
-            edge.upLayoutIndex === edge.downLayoutIndex
-                ? preferredColumn
-                : findClosestFreeEdgeColumn(preferredColumn, visibleRows, rowOccupied);
-
-        edgeColumns.set(edge.edgeId, column);
-        for (const rowIndex of visibleRows) {
-            rowOccupied[rowIndex]?.add(column);
-        }
-    }
-
     return graph.rows.map((row, rowIndex) => {
-        const visibleColumns = new Set<number>([nodeColumns[rowIndex] ?? 0]);
+        const visibleElements: VisibleGraphElement[] = [
+            { type: "node", rowIndex, layoutIndex: row.node.layoutIndex },
+        ];
         const rowEdgePositions = new Map<string, number>();
 
         for (const edge of graph.edges) {
             if (edge.downRowIndex <= edge.upRowIndex) continue;
             const visibleRows = visibleRowsByEdge.get(edge.edgeId);
             if (!visibleRows?.includes(rowIndex)) continue;
-            visibleColumns.add(
-                edgeColumns.get(edge.edgeId) ?? preferredEdgeColumn(edge, compactLayoutIndex),
-            );
+            visibleElements.push({ type: "edge", edge });
         }
 
-        const rowDenseColumns = Array.from(visibleColumns).sort((left, right) => left - right);
-        const denseColumnIndex = new Map(rowDenseColumns.map((column, index) => [column, index]));
+        visibleElements.sort(compareVisibleElements);
 
-        for (const edge of graph.edges) {
-            if (edge.downRowIndex <= edge.upRowIndex) continue;
-            const visibleRows = visibleRowsByEdge.get(edge.edgeId);
-            if (!visibleRows?.includes(rowIndex)) continue;
-            const position =
-                denseColumnIndex.get(
-                    edgeColumns.get(edge.edgeId) ??
-                        preferredEdgeColumn(edge, compactLayoutIndex),
-                ) ?? 0;
-            rowEdgePositions.set(edge.edgeId, position);
-        }
+        let nodePosition = 0;
+        visibleElements.forEach((element, position) => {
+            if (element.type === "node") {
+                nodePosition = position;
+            } else {
+                rowEdgePositions.set(element.edge.edgeId, position);
+            }
+        });
 
         return {
-            nodePosition: denseColumnIndex.get(nodeColumns[rowIndex]) ?? 0,
+            nodePosition,
             edgePositions: rowEdgePositions,
-            maxPosition: Math.max(0, rowDenseColumns.length - 1),
+            maxPosition: Math.max(0, visibleElements.length - 1),
         };
     });
-}
-
-function preferredEdgeColumn(
-    edge: PermanentEdge,
-    compactLayoutIndex: Map<number, number>,
-): number {
-    const upColumn = compactLayoutIndex.get(edge.upLayoutIndex) ?? edge.upLayoutIndex * 2;
-    const downColumn = compactLayoutIndex.get(edge.downLayoutIndex) ?? edge.downLayoutIndex * 2;
-    if (upColumn === downColumn) {
-        return upColumn;
-    }
-    const span = edge.downRowIndex - edge.upRowIndex;
-    const baseColumn = Math.max(upColumn, downColumn) - 1;
-    return span <= 2 ? Math.max(1, baseColumn - 1) : baseColumn;
-}
-
-function findClosestFreeEdgeColumn(
-    preferredColumn: number,
-    visibleRows: number[],
-    rowOccupied: Array<Set<number>>,
-): number {
-    if (!visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(preferredColumn))) {
-        return preferredColumn;
-    }
-
-    for (let offset = 2; offset < 128; offset += 2) {
-        const inwardColumn = preferredColumn - offset;
-        if (
-            inwardColumn >= 1 &&
-            !visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(inwardColumn))
-        ) {
-            return inwardColumn;
-        }
-
-        const outwardColumn = preferredColumn + offset;
-        if (!visibleRows.some((rowIndex) => rowOccupied[rowIndex]?.has(outwardColumn))) {
-            return outwardColumn;
-        }
-    }
-
-    return preferredColumn;
 }
 
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
@@ -374,6 +289,68 @@ function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
         rows.add(bottomStubRow);
     }
     return [...rows].sort((left, right) => left - right);
+}
+
+function compareVisibleElements(left: VisibleGraphElement, right: VisibleGraphElement): number {
+    if (left.type === "node" && right.type === "node") {
+        return left.layoutIndex - right.layoutIndex;
+    }
+
+    if (left.type === "edge" && right.type === "node") {
+        return compareEdgeToNode(left.edge, right);
+    }
+
+    if (left.type === "node" && right.type === "edge") {
+        return -compareEdgeToNode(right.edge, left);
+    }
+
+    if (left.type === "edge" && right.type === "edge") {
+        return compareEdges(left.edge, right.edge);
+    }
+
+    return 0;
+}
+
+function compareEdges(left: PermanentEdge, right: PermanentEdge): number {
+    if (left.upRowIndex === right.upRowIndex) {
+        if (left.downRowIndex < right.downRowIndex) {
+            return -compareEdgeToNode(right, {
+                type: "node",
+                rowIndex: left.downRowIndex,
+                layoutIndex: left.downLayoutIndex,
+            });
+        }
+        return compareEdgeToNode(left, {
+            type: "node",
+            rowIndex: right.downRowIndex,
+            layoutIndex: right.downLayoutIndex,
+        });
+    }
+
+    if (left.upRowIndex < right.upRowIndex) {
+        return compareEdgeToNode(left, {
+            type: "node",
+            rowIndex: right.upRowIndex,
+            layoutIndex: right.upLayoutIndex,
+        });
+    }
+
+    return -compareEdgeToNode(right, {
+        type: "node",
+        rowIndex: left.upRowIndex,
+        layoutIndex: left.upLayoutIndex,
+    });
+}
+
+function compareEdgeToNode(
+    edge: PermanentEdge,
+    node: Extract<VisibleGraphElement, { type: "node" }>,
+): number {
+    const maxLayoutIndex = Math.max(edge.upLayoutIndex, edge.downLayoutIndex);
+    if (maxLayoutIndex !== node.layoutIndex) {
+        return maxLayoutIndex - node.layoutIndex;
+    }
+    return edge.upRowIndex - node.rowIndex;
 }
 
 function getNodePosition(rowRenderPositions: RowRenderPositions[], rowIndex: number): number {

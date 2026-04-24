@@ -309,7 +309,7 @@ describe("core utilities", () => {
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
     });
 
-    it("graph compute keeps cross-lane edge columns stable across intermediate rows", () => {
+    it("graph compute keeps cross-lane edge transitions local between adjacent rows", () => {
         const graph = computeGraph([
             { hash: "feature-head", parentHashes: ["merge-2"], refs: ["feature/demo"] },
             { hash: "merge-2", parentHashes: ["feature-2", "alpha-2"] },
@@ -331,8 +331,11 @@ describe("core utilities", () => {
             .filter(({ rowIndex }) => rowIndex > 1 && rowIndex < 5);
 
         expect(intermediateSegments.length).toBeGreaterThan(0);
-        expect(new Set(intermediateSegments.map(({ element }) => element.fromPosition)).size).toBe(1);
-        expect(new Set(intermediateSegments.map(({ element }) => element.toPosition)).size).toBe(1);
+        expect(
+            intermediateSegments.every(
+                ({ element }) => Math.abs(element.toPosition - element.fromPosition) <= 1,
+            ),
+        ).toBe(true);
     });
 
     it("graph compute compresses rows to nearby visible columns even when other rows are wider", () => {
