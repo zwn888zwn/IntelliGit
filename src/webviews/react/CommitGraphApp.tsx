@@ -160,10 +160,19 @@ function App(): React.ReactElement {
         MAX_INFO_WIDTH,
         true,
     );
-    const currentCommitHash = useMemo(
-        () => branches.find((branch) => branch.isCurrent)?.hash ?? null,
-        [branches],
-    );
+    const currentCommitRefs = useMemo(() => {
+        const refsByRepo = new Map<string, string>();
+        for (const commit of commits) {
+            if (commit.refs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD ->"))) {
+                refsByRepo.set(commit.repoRoot, commit.hash);
+            }
+        }
+        const currentBranch = branches.find((branch) => branch.isCurrent);
+        if (currentBranch && repository?.root) {
+            refsByRepo.set(repository.root, currentBranch.hash);
+        }
+        return Array.from(refsByRepo, ([repoRoot, hash]) => ({ repoRoot, hash }));
+    }, [branches, commits, repository?.root]);
 
     useEffect(() => {
         vscode.postMessage({ type: "ready" });
@@ -338,7 +347,7 @@ function App(): React.ReactElement {
                             repositories={repositories}
                             repository={repository}
                             selectedHash={selectedHash}
-                            currentHash={currentCommitHash}
+                            currentCommitRefs={currentCommitRefs}
                             revealHash={revealHash}
                             filterText={filterText}
                             hasMore={hasMore}

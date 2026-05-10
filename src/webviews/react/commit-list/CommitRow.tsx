@@ -1,4 +1,5 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import type { Commit } from "../../../types";
 import { RefTypeIcon } from "../shared/components";
 import { formatDateTime } from "../shared/date";
@@ -50,6 +51,71 @@ function RefBadge({ kind, name }: { kind: "branch" | "tag"; name: string }): Rea
     );
 }
 
+function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.ReactElement | null {
+    const branchRefsCount = branchRefs.length;
+    const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
+    if (branchRefsCount === 0) return null;
+
+    const tooltipText = `Branches (${branchRefsCount}):\n${branchRefs.join("\n")}`;
+    const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setTooltipPos({
+            x: event.clientX > 0 ? event.clientX : rect.left + rect.width / 2,
+            y: rect.top - 6,
+        });
+    };
+    const hideTooltip = (): void => setTooltipPos(null);
+
+    return (
+        <span
+            style={{
+                marginLeft: 6,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                flexShrink: 0,
+                fontSize: "11px",
+                opacity: 0.85,
+                color: "var(--vscode-charts-blue, #6eb3ff)",
+            }}
+            aria-label={tooltipText}
+            onPointerEnter={showTooltip}
+            onPointerMove={showTooltip}
+            onPointerLeave={hideTooltip}
+        >
+            <RefTypeIcon kind="branch" size={12} />
+            {branchRefsCount}
+            {tooltipPos &&
+                createPortal(
+                    <span
+                        style={{
+                            position: "fixed",
+                            left: Math.max(8, Math.min(tooltipPos.x, window.innerWidth - 8)),
+                            top: Math.max(8, tooltipPos.y),
+                            transform: "translate(-50%, -100%)",
+                            background: "var(--vscode-editorHoverWidget-background, #2f3646)",
+                            color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
+                            border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.12))",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            lineHeight: "15px",
+                            padding: "4px 7px",
+                            maxWidth: 360,
+                            whiteSpace: "pre-wrap",
+                            overflowWrap: "anywhere",
+                            zIndex: 9999,
+                            pointerEvents: "none",
+                            boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+                        }}
+                    >
+                        {tooltipText}
+                    </span>,
+                    document.body,
+                )}
+        </span>
+    );
+}
+
 function CommitMessageCell({
     message,
     refs,
@@ -58,17 +124,12 @@ function CommitMessageCell({
     refs: string[];
 }): React.ReactElement {
     const { branches: branchRefs, tags: tagRefs } = splitCommitRefs(refs);
-    const branchRefsCount = branchRefs.length;
     const visibleTagRefs = tagRefs.slice(0, 2);
     const hiddenTagCount = Math.max(0, tagRefs.length - visibleTagRefs.length);
     const refSummaryLines: string[] = [];
-    const branchTooltipText =
-        branchRefs.length > 0
-            ? `Branches (${branchRefsCount}):\n${branchRefs.join("\n")}`
-            : `${branchRefsCount} branch label${branchRefsCount === 1 ? "" : "s"}`;
     if (branchRefs.length > 0) refSummaryLines.push(`Branches: ${branchRefs.join(" • ")}`);
     if (tagRefs.length > 0) refSummaryLines.push(`Tags: ${tagRefs.join(" • ")}`);
-    const tooltipText =
+    const messageTooltipText =
         refSummaryLines.length > 0 ? `${message}\n\n${refSummaryLines.join("\n")}` : message;
 
     return (
@@ -80,32 +141,14 @@ function CommitMessageCell({
                 alignItems: "center",
                 overflow: "hidden",
             }}
-            title={tooltipText}
         >
             <span
                 style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}
-                title={message}
+                title={messageTooltipText}
             >
                 {message}
             </span>
-            {branchRefsCount > 0 && (
-                <span
-                    style={{
-                        marginLeft: 6,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 3,
-                        flexShrink: 0,
-                        fontSize: "11px",
-                        opacity: 0.85,
-                        color: "var(--vscode-charts-blue, #6eb3ff)",
-                    }}
-                    title={branchTooltipText}
-                >
-                    <RefTypeIcon kind="branch" size={12} />
-                    {branchRefsCount}
-                </span>
-            )}
+            <BranchRefsIndicator branchRefs={branchRefs} />
             {visibleTagRefs.map((tagRef) => (
                 <span key={`tag:${tagRef}`} style={{ marginLeft: 5, flexShrink: 0 }}>
                     <RefBadge kind="tag" name={tagRef} />

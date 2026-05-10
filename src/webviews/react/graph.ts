@@ -17,8 +17,15 @@ export type {
 } from "./commit-list/graphRouter";
 
 export function computeGraph(
-    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[] }>,
+    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[]; repoRoot?: string }>,
 ): CommitGraphLayoutResult {
     const permanentGraph = buildPermanentGraph(commits);
-    return buildRenderRows(permanentGraph);
+    const result = buildRenderRows(permanentGraph);
+    return {
+        ...result,
+        rows: result.rows.map((row, index) => ({
+            ...row,
+            repoRoot: commits[index]?.repoRoot,
+        })),
+    };
 }

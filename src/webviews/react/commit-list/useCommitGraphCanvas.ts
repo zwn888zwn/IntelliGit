@@ -15,7 +15,7 @@ interface Args {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
     viewportRef: React.RefObject<HTMLDivElement | null>;
     rows: RenderRowModel[];
-    currentHash: string | null;
+    currentCommitRefs: Array<{ repoRoot: string; hash: string }>;
     graphWidth: number;
     graphScale: number;
     graphOffset: number;
@@ -30,7 +30,7 @@ export function useCommitGraphCanvas({
     canvasRef,
     viewportRef,
     rows,
-    currentHash,
+    currentCommitRefs,
     graphWidth,
     graphScale,
     graphOffset,
@@ -66,6 +66,11 @@ export function useCommitGraphCanvas({
                     return rowTop + ROW_HEIGHT + ROW_HEIGHT / 2;
             }
         };
+        const isCurrentCommit = (row: RenderRowModel): boolean =>
+            currentCommitRefs.some((ref) => {
+                const sameRepo = row.repoRoot ? ref.repoRoot === row.repoRoot : true;
+                return sameRepo && isHashMatch(row.commitHash, ref.hash);
+            });
         const drawEdgeElement = (
             ctx2d: CanvasRenderingContext2D,
             rowTop: number,
@@ -140,7 +145,7 @@ export function useCommitGraphCanvas({
                 if (node) {
                     const cx = positionX(node.position);
                     const cy = y + ROW_HEIGHT / 2;
-                    if (currentHash && isHashMatch(row.commitHash, currentHash)) {
+                    if (isCurrentCommit(row)) {
                         ctx.beginPath();
                         ctx.strokeStyle = node.color;
                         ctx.lineWidth = Math.max(2, 2 * graphScale);
@@ -191,5 +196,5 @@ export function useCommitGraphCanvas({
             viewport.removeEventListener("scroll", scheduleDraw);
             window.removeEventListener("resize", scheduleDraw);
         };
-    }, [canvasRef, viewportRef, currentHash, graphOffset, graphScale, graphWidth, rows]);
+    }, [canvasRef, viewportRef, currentCommitRefs, graphOffset, graphScale, graphWidth, rows]);
 }

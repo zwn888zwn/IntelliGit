@@ -48,6 +48,7 @@ export interface ArrowMarker {
 
 export interface RenderRowModel {
     commitHash: string;
+    repoRoot?: string;
     parentHashes: string[];
     nodePosition: number;
     nodeColor: string;
