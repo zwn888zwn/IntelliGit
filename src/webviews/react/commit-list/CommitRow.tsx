@@ -51,12 +51,20 @@ function RefBadge({ kind, name }: { kind: "branch" | "tag"; name: string }): Rea
     );
 }
 
+function normalizeBranchRefName(ref: string): string {
+    return ref.startsWith("HEAD -> ") ? ref.slice("HEAD -> ".length).trim() : ref;
+}
+
 function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.ReactElement | null {
-    const branchRefsCount = branchRefs.length;
+    const displayRefs = Array.from(
+        new Set(branchRefs.map(normalizeBranchRefName).filter((ref) => ref && ref !== "HEAD")),
+    );
+    const branchRefsCount = displayRefs.length;
     const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
     if (branchRefsCount === 0) return null;
 
-    const tooltipText = `Branches (${branchRefsCount}):\n${branchRefs.join("\n")}`;
+    const branchText = displayRefs.join(" & ");
+    const tooltipText = `Branches (${branchRefsCount}):\n${displayRefs.join("\n")}`;
     const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
         const rect = event.currentTarget.getBoundingClientRect();
         setTooltipPos({
@@ -72,11 +80,14 @@ function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.Re
                 marginLeft: 6,
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 3,
-                flexShrink: 0,
+                gap: 4,
+                minWidth: 34,
+                maxWidth: 260,
+                flex: "0 1 auto",
                 fontSize: "11px",
-                opacity: 0.85,
-                color: "var(--vscode-charts-blue, #6eb3ff)",
+                lineHeight: "16px",
+                color: "var(--vscode-descriptionForeground)",
+                opacity: 0.86,
             }}
             aria-label={tooltipText}
             onPointerEnter={showTooltip}
@@ -84,7 +95,16 @@ function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.Re
             onPointerLeave={hideTooltip}
         >
             <RefTypeIcon kind="branch" size={12} />
-            {branchRefsCount}
+            <span
+                style={{
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                }}
+            >
+                {branchText}
+            </span>
             {tooltipPos &&
                 createPortal(
                     <span
@@ -143,7 +163,12 @@ function CommitMessageCell({
             }}
         >
             <span
-                style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flex: 1 }}
+                style={{
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    minWidth: 0,
+                    flex: "0 1 auto",
+                }}
                 title={messageTooltipText}
             >
                 {message}
