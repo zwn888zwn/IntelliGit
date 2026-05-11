@@ -1,7 +1,7 @@
 // Entry point for the commit panel React webview. Wraps the app in
 // ChakraProvider with the VS Code theme and composes all panels.
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChakraProvider, Box } from "@chakra-ui/react";
 import theme from "./theme";
@@ -11,7 +11,6 @@ import { ShelfTab } from "./components/ShelfTab";
 import { useExtensionMessages } from "./hooks/useExtensionMessages";
 import { getCheckedFileKey, useCheckedFiles } from "./hooks/useCheckedFiles";
 import { getVsCodeApi } from "./hooks/useVsCodeApi";
-import { useDragResize } from "./hooks/useDragResize";
 import { ThemeIconFontFaces } from "../shared/components";
 
 function App(): React.ReactElement {
@@ -72,23 +71,8 @@ function App(): React.ReactElement {
         stageCheckedAndCommit(true);
     }, [stageCheckedAndCommit]);
 
-    const containerRef = useRef<HTMLDivElement>(null);
-    const savedBottomHeight = vscode.getState?.()?.bottomPanelHeight;
-    const { height: bottomHeight, onMouseDown } = useDragResize(
-        typeof savedBottomHeight === "number" ? savedBottomHeight : 120,
-        40,
-        containerRef,
-        {
-            maxReservedHeight: 120,
-            onResize: (h: number) => {
-                const prev = vscode.getState?.() ?? {};
-                vscode.setState({ ...prev, bottomPanelHeight: h });
-            },
-        },
-    );
-
     return (
-        <Box ref={containerRef} display="flex" flexDirection="column" h="100%">
+        <Box display="flex" flexDirection="column" h="100%">
             <ThemeIconFontFaces fonts={state.iconFonts} />
             <Box flex={1} overflow="hidden" display="flex" flexDirection="column">
                 <TabBar
@@ -133,26 +117,6 @@ function App(): React.ReactElement {
                         />
                     }
                 />
-            </Box>
-            <Box
-                h="5px"
-                flexShrink={0}
-                cursor="row-resize"
-                bg="var(--vscode-panel-border)"
-                onMouseDown={onMouseDown}
-                _hover={{ bg: "var(--vscode-focusBorder, #007acc)" }}
-            />
-            <Box
-                h={`${bottomHeight}px`}
-                flexShrink={0}
-                overflow="auto"
-                display="flex"
-                alignItems="center"
-                justifyContent="center"
-            >
-                <Box color="var(--vscode-descriptionForeground)" fontSize="13px" fontStyle="italic">
-                    {state.repository ? "Coming..." : "No git repository found in this workspace."}
-                </Box>
             </Box>
         </Box>
     );
