@@ -23,6 +23,8 @@ const INFO_INDENT_BASE = 18;
 const INFO_INDENT_STEP = 14;
 const INFO_GUIDE_BASE = 23;
 const INFO_SECTION_GUIDE = 7;
+const COMMIT_DETAILS_DEFAULT_HEIGHT = 110;
+const COMMIT_DETAILS_HEIGHT_RATIO = 1 / 3;
 
 function CommitRefRow({
     kind,
@@ -74,11 +76,13 @@ export function CommitInfoPane({
     const [detailCollapsed, setDetailCollapsed] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const { height: bottomHeight, onMouseDown: onResizeStart } = useDragResize(
-        220,
+        COMMIT_DETAILS_DEFAULT_HEIGHT,
         70,
         containerRef,
         {
             maxReservedHeight: 80,
+            resolveInitialHeight: (containerHeight) =>
+                Math.floor(containerHeight * COMMIT_DETAILS_HEIGHT_RATIO),
             onResize: () => setDetailCollapsed(false),
         },
     );

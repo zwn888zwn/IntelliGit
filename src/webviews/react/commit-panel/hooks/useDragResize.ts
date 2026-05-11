@@ -11,6 +11,7 @@ interface DragResizeAPI {
 export interface DragResizeOptions {
     maxReservedHeight?: number;
     onResize?: (height: number) => void;
+    resolveInitialHeight?: (containerHeight: number) => number;
 }
 
 export function useDragResize(
@@ -22,7 +23,8 @@ export function useDragResize(
     const [height, setHeight] = useState(initialHeight);
     const dragging = useRef(false);
     const heightRef = useRef(height);
-    const { maxReservedHeight = 60, onResize } = options;
+    const didResolveInitialHeight = useRef(false);
+    const { maxReservedHeight = 60, onResize, resolveInitialHeight } = options;
     const onResizeRef = useRef(onResize);
 
     useEffect(() => {
@@ -32,6 +34,34 @@ export function useDragResize(
     useEffect(() => {
         heightRef.current = height;
     }, [height]);
+
+    useEffect(() => {
+        if (!resolveInitialHeight || didResolveInitialHeight.current) return;
+
+        const resolveHeight = () => {
+            const containerHeight = containerRef.current?.clientHeight ?? 0;
+            if (containerHeight <= 0 || didResolveInitialHeight.current) return false;
+
+            const maxH = containerHeight - maxReservedHeight;
+            const nextHeight = Math.max(
+                minHeight,
+                Math.min(maxH, resolveInitialHeight(containerHeight)),
+            );
+            didResolveInitialHeight.current = true;
+            heightRef.current = nextHeight;
+            setHeight(nextHeight);
+            return true;
+        };
+
+        if (resolveHeight()) return;
+        if (typeof ResizeObserver === "undefined" || !containerRef.current) return;
+
+        const observer = new ResizeObserver(() => {
+            if (resolveHeight()) observer.disconnect();
+        });
+        observer.observe(containerRef.current);
+        return () => observer.disconnect();
+    }, [containerRef, maxReservedHeight, minHeight, resolveInitialHeight]);
 
     const onMouseDown = useCallback(
         (e: React.MouseEvent) => {
