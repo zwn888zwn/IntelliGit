@@ -10,6 +10,8 @@ import {
 
 const GRAPH_LEFT_PAD = 0;
 const OVERSCAN_ROWS = 8;
+const EDGE_LINE_WIDTH = 1.25;
+const CURRENT_RING_WIDTH = 1.75;
 
 interface Args {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -78,7 +80,7 @@ export function useCommitGraphCanvas({
         ) => {
             ctx2d.beginPath();
             ctx2d.strokeStyle = element.color;
-            ctx2d.lineWidth = Math.max(1.5, 2 * graphScale);
+            ctx2d.lineWidth = Math.max(1, EDGE_LINE_WIDTH * graphScale);
             ctx2d.moveTo(
                 positionX(element.fromPosition),
                 anchorY(rowTop, element.fromAnchor),
@@ -97,7 +99,7 @@ export function useCommitGraphCanvas({
             const x = positionX(element.position);
             ctx2d.beginPath();
             ctx2d.strokeStyle = element.color;
-            ctx2d.lineWidth = Math.max(1.5, 2 * graphScale);
+            ctx2d.lineWidth = Math.max(1, EDGE_LINE_WIDTH * graphScale);
             if (element.direction === "down") {
                 ctx2d.moveTo(x, rowTop);
                 ctx2d.lineTo(x, rowTop + ROW_HEIGHT / 2);
@@ -148,7 +150,7 @@ export function useCommitGraphCanvas({
                     if (isCurrentCommit(row)) {
                         ctx.beginPath();
                         ctx.strokeStyle = node.color;
-                        ctx.lineWidth = Math.max(2, 2 * graphScale);
+                        ctx.lineWidth = Math.max(1.5, CURRENT_RING_WIDTH * graphScale);
                         ctx.arc(
                             cx,
                             cy,
@@ -160,7 +162,7 @@ export function useCommitGraphCanvas({
                     }
                     ctx.beginPath();
                     ctx.fillStyle = node.color;
-                    ctx.arc(cx, cy, Math.max(2.5, DOT_RADIUS * graphScale), 0, Math.PI * 2);
+                    ctx.arc(cx, cy, Math.max(2.25, DOT_RADIUS * graphScale), 0, Math.PI * 2);
                     ctx.fill();
                 }
             }

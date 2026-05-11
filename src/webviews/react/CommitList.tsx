@@ -81,13 +81,12 @@ export function CommitList({
     } | null>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
-    const [loadMoreDebug, setLoadMoreDebug] = useState({ count: 0, lastVisibleEnd: 0 });
 
     const graph = useMemo(() => computeGraph(commits), [commits]);
     const graphRows = graph.rows;
     const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
     const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
-    const repoRailWidth = repoRailExpanded ? 168 : 16;
+    const repoRailWidth = repoRailExpanded ? 168 : 10;
     const headerGraphWidth = repoRailWidth + Math.min(graphWidth, 44);
     const repositoryLookup = useMemo(
         () => new Map(repositories.map((item) => [item.root, item])),
@@ -186,10 +185,6 @@ export function CommitList({
         (visibleEnd: number) => {
             if (!hasMore) return;
             if (visibleEnd < Math.max(0, commits.length - PRELOAD_ROWS)) return;
-            setLoadMoreDebug((current) => ({
-                count: current.count + 1,
-                lastVisibleEnd: visibleEnd,
-            }));
             void onLoadMore();
         },
         [commits.length, hasMore, onLoadMore],
@@ -296,19 +291,6 @@ export function CommitList({
                 >
                     Branch: {selectedBranch ?? "All branches"}
                 </span>
-                <span
-                    style={{
-                        ...BRANCH_SCOPE_STYLE,
-                        maxWidth: "none",
-                        marginLeft: "auto",
-                        opacity: 0.6,
-                        fontFamily: "var(--vscode-editor-font-family, monospace)",
-                    }}
-                    title={`commits=${commits.length}, visible=${visibleCommits.length}, height=${viewportHeight}, top=${scrollTop}, start=${visibleRange.start}, end=${visibleRange.end}, hasMore=${hasMore}, loadMoreCount=${loadMoreDebug.count}, lastVisibleEnd=${loadMoreDebug.lastVisibleEnd}`}
-                >
-                    dbg {commits.length}/{visibleCommits.length} h{viewportHeight} y{scrollTop} m
-                    {hasMore ? 1 : 0} l{loadMoreDebug.count}@{loadMoreDebug.lastVisibleEnd}
-                </span>
             </div>
 
             <div style={headerRowStyle(headerGraphWidth)}>
@@ -356,7 +338,12 @@ export function CommitList({
                                             height: ROW_HEIGHT,
                                             border: "none",
                                             borderRight: "1px solid rgba(255,255,255,0.08)",
-                                            background: repo?.color ?? "#666",
+                                            borderLeft: repoRailExpanded
+                                                ? "none"
+                                                : `4px solid ${repo?.color ?? "#666"}`,
+                                            background: repoRailExpanded
+                                                ? (repo?.color ?? "#666")
+                                                : "transparent",
                                             color: "rgba(255,255,255,0.92)",
                                             padding: repoRailExpanded ? "0 8px" : 0,
                                             textAlign: "left",

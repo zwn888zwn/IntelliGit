@@ -74,6 +74,7 @@ export function CommitInfoPane({
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
     const [filesCollapsed, setFilesCollapsed] = useState(false);
     const [detailCollapsed, setDetailCollapsed] = useState(false);
+    const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const { height: bottomHeight, onMouseDown: onResizeStart } = useDragResize(
         COMMIT_DETAILS_DEFAULT_HEIGHT,
@@ -96,10 +97,12 @@ export function CommitInfoPane({
     useEffect(() => {
         if (!detail) {
             setExpandedDirs(new Set());
+            setSelectedFilePath(null);
             return;
         }
         setExpandedDirs(new Set(collectDirPaths(tree)));
-    }, [detail, tree]);
+        setSelectedFilePath(null);
+    }, [detail?.hash, tree]);
 
     if (!detail) {
         return (
@@ -151,6 +154,8 @@ export function CommitInfoPane({
                         folderIcon={folderIcon}
                         folderExpandedIcon={folderExpandedIcon}
                         folderIconsByName={folderIconsByName}
+                        selectedFilePath={selectedFilePath}
+                        onSelectFile={setSelectedFilePath}
                         onToggleDir={(dir) =>
                             setExpandedDirs((prev) => {
                                 const next = new Set(prev);
@@ -318,6 +323,8 @@ function TreeRows({
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
+    selectedFilePath,
+    onSelectFile,
     onToggleDir,
     onOpenDiff,
 }: {
@@ -330,6 +337,8 @@ function TreeRows({
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
+    selectedFilePath: string | null;
+    onSelectFile: (path: string) => void;
     onToggleDir: (path: string) => void;
     onOpenDiff?: (commitHash: string, filePath: string, repoRoot: string) => void;
 }): React.ReactElement {
@@ -345,6 +354,8 @@ function TreeRows({
                             commitHash={commitHash}
                             commitShortHash={commitShortHash}
                             repoRoot={repoRoot}
+                            isSelected={selectedFilePath === entry.file.path}
+                            onSelectFile={onSelectFile}
                             onOpenDiff={onOpenDiff}
                         />
                     );
@@ -374,6 +385,8 @@ function TreeRows({
                                 folderIcon={folderIcon}
                                 folderExpandedIcon={folderExpandedIcon}
                                 folderIconsByName={folderIconsByName}
+                                selectedFilePath={selectedFilePath}
+                                onSelectFile={onSelectFile}
                                 onToggleDir={onToggleDir}
                                 onOpenDiff={onOpenDiff}
                             />
@@ -458,6 +471,8 @@ const CommitFileRow = React.memo(function CommitFileRow({
     commitHash,
     commitShortHash,
     repoRoot,
+    isSelected,
+    onSelectFile,
     onOpenDiff,
 }: {
     file: CommitFile;
@@ -465,6 +480,8 @@ const CommitFileRow = React.memo(function CommitFileRow({
     commitHash: string;
     commitShortHash: string;
     repoRoot: string;
+    isSelected: boolean;
+    onSelectFile: (path: string) => void;
     onOpenDiff?: (commitHash: string, filePath: string, repoRoot: string) => void;
 }): React.ReactElement {
     const padLeft = INFO_INDENT_BASE + depth * INFO_INDENT_STEP;
@@ -475,6 +492,10 @@ const CommitFileRow = React.memo(function CommitFileRow({
         onOpenDiff?.(commitHash, file.path, repoRoot);
     }, [onOpenDiff, commitHash, file.path, repoRoot]);
 
+    const selectFile = useCallback(() => {
+        onSelectFile(file.path);
+    }, [file.path, onSelectFile]);
+
     useEffect(() => {
         const el = rowRef.current;
         if (!el) return;
@@ -482,6 +503,7 @@ const CommitFileRow = React.memo(function CommitFileRow({
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Enter") {
                 e.preventDefault();
+                selectFile();
                 openDiff();
             }
         };
@@ -491,7 +513,7 @@ const CommitFileRow = React.memo(function CommitFileRow({
             el.removeEventListener("dblclick", handleDblClick);
             el.removeEventListener("keydown", handleKeyDown);
         };
-    }, [openDiff]);
+    }, [openDiff, selectFile]);
 
     const vscodeContext = useMemo(
         () =>
@@ -519,7 +541,17 @@ const CommitFileRow = React.memo(function CommitFileRow({
             cursor="pointer"
             position="relative"
             tabIndex={0}
-            _hover={{ bg: "var(--vscode-list-hoverBackground)" }}
+            role="treeitem"
+            aria-selected={isSelected}
+            bg={isSelected ? "var(--vscode-list-activeSelectionBackground)" : undefined}
+            color={isSelected ? "var(--vscode-list-activeSelectionForeground)" : undefined}
+            _hover={{
+                bg: isSelected
+                    ? "var(--vscode-list-activeSelectionBackground)"
+                    : "var(--vscode-list-hoverBackground)",
+            }}
+            onClick={selectFile}
+            onFocus={selectFile}
             data-vscode-context={vscodeContext}
             title={file.path}
         >
