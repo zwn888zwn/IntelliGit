@@ -19,6 +19,7 @@ import type { TreeEntry } from "../types";
 interface Props {
     repositories: RepositoryContextInfo[];
     currentRepository: RepositoryContextInfo | null;
+    activeFile: { repoRoot: string; path: string } | null;
     files: WorkingFile[];
     groupByDir: boolean;
     folderIcon?: ThemeTreeIcon;
@@ -39,6 +40,7 @@ interface Props {
 export function FileTree({
     repositories,
     currentRepository,
+    activeFile,
     files,
     groupByDir,
     folderIcon,
@@ -86,6 +88,7 @@ export function FileTree({
                     key={repository.root}
                     repository={repository}
                     isCurrent={currentRepository?.root === repository.root}
+                    activeFile={activeFile}
                     files={repoFiles}
                     groupByDir={groupByDir}
                     folderIcon={folderIcon}
@@ -116,6 +119,7 @@ function RepositorySection({
     repository,
     isCurrent,
     files,
+    activeFile,
     groupByDir,
     folderIcon,
     folderExpandedIcon,
@@ -258,6 +262,7 @@ function RepositorySection({
                             folderIconsByName={folderIconsByName}
                             expandedDirs={expandedDirs}
                             checkedPaths={checkedPaths}
+                            activeFile={activeFile}
                             onToggleFile={onToggleFile}
                             onToggleFolder={onToggleFolder}
                             isAllChecked={isAllChecked}
@@ -291,6 +296,7 @@ function RepositorySection({
                             folderIconsByName={folderIconsByName}
                             expandedDirs={expandedDirs}
                             checkedPaths={checkedPaths}
+                            activeFile={activeFile}
                             onToggleFile={onToggleFile}
                             onToggleFolder={onToggleFolder}
                             isAllChecked={isAllChecked}
@@ -315,6 +321,7 @@ interface TreeEntriesProps {
     folderIconsByName?: ThemeFolderIconMap;
     expandedDirs: Set<string>;
     checkedPaths: Set<string>;
+    activeFile: { repoRoot: string; path: string } | null;
     onToggleFile: (file: WorkingFile) => void;
     onToggleFolder: (files: WorkingFile[]) => void;
     isAllChecked: (files: WorkingFile[]) => boolean;
@@ -333,6 +340,7 @@ function TreeEntries({
     folderIconsByName,
     expandedDirs,
     checkedPaths,
+    activeFile,
     onToggleFile,
     onToggleFolder,
     isAllChecked,
@@ -350,6 +358,10 @@ function TreeEntries({
                             file={entry.file}
                             depth={depth}
                             isChecked={checkedPaths.has(getCheckedFileKey(entry.file))}
+                            isActive={
+                                activeFile?.repoRoot === entry.file.repoRoot &&
+                                activeFile.path === entry.file.path
+                            }
                             groupByDir={groupByDir}
                             onToggle={onToggleFile}
                             onClick={onFileClick}
@@ -387,6 +399,7 @@ function TreeEntries({
                                 folderIconsByName={folderIconsByName}
                                 expandedDirs={expandedDirs}
                                 checkedPaths={checkedPaths}
+                                activeFile={activeFile}
                                 onToggleFile={onToggleFile}
                                 onToggleFolder={onToggleFolder}
                                 isAllChecked={isAllChecked}

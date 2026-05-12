@@ -178,6 +178,20 @@
                 "enablement": "resourceScheme == intelligit-diff-editable && intelligit.commitDiffSourceExists"
             },
             {
+                "command": "intelligit.previousWorkingFileChange",
+                "title": "Previous IntelliGit Change",
+                "category": "IntelliGit",
+                "icon": "$(arrow-up)",
+                "enablement": "intelligit.commitPanel.hasPreviousDiffFile"
+            },
+            {
+                "command": "intelligit.nextWorkingFileChange",
+                "title": "Next IntelliGit Change",
+                "category": "IntelliGit",
+                "icon": "$(arrow-down)",
+                "enablement": "intelligit.commitPanel.hasNextDiffFile"
+            },
+            {
                 "command": "intelligit.fileDelete",
                 "title": "Delete",
                 "category": "IntelliGit"
@@ -365,6 +379,16 @@
                 }
             ],
             "editor/title": [
+                {
+                    "command": "intelligit.previousWorkingFileChange",
+                    "when": "intelligit.commitPanel.activeDiff",
+                    "group": "navigation@6"
+                },
+                {
+                    "command": "intelligit.nextWorkingFileChange",
+                    "when": "intelligit.commitPanel.activeDiff",
+                    "group": "navigation@7"
+                },
                 {
                     "command": "intelligit.openCommitDiffSource",
                     "when": "resourceScheme == intelligit-diff-editable",

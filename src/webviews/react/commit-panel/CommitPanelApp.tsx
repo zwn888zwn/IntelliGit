@@ -85,6 +85,7 @@ function App(): React.ReactElement {
                             files={state.files}
                             repositories={state.repositories}
                             currentRepository={state.repository}
+                            activeFile={state.activeFile}
                             commitMessage={state.commitMessage}
                             isAmend={state.isAmend}
                             isRefreshing={state.isRefreshing}

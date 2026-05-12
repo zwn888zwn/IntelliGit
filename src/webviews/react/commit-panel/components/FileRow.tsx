@@ -15,6 +15,7 @@ interface Props {
     file: WorkingFile;
     depth: number;
     isChecked: boolean;
+    isActive: boolean;
     groupByDir: boolean;
     onToggle: (file: WorkingFile) => void;
     onClick: (file: WorkingFile) => void;
@@ -24,6 +25,7 @@ function FileRowInner({
     file,
     depth,
     isChecked,
+    isActive,
     groupByDir,
     onToggle,
     onClick,
@@ -44,7 +46,15 @@ function FileRowInner({
             fontFamily={SYSTEM_FONT_STACK}
             cursor="pointer"
             position="relative"
-            _hover={{ bg: "var(--vscode-list-hoverBackground)" }}
+            role="treeitem"
+            aria-selected={isActive}
+            bg={isActive ? "var(--vscode-list-activeSelectionBackground)" : undefined}
+            color={isActive ? "var(--vscode-list-activeSelectionForeground)" : undefined}
+            _hover={{
+                bg: isActive
+                    ? "var(--vscode-list-activeSelectionBackground)"
+                    : "var(--vscode-list-hoverBackground)",
+            }}
             data-vscode-context={JSON.stringify({
                 webviewSection: "file",
                 filePath: file.path,

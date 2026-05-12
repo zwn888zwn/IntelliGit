@@ -55,6 +55,7 @@ export type InboundMessage =
     | { type: "lastCommitMessage"; message: string }
     | { type: "committed" }
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
+    | { type: "setActiveFile"; target: RepoPathRef | null }
     | { type: "refreshing"; active: boolean }
     | { type: "error"; message: string };
 
@@ -70,6 +71,7 @@ export interface CommitPanelState {
     folderIconsByName?: ThemeFolderIconMap;
     iconFonts: ThemeIconFont[];
     repository: RepositoryContextInfo | null;
+    activeFile: RepoPathRef | null;
     commitMessage: string;
     isAmend: boolean;
     isRefreshing: boolean;
@@ -93,6 +95,7 @@ export type CommitPanelAction =
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }
     | { type: "COMMITTED" }
     | { type: "SET_REPOSITORY_CONTEXT"; repository: RepositoryContextInfo | null }
+    | { type: "SET_ACTIVE_FILE"; target: RepoPathRef | null }
     | { type: "SET_REFRESHING"; active: boolean }
     | { type: "SET_ERROR"; message: string }
     | { type: "SET_COMMIT_MESSAGE"; message: string }

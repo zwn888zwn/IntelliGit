@@ -130,6 +130,70 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             enabled,
         );
     };
+    const getEditorNavigationState = (): { uri: string; line: number; character: number } | null => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) return null;
+        const active = editor.selection.active;
+        return {
+            uri: editor.document.uri.toString(),
+            line: active.line,
+            character: active.character,
+        };
+    };
+    const waitForEditorCommand = () => new Promise((resolve) => setTimeout(resolve, 80));
+    const isSameEditorPosition = (
+        before: { uri: string; line: number; character: number } | null,
+        after: { uri: string; line: number; character: number } | null,
+    ): boolean =>
+        before?.uri === after?.uri &&
+        before?.line === after?.line &&
+        before?.character === after?.character;
+    const didNativeDiffNavigationWrap = (
+        direction: "next" | "previous",
+        before: { uri: string; line: number; character: number } | null,
+        after: { uri: string; line: number; character: number } | null,
+    ): boolean => {
+        if (!before || !after || before.uri !== after.uri) return false;
+        return direction === "next" ? after.line < before.line : after.line > before.line;
+    };
+    const restoreEditorNavigationState = (
+        state: { uri: string; line: number; character: number } | null,
+    ): void => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor || !state || editor.document.uri.toString() !== state.uri) return;
+        const position = new vscode.Position(state.line, state.character);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(
+            new vscode.Range(position, position),
+            vscode.TextEditorRevealType.InCenterIfOutsideViewport,
+        );
+    };
+    const navigateWorkingTreeDiff = async (direction: "next" | "previous"): Promise<void> => {
+        if (!(await commitPanel.canNavigateWorkingFileChange(direction))) return;
+        const command =
+            direction === "next"
+                ? "workbench.action.compareEditor.nextChange"
+                : "workbench.action.compareEditor.previousChange";
+        const before = getEditorNavigationState();
+        await vscode.commands.executeCommand(command);
+        await waitForEditorCommand();
+        commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
+        const after = getEditorNavigationState();
+        if (
+            !isSameEditorPosition(before, after) &&
+            !didNativeDiffNavigationWrap(direction, before, after)
+        ) {
+            return;
+        }
+
+        const target = commitPanel.getAdjacentWorkingFileTarget(direction);
+        if (!target) {
+            restoreEditorNavigationState(before);
+            commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
+            return;
+        }
+        await commitPanel.openWorkingFileDiff(target);
+    };
 
     const applyCurrentRepositoryContext = async (
         options: { resetGraph?: boolean } = {},
@@ -710,20 +774,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("intelligit.fileRefreshing", () => {
             // No-op: visual-only command shown while refreshing (disabled via enablement).
         }),
+        vscode.commands.registerCommand("intelligit.previousWorkingFileChange", async () => {
+            await navigateWorkingTreeDiff("previous");
+        }),
+        vscode.commands.registerCommand("intelligit.nextWorkingFileChange", async () => {
+            await navigateWorkingTreeDiff("next");
+        }),
     );
 
     // --- Initial load ---
 
     await applyCurrentRepositoryContext({ resetGraph: true });
+    commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
     await blameController.initialize();
 
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(async (editor) => {
             if (await repositoryService.followActiveEditor(editor)) {
                 await applyCurrentRepositoryContext({ resetGraph: true });
+                commitPanel.syncActiveEditor(editor);
                 return;
             }
+            commitPanel.syncActiveEditor(editor);
             await updateCommitDiffSourceContext(editor);
+        }),
+        vscode.window.onDidChangeTextEditorSelection((event) => {
+            commitPanel.syncActiveEditor(event.textEditor);
         }),
         vscode.workspace.onDidChangeWorkspaceFolders(async () => {
             await repositoryService.refreshRepositories();

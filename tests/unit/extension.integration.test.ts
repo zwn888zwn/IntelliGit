@@ -51,6 +51,7 @@ const createFileListeners: Array<() => void> = [];
 const deleteFileListeners: Array<() => void> = [];
 const renameFileListeners: Array<() => void> = [];
 const activeEditorListeners: Array<(editor: unknown) => void> = [];
+const editorSelectionListeners: Array<(event: { textEditor: unknown }) => void> = [];
 const workspaceFolderListeners: Array<() => void> = [];
 type FsWatchCallback = (...args: unknown[]) => void;
 const fsWatchCallbacks: FsWatchCallback[] = [];
@@ -273,6 +274,10 @@ class MockCommitPanelViewProvider {
     onDidChangeFileCount = this.fileCountEmitter.event;
     setRepositoryContext = vi.fn();
     refresh = vi.fn(async () => undefined);
+    syncActiveEditor = vi.fn();
+    canNavigateWorkingFileChange = vi.fn(async () => true);
+    getAdjacentWorkingFileTarget = vi.fn(() => null);
+    openWorkingFileDiff = vi.fn(async () => undefined);
     dispose = vi.fn();
     emitFileCount(count: number): void {
         this.fileCountEmitter.fire(count);
@@ -363,6 +368,10 @@ vi.mock("vscode", () => ({
         },
         onDidChangeActiveTextEditor: vi.fn((listener: (editor: unknown) => void) => {
             activeEditorListeners.push(listener);
+            return { dispose: vi.fn() };
+        }),
+        onDidChangeTextEditorSelection: vi.fn((listener: (event: { textEditor: unknown }) => void) => {
+            editorSelectionListeners.push(listener);
             return { dispose: vi.fn() };
         }),
         registerWebviewViewProvider,

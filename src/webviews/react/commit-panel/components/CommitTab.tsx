@@ -21,6 +21,7 @@ interface Props {
     files: WorkingFile[];
     repositories: RepositoryContextInfo[];
     currentRepository: RepositoryContextInfo | null;
+    activeFile: RepoPathRef | null;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
@@ -45,6 +46,7 @@ export function CommitTab({
     files,
     repositories,
     currentRepository,
+    activeFile,
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
@@ -132,6 +134,7 @@ export function CommitTab({
                 <FileTree
                     repositories={repositories}
                     currentRepository={currentRepository}
+                    activeFile={activeFile}
                     files={files}
                     groupByDir={groupByDir}
                     folderIcon={folderIcon}

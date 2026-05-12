@@ -16,6 +16,7 @@ const initialState: CommitPanelState = {
     folderIconsByName: undefined,
     iconFonts: [],
     repository: null,
+    activeFile: null,
     commitMessage: "",
     isAmend: false,
     isRefreshing: false,
@@ -46,6 +47,8 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
             return { ...state, commitMessage: "", isAmend: false };
         case "SET_REPOSITORY_CONTEXT":
             return { ...state, repository: action.repository };
+        case "SET_ACTIVE_FILE":
+            return { ...state, activeFile: action.target };
         case "SET_ERROR":
             return { ...state, error: action.message };
         case "SET_COMMIT_MESSAGE":
@@ -67,10 +70,10 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                 case "update":
                     dispatch({
                         type: "SET_FILES_AND_STASHES",
-                        repositories: msg.repositories,
-                        files: msg.files,
-                        stashes: msg.stashes,
-                        shelfFiles: msg.shelfFiles,
+                        repositories: msg.repositories ?? [],
+                        files: msg.files ?? [],
+                        stashes: msg.stashes ?? [],
+                        shelfFiles: msg.shelfFiles ?? [],
                         selectedShelfIndex: msg.selectedShelfIndex,
                         folderIcon: msg.folderIcon,
                         folderExpandedIcon: msg.folderExpandedIcon,
@@ -86,6 +89,9 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                     break;
                 case "setRepositoryContext":
                     dispatch({ type: "SET_REPOSITORY_CONTEXT", repository: msg.repository });
+                    break;
+                case "setActiveFile":
+                    dispatch({ type: "SET_ACTIVE_FILE", target: msg.target });
                     break;
                 case "refreshing":
                     dispatch({ type: "SET_REFRESHING", active: msg.active });

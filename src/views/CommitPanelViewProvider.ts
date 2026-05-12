@@ -16,10 +16,17 @@ import { buildWebviewShellHtml } from "./webviewHtml";
 import { getErrorMessage } from "../utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "../utils/fileOps";
 import { runWithNotificationProgress } from "../utils/notifications";
+import { getRepoRelativeFilePathFromUri } from "../services/diffService";
+import { buildFileTree, type TreeEntry } from "../webviews/react/shared/fileTree";
 import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
+
+interface DiffHunkRange {
+    start: number;
+    end: number;
+}
 
 export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = "intelligit.commitPanel";
@@ -31,6 +38,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private shelfFiles: WorkingFile[] = [];
     private folderIconsByName: ThemeFolderIconMap = {};
     private lastFileCount = 0;
+    private activeFile: RepoPathRef | null = null;
+    private activeEditorLine: number | null = null;
+    private navigationContextSeq = 0;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
     private repository: RepositoryContextInfo | null = null;
@@ -105,6 +115,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             this.selectedShelfIndex = null;
             this.shelfFiles = [];
             this.folderIconsByName = {};
+            this.setActiveFile(null);
             this._onDidChangeFileCount.fire(0);
             this.updateViewCount(0);
             this.postToWebview({
@@ -162,6 +173,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             ]);
 
             this.files = files;
+            if (this.activeFile && !this.hasWorkingFile(this.activeFile)) {
+                this.setActiveFile(null);
+            }
             this.stashes = stashes;
             this.selectedShelfIndex = selectedShelfIndex;
             this.shelfFiles = shelfFiles;
@@ -182,6 +196,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 folderIconsByName: this.folderIconsByName,
                 iconFonts,
             });
+            this.postToWebview({ type: "setActiveFile", target: this.activeFile });
         } finally {
             this.postToWebview({ type: "refreshing", active: false });
             void Promise.resolve(
@@ -261,6 +276,147 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             throw new Error(`No IntelliGit repository found for '${root}'.`);
         }
         return repository;
+    }
+
+    private hasWorkingFile(target: RepoPathRef): boolean {
+        return this.files.some(
+            (file) => file.repoRoot === target.repoRoot && file.path === target.path,
+        );
+    }
+
+    private setActiveFile(target: RepoPathRef | null): void {
+        if (
+            this.activeFile?.repoRoot === target?.repoRoot &&
+            this.activeFile?.path === target?.path
+        ) {
+            this.updateNavigationContexts();
+            return;
+        }
+        this.activeFile = target;
+        this.postToWebview({ type: "setActiveFile", target });
+        this.updateNavigationContexts();
+    }
+
+    private updateNavigationContexts(): void {
+        const requestId = ++this.navigationContextSeq;
+        const hasActiveDiff = Boolean(this.activeFile);
+        void (async () => {
+            const hasPreviousFile = Boolean(this.getAdjacentWorkingFileTarget("previous"));
+            const hasNextFile = Boolean(this.getAdjacentWorkingFileTarget("next"));
+            const changeRanges = await this.getActiveFileChangeRanges();
+            if (requestId !== this.navigationContextSeq) return;
+            const currentLine = this.activeEditorLine;
+            const hasPreviousChange =
+                currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, "previous");
+            const hasNextChange =
+                currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, "next");
+            await Promise.all([
+                vscode.commands.executeCommand(
+                    "setContext",
+                    "intelligit.commitPanel.activeDiff",
+                    hasActiveDiff,
+                ),
+                vscode.commands.executeCommand(
+                    "setContext",
+                    "intelligit.commitPanel.hasPreviousDiffFile",
+                    hasPreviousChange || hasPreviousFile,
+                ),
+                vscode.commands.executeCommand(
+                    "setContext",
+                    "intelligit.commitPanel.hasNextDiffFile",
+                    hasNextChange || hasNextFile,
+                ),
+            ]);
+        })().catch(() => {});
+    }
+
+    private getTargetForUri(uri: vscode.Uri | undefined): RepoPathRef | null {
+        if (!uri) return null;
+        for (const repository of this.getRepositories()) {
+            const filePath = getRepoRelativeFilePathFromUri(uri, repository.root);
+            if (!filePath) continue;
+            const target = { repoRoot: repository.root, path: filePath };
+            return this.hasWorkingFile(target) ? target : null;
+        }
+        return null;
+    }
+
+    syncActiveEditor(editor: vscode.TextEditor | undefined): void {
+        this.activeEditorLine = editor?.selection.active.line ?? null;
+        this.setActiveFile(this.getTargetForUri(editor?.document.uri));
+    }
+
+    getAdjacentWorkingFileTarget(direction: "next" | "previous"): RepoPathRef | null {
+        if (!this.activeFile) return null;
+        const uniqueTargets = this.getVisibleWorkingFileTargets();
+        const index = uniqueTargets.findIndex(
+            (target) =>
+                target.repoRoot === this.activeFile?.repoRoot &&
+                target.path === this.activeFile.path,
+        );
+        if (index < 0) return null;
+        const nextIndex = direction === "next" ? index + 1 : index - 1;
+        return uniqueTargets[nextIndex] ?? null;
+    }
+
+    private getVisibleWorkingFileTargets(): RepoPathRef[] {
+        const targets: RepoPathRef[] = [];
+        const seen = new Set<string>();
+        for (const repository of this.getRepositories()) {
+            const repoFiles = this.files.filter((file) => file.repoRoot === repository.root);
+            const tracked = repoFiles.filter((file) => file.status !== "?");
+            const unversioned = repoFiles.filter((file) => file.status === "?");
+            this.pushVisibleTreeTargets(targets, seen, buildFileTree(tracked));
+            this.pushVisibleTreeTargets(targets, seen, buildFileTree(unversioned));
+        }
+        return targets;
+    }
+
+    private pushVisibleTreeTargets(
+        targets: RepoPathRef[],
+        seen: Set<string>,
+        entries: TreeEntry<WorkingFile>[],
+    ): void {
+        for (const entry of entries) {
+            if (entry.type === "folder") {
+                this.pushVisibleTreeTargets(targets, seen, entry.children);
+                continue;
+            }
+            const key = `${entry.file.repoRoot}\u0000${entry.file.path}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            targets.push({ repoRoot: entry.file.repoRoot, path: entry.file.path });
+        }
+    }
+
+    private async getActiveFileChangeRanges(): Promise<DiffHunkRange[]> {
+        if (!this.activeFile) return [];
+        const repository = this.getRepositoryEntry(this.activeFile.repoRoot);
+        const safePath = assertRepoRelativePath(this.activeFile.path);
+        const [unstagedDiff, stagedDiff] = await Promise.all([
+            repository.executor.run(["diff", "--unified=0", "--", safePath]).catch(() => ""),
+            repository.executor.run(["diff", "--cached", "--unified=0", "--", safePath]).catch(() => ""),
+        ]);
+        return parseChangedNewFileHunks(`${unstagedDiff}\n${stagedDiff}`);
+    }
+
+    async openWorkingFileDiff(target: RepoPathRef): Promise<void> {
+        const repository = this.getRepositoryEntry(target.repoRoot);
+        const safePath = assertRepoRelativePath(target.path);
+        this.setActiveFile({ repoRoot: repository.root, path: safePath });
+        await vscode.commands.executeCommand(
+            "git.openChange",
+            vscode.Uri.joinPath(repository.uri, safePath),
+        );
+    }
+
+    async canNavigateWorkingFileChange(direction: "next" | "previous"): Promise<boolean> {
+        if (!this.activeFile) return false;
+        const changeRanges = await this.getActiveFileChangeRanges();
+        const currentLine = this.activeEditorLine;
+        const hasAdjacentChange =
+            currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, direction);
+        return hasAdjacentChange || Boolean(this.getAdjacentWorkingFileTarget(direction));
     }
 
     private groupTargetsByRepository(targets: RepoPathRef[]): Map<string, string[]> {
@@ -490,9 +646,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
             case "showDiff": {
                 const target = this.getMessageTarget(msg);
-                const repository = this.getRepositoryEntry(target.repoRoot);
-                const uri = vscode.Uri.joinPath(repository.uri, target.path);
-                await vscode.commands.executeCommand("git.openChange", uri);
+                await this.openWorkingFileDiff(target);
                 break;
             }
 
@@ -678,4 +832,33 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private disposeThemeChangeDisposables(): void {
         disposeAll(this.themeChangeDisposables);
     }
+}
+
+function parseChangedNewFileHunks(diff: string): DiffHunkRange[] {
+    const ranges: DiffHunkRange[] = [];
+    const hunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+    let match: RegExpExecArray | null;
+    while ((match = hunkPattern.exec(diff)) !== null) {
+        const start = Number.parseInt(match[1] ?? "0", 10);
+        const count = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
+        if (!Number.isFinite(start) || !Number.isFinite(count)) continue;
+        const zeroBasedStart = Math.max(0, start - 1);
+        const zeroBasedEnd = zeroBasedStart + Math.max(1, count) - 1;
+        ranges.push({ start: zeroBasedStart, end: zeroBasedEnd });
+    }
+    return ranges.sort((left, right) => left.start - right.start);
+}
+
+function hasAdjacentHunk(
+    ranges: DiffHunkRange[],
+    currentLine: number,
+    direction: "next" | "previous",
+): boolean {
+    const currentRange = ranges.find(
+        (range) => currentLine >= range.start && currentLine <= range.end,
+    );
+    const referenceLine = currentRange?.start ?? currentLine;
+    return direction === "next"
+        ? ranges.some((range) => range.start > referenceLine)
+        : ranges.some((range) => range.start < referenceLine);
 }
