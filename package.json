@@ -192,6 +192,20 @@
                 "enablement": "intelligit.commitPanel.hasNextDiffFile"
             },
             {
+                "command": "intelligit.previousProjectComparisonChange",
+                "title": "Previous IntelliGit Compare Change",
+                "category": "IntelliGit",
+                "icon": "$(arrow-up)",
+                "enablement": "intelligit.projectComparison.hasPreviousDiffFile"
+            },
+            {
+                "command": "intelligit.nextProjectComparisonChange",
+                "title": "Next IntelliGit Compare Change",
+                "category": "IntelliGit",
+                "icon": "$(arrow-down)",
+                "enablement": "intelligit.projectComparison.hasNextDiffFile"
+            },
+            {
                 "command": "intelligit.fileDelete",
                 "title": "Delete",
                 "category": "IntelliGit"
@@ -401,6 +415,16 @@
                     "command": "intelligit.nextWorkingFileChange",
                     "when": "intelligit.commitPanel.activeDiff",
                     "group": "navigation@7"
+                },
+                {
+                    "command": "intelligit.previousProjectComparisonChange",
+                    "when": "intelligit.projectComparison.activeDiff",
+                    "group": "navigation@-20"
+                },
+                {
+                    "command": "intelligit.nextProjectComparisonChange",
+                    "when": "intelligit.projectComparison.activeDiff",
+                    "group": "navigation@-19"
                 },
                 {
                     "command": "intelligit.openCommitDiffSource",

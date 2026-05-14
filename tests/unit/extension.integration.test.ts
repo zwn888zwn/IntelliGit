@@ -176,6 +176,14 @@ const gitOpsState = {
             additions: 1,
             deletions: 1,
         },
+        {
+            repoId: ".",
+            repoRoot: "/repo-a",
+            path: "src/next.ts",
+            status: "M",
+            additions: 2,
+            deletions: 0,
+        },
     ]),
     rollbackFiles: vi.fn(async () => undefined),
     shelveSave: vi.fn(async () => "saved"),
@@ -733,6 +741,14 @@ describe("extension integration", () => {
                 additions: 1,
                 deletions: 1,
             },
+            {
+                repoId: ".",
+                repoRoot: "/repo-a",
+                path: "src/next.ts",
+                status: "M",
+                additions: 2,
+                deletions: 0,
+            },
         ]);
         gitOpsState.rollbackFiles.mockResolvedValue(undefined);
         gitOpsState.shelveSave.mockResolvedValue("saved");
@@ -781,6 +797,8 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
         expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
         expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
+        expect(registeredCommands.has("intelligit.previousProjectComparisonChange")).toBe(true);
+        expect(registeredCommands.has("intelligit.nextProjectComparisonChange")).toBe(true);
 
         function getCommand(id: string): CommandHandler {
             const cmd = registeredCommands.get(id);
@@ -1088,6 +1106,22 @@ describe("extension integration", () => {
     });
 
     it("opens project branch comparison from an Explorer resource", async () => {
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "diff" && args.includes("src/changed.ts")) {
+                return [
+                    "@@ -1 +1 @@",
+                    "-old",
+                    "+new",
+                    "@@ -10 +10 @@",
+                    "-old",
+                    "+new",
+                ].join("\n");
+            }
+            if (args[0] === "diff" && args.includes("src/next.ts")) {
+                return "@@ -1 +1 @@\n-old\n+new";
+            }
+            return defaultExecutorRunImpl(args);
+        });
         const { activate } = await import("../../src/extension");
         const vscode = await import("vscode");
         const context = {
@@ -1131,6 +1165,106 @@ describe("extension integration", () => {
             expect.anything(),
             expect.objectContaining({ fsPath: "/repo-a/src/changed.ts" }),
             expect.stringContaining("feature-local"),
+        );
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith({
+            type: "setActiveFile",
+            path: "src/changed.ts",
+        });
+        await waitForAsync();
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasNextDiffFile",
+            true,
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasPreviousDiffFile",
+            false,
+        );
+        executeCommandFallback.mockClear();
+        gitOpsState.getFileContentAtRef.mockClear();
+
+        await registeredCommands.get("intelligit.nextProjectComparisonChange")?.();
+        await new Promise((resolve) => setTimeout(resolve, 90));
+        await waitForAsync();
+
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "workbench.action.compareEditor.nextChange",
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasPreviousDiffFile",
+            true,
+        );
+        expect(gitOpsState.getFileContentAtRef).not.toHaveBeenCalledWith(
+            "src/next.ts",
+            "feature-local",
+        );
+        executeCommandFallback.mockClear();
+
+        await registeredCommands.get("intelligit.nextProjectComparisonChange")?.();
+        await new Promise((resolve) => setTimeout(resolve, 90));
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/next.ts",
+            "feature-local",
+        );
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith({
+            type: "setActiveFile",
+            path: "src/next.ts",
+        });
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasNextDiffFile",
+            false,
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasPreviousDiffFile",
+            true,
+        );
+        executeCommandFallback.mockClear();
+
+        await registeredCommands.get("intelligit.previousProjectComparisonChange")?.();
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/changed.ts",
+            "feature-local",
+        );
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith({
+            type: "setActiveFile",
+            path: "src/changed.ts",
+        });
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "workbench.action.compareEditor.previousChange",
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasPreviousDiffFile",
+            true,
+        );
+        executeCommandFallback.mockClear();
+
+        await registeredCommands.get("intelligit.previousProjectComparisonChange")?.();
+        await waitForAsync();
+
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "workbench.action.compareEditor.previousChange",
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.projectComparison.hasPreviousDiffFile",
+            false,
+        );
+        executeCommandFallback.mockClear();
+
+        await registeredCommands.get("intelligit.previousProjectComparisonChange")?.();
+        await waitForAsync();
+
+        expect(executeCommandFallback).not.toHaveBeenCalledWith(
+            "workbench.action.compareEditor.previousChange",
         );
     });
 

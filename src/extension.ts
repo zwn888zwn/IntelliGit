@@ -841,12 +841,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("intelligit.nextWorkingFileChange", async () => {
             await navigateWorkingTreeDiff("next");
         }),
+        vscode.commands.registerCommand("intelligit.previousProjectComparisonChange", async () => {
+            await ProjectBranchComparisonPanel.getActivePanel()?.navigateChange("previous");
+        }),
+        vscode.commands.registerCommand("intelligit.nextProjectComparisonChange", async () => {
+            await ProjectBranchComparisonPanel.getActivePanel()?.navigateChange("next");
+        }),
     );
 
     // --- Initial load ---
 
     await applyCurrentRepositoryContext({ resetGraph: true });
     commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
+    ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(vscode.window.activeTextEditor);
     await blameController.initialize();
 
     context.subscriptions.push(
@@ -854,13 +861,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (await repositoryService.followActiveEditor(editor)) {
                 await applyCurrentRepositoryContext({ resetGraph: true });
                 commitPanel.syncActiveEditor(editor);
+                ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(editor);
                 return;
             }
             commitPanel.syncActiveEditor(editor);
+            ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(editor);
             await updateCommitDiffSourceContext(editor);
         }),
         vscode.window.onDidChangeTextEditorSelection((event) => {
             commitPanel.syncActiveEditor(event.textEditor);
+            ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(event.textEditor);
         }),
         vscode.workspace.onDidChangeWorkspaceFolders(async () => {
             await repositoryService.refreshRepositories();

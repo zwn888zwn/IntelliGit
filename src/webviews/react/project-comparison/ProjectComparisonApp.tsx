@@ -54,6 +54,10 @@ function App(): React.ReactElement {
                 setState((prev) => ({ ...prev, isRefreshing: message.active }));
                 return;
             }
+            if (message.type === "setActiveFile") {
+                setActivePath(message.path);
+                return;
+            }
             if (message.type === "error") {
                 setState((prev) => ({ ...prev, error: message.message }));
             }
@@ -74,7 +78,10 @@ function App(): React.ReactElement {
     return (
         <Flex direction="column" h="100%" bg="var(--vscode-editor-background)">
             <ThemeIconFontFaces fonts={state.iconFonts} />
-            <Header state={state} onRefresh={() => vscode.postMessage({ type: "refresh" })} />
+            <Header
+                state={state}
+                onRefresh={() => vscode.postMessage({ type: "refresh" })}
+            />
             {state.error && (
                 <Box
                     px="10px"
@@ -188,6 +195,18 @@ function ComparisonTree({
     useEffect(() => {
         setExpandedDirs(new Set(collectDirPaths(tree)));
     }, [tree]);
+
+    useEffect(() => {
+        if (!activePath) return;
+        setExpandedDirs((prev) => {
+            const next = new Set(prev);
+            const parts = activePath.split("/");
+            for (let i = 1; i < parts.length; i++) {
+                next.add(parts.slice(0, i).join("/"));
+            }
+            return next;
+        });
+    }, [activePath]);
 
     const toggleDir = useCallback((dirPath: string) => {
         setExpandedDirs((prev) => {

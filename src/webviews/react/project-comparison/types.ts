@@ -23,6 +23,7 @@ export type ProjectComparisonInbound =
           iconFonts?: ThemeIconFont[];
       }
     | { type: "refreshing"; active: boolean }
+    | { type: "setActiveFile"; path: string | null }
     | { type: "error"; message: string };
 
 export interface ProjectComparisonState {
