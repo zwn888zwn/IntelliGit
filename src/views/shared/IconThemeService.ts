@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type {
     Branch,
     CommitDetail,
+    ProjectComparisonFile,
     ThemeFolderIconMap,
     ThemeIconFont,
     WorkingFile,
@@ -95,6 +96,13 @@ export class IconThemeService implements vscode.Disposable {
         return this.iconResolver.decorateWorkingFiles(files);
     }
 
+    async decorateProjectComparisonFiles(
+        files: ProjectComparisonFile[],
+    ): Promise<ProjectComparisonFile[]> {
+        if (!this.iconResolver) return files;
+        return this.iconResolver.decoratePathItems(files);
+    }
+
     async decorateCommitDetailWithFolderIcons(detail: CommitDetail): Promise<{
         detail: CommitDetail;
         folderIconsByName: ThemeFolderIconMap;
@@ -114,6 +122,13 @@ export class IconThemeService implements vscode.Disposable {
     }
 
     async getFolderIconsByWorkingFiles(files: WorkingFile[]): Promise<ThemeFolderIconMap> {
+        await this.initIconThemeData();
+        return this.getFolderIconsByPaths(files.map((file) => file.path));
+    }
+
+    async getFolderIconsByProjectComparisonFiles(
+        files: ProjectComparisonFile[],
+    ): Promise<ThemeFolderIconMap> {
         await this.initIconThemeData();
         return this.getFolderIconsByPaths(files.map((file) => file.path));
     }

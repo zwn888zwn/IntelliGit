@@ -219,6 +219,12 @@
                 "icon": "$(git-branch)"
             },
             {
+                "command": "intelligit.compareProjectWithBranch",
+                "title": "Compare Project with Branch...",
+                "category": "IntelliGit",
+                "icon": "$(git-branch)"
+            },
+            {
                 "command": "intelligit.annotateWithGitBlame",
                 "title": "Annotate with Git Blame",
                 "category": "IntelliGit"
@@ -310,6 +316,13 @@
             }
         ],
         "menus": {
+            "explorer/context": [
+                {
+                    "command": "intelligit.compareProjectWithBranch",
+                    "when": "resourceScheme == file",
+                    "group": "navigation@9"
+                }
+            ],
             "editor/context": [
                 {
                     "submenu": "intelligit.editorContext",

@@ -55,6 +55,12 @@ const editorSelectionListeners: Array<(event: { textEditor: unknown }) => void> 
 const workspaceFolderListeners: Array<() => void> = [];
 type FsWatchCallback = (...args: unknown[]) => void;
 const fsWatchCallbacks: FsWatchCallback[] = [];
+let latestWebviewPanel:
+    | {
+          webview: { postMessage: ReturnType<typeof vi.fn> };
+          emitMessage: (message: unknown) => Promise<void>;
+      }
+    | undefined;
 
 let workspaceFolders: Array<{ uri: { fsPath: string; path: string } }> | undefined = [
     { uri: { fsPath: "/repo", path: "/repo" } },
@@ -161,6 +167,16 @@ const gitOpsState = {
     })),
     getUnpushedCommitHashes: vi.fn(async () => ["a1b2c3d4", "feed1234", "deadbee"]),
     getFileContentAtRef: vi.fn(async (_filePath: string, ref: string) => `content:${ref}`),
+    getBranchComparisonFiles: vi.fn(async () => [
+        {
+            repoId: ".",
+            repoRoot: "/repo-a",
+            path: "src/changed.ts",
+            status: "M",
+            additions: 1,
+            deletions: 1,
+        },
+    ]),
     rollbackFiles: vi.fn(async () => undefined),
     shelveSave: vi.fn(async () => "saved"),
     getFileHistory: vi.fn(async () => "history"),
@@ -374,6 +390,7 @@ vi.mock("vscode", () => ({
             editorSelectionListeners.push(listener);
             return { dispose: vi.fn() };
         }),
+        onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
         registerWebviewViewProvider,
         createTreeView: vi.fn(() => ({
             badge: undefined,
@@ -382,7 +399,7 @@ vi.mock("vscode", () => ({
         createWebviewPanel: vi.fn(() => {
             const msgListeners: Array<(msg: unknown) => void> = [];
             const disposeListeners: Array<() => void> = [];
-            return {
+            const panel = {
                 webview: {
                     options: {},
                     html: "",
@@ -402,7 +419,12 @@ vi.mock("vscode", () => ({
                 dispose: vi.fn(() => {
                     for (const listener of disposeListeners) listener();
                 }),
+                async emitMessage(message: unknown): Promise<void> {
+                    for (const listener of msgListeners) await listener(message);
+                },
             };
+            latestWebviewPanel = panel;
+            return panel;
         }),
         showInformationMessage,
         showErrorMessage,
@@ -423,6 +445,7 @@ vi.mock("vscode", () => ({
             workspaceFolderListeners.push(listener);
             return { dispose: vi.fn() };
         }),
+        onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
         fs: { writeFile, stat: fsStat },
         openTextDocument,
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
@@ -473,6 +496,7 @@ vi.mock("../../src/git/operations", async (importOriginal) => {
             getCommitDetail = gitOpsState.getCommitDetail;
             getUnpushedCommitHashes = gitOpsState.getUnpushedCommitHashes;
             getFileContentAtRef = gitOpsState.getFileContentAtRef;
+            getBranchComparisonFiles = gitOpsState.getBranchComparisonFiles;
             rollbackFiles = gitOpsState.rollbackFiles;
             shelveSave = gitOpsState.shelveSave;
             getFileHistory = gitOpsState.getFileHistory;
@@ -548,7 +572,9 @@ vi.mock("../../src/services/RepositoryContextService", () => ({
             const fsPath = uri?.fsPath;
             if (!fsPath) return null;
             return (
-                repositoryEntries.find((entry) => fsPath.startsWith(`${entry.root}/`)) ?? null
+                repositoryEntries.find(
+                    (entry) => fsPath === entry.root || fsPath.startsWith(`${entry.root}/`),
+                ) ?? null
             );
         }
         requireCurrentRepository() {
@@ -565,8 +591,9 @@ vi.mock("../../src/services/RepositoryContextService", () => ({
         getBranches: gitOpsState.getBranches,
         getCommitDetail: gitOpsState.getCommitDetail,
         getUnpushedCommitHashes: gitOpsState.getUnpushedCommitHashes,
-        getFileContentAtRef: gitOpsState.getFileContentAtRef,
-        rollbackFiles: gitOpsState.rollbackFiles,
+            getFileContentAtRef: gitOpsState.getFileContentAtRef,
+            getBranchComparisonFiles: gitOpsState.getBranchComparisonFiles,
+            rollbackFiles: gitOpsState.rollbackFiles,
         shelveSave: gitOpsState.shelveSave,
         getFileHistory: gitOpsState.getFileHistory,
         getStatus: gitOpsState.getStatus,
@@ -627,6 +654,7 @@ describe("extension integration", () => {
         latestCommitGraphProvider = undefined;
         latestCommitPanelProvider = undefined;
         latestBlameController = undefined;
+        latestWebviewPanel = undefined;
         openTextDocument.mockImplementation(async (arg: unknown) => ({
             uri: arg,
             languageId: "typescript",
@@ -696,6 +724,16 @@ describe("extension integration", () => {
         gitOpsState.getFileContentAtRef.mockImplementation(
             async (_filePath: string, ref: string) => `content:${ref}`,
         );
+        gitOpsState.getBranchComparisonFiles.mockResolvedValue([
+            {
+                repoId: ".",
+                repoRoot: "/repo-a",
+                path: "src/changed.ts",
+                status: "M",
+                additions: 1,
+                deletions: 1,
+            },
+        ]);
         gitOpsState.rollbackFiles.mockResolvedValue(undefined);
         gitOpsState.shelveSave.mockResolvedValue("saved");
         gitOpsState.getFileHistory.mockResolvedValue("history");
@@ -742,6 +780,7 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.clearGitBlame")).toBe(true);
         expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
         expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
+        expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
 
         function getCommand(id: string): CommandHandler {
             const cmd = registeredCommands.get(id);
@@ -1045,6 +1084,53 @@ describe("extension integration", () => {
         );
         expect(showErrorMessage).not.toHaveBeenCalledWith(
             "Invalid commit hash received for commit action.",
+        );
+    });
+
+    it("opens project branch comparison from an Explorer resource", async () => {
+        const { activate } = await import("../../src/extension");
+        const vscode = await import("vscode");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: mockDisposables,
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        showQuickPick.mockImplementationOnce(async (items: Array<Record<string, unknown>>) => {
+            return items.find((item) => item.refName === "feature-local");
+        });
+
+        await registeredCommands.get("intelligit.compareProjectWithBranch")?.({
+            scheme: "file",
+            fsPath: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+
+        expect(showQuickPick).toHaveBeenCalledWith(
+            expect.any(Array),
+            expect.objectContaining({ title: "Compare Project with Branch" }),
+        );
+        expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+            "intelligit.projectBranchComparison",
+            "Difference Between feature-local and Current",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenCalledWith("feature-local");
+
+        await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/changed.ts" });
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/changed.ts",
+            "feature-local",
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.anything(),
+            expect.objectContaining({ fsPath: "/repo-a/src/changed.ts" }),
+            expect.stringContaining("feature-local"),
         );
     });
 

@@ -6,6 +6,7 @@ import type {
     CommitDetail,
     CommitFile,
     GitBlameLine,
+    ProjectComparisonFile,
     WorkingFile,
     StashEntry,
     MergeConflictFile,
@@ -462,6 +463,94 @@ export class GitOps {
         return files;
     }
 
+    async getBranchComparisonFiles(ref: string): Promise<ProjectComparisonFile[]> {
+        const trimmedRef = ref.trim();
+        if (!trimmedRef) return [];
+
+        const files = new Map<string, ProjectComparisonFile>();
+        const upsertFile = (
+            filePath: string,
+            status: ProjectComparisonFile["status"],
+            oldPath?: string,
+        ): ProjectComparisonFile => {
+            const existing = files.get(filePath);
+            if (existing) {
+                const updated = {
+                    ...existing,
+                    status,
+                    oldPath: oldPath ?? existing.oldPath,
+                };
+                files.set(filePath, updated);
+                return updated;
+            }
+
+            const created: ProjectComparisonFile = {
+                repoId: this.repoMetadata?.repoId ?? ".",
+                repoRoot: this.repoMetadata?.repoRoot ?? "",
+                path: filePath,
+                oldPath,
+                status,
+                additions: 0,
+                deletions: 0,
+            };
+            files.set(filePath, created);
+            return created;
+        };
+
+        const nameStatus = await this.executor.run([
+            "diff",
+            "--name-status",
+            "--find-renames",
+            trimmedRef,
+            "--",
+        ]);
+
+        for (const line of nameStatus.trim().split("\n")) {
+            if (!line.trim()) continue;
+            const cols = line.split("\t");
+            if (cols.length < 2) continue;
+
+            const status = mapProjectComparisonStatus(cols[0].charAt(0));
+            if (!status) continue;
+
+            const isRenameOrCopy = status === "R" || status === "C";
+            const filePath = isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1];
+            const oldPath = isRenameOrCopy && cols.length >= 3 ? cols[1] : undefined;
+            upsertFile(filePath, status, oldPath);
+        }
+
+        try {
+            const numstat = await this.executor.run([
+                "diff",
+                "--numstat",
+                "--find-renames",
+                trimmedRef,
+                "--",
+            ]);
+            for (const line of numstat.trim().split("\n")) {
+                if (!line.trim()) continue;
+                const cols = line.split("\t");
+                if (cols.length < 3) continue;
+
+                const filePath = normalizeNumstatPath(cols.slice(2).join("\t"));
+                const file = files.get(filePath);
+                if (!file) continue;
+
+                const parsedAdd = cols[0] === "-" ? 0 : parseInt(cols[0]);
+                const parsedDel = cols[1] === "-" ? 0 : parseInt(cols[1]);
+                files.set(filePath, {
+                    ...file,
+                    additions: Number.isNaN(parsedAdd) ? 0 : parsedAdd,
+                    deletions: Number.isNaN(parsedDel) ? 0 : parsedDel,
+                });
+            }
+        } catch (err) {
+            logGitOpsWarning("Failed to get branch comparison numstat", err, { notifyUser: true });
+        }
+
+        return Array.from(files.values()).sort((a, b) => a.path.localeCompare(b.path));
+    }
+
     async getBlame(filePath: string): Promise<GitBlameLine[]> {
         const output = await this.executor.run([
             "blame",
@@ -915,12 +1004,42 @@ export class GitOps {
 }
 
 const VALID_COMMIT_FILE_STATUSES = new Set<CommitFile["status"]>(["A", "M", "D", "R", "C", "T"]);
+const VALID_PROJECT_COMPARISON_STATUSES = new Set<ProjectComparisonFile["status"]>([
+    "A",
+    "M",
+    "D",
+    "R",
+    "C",
+    "T",
+]);
 
 function mapCommitFileStatus(code: string): CommitFile["status"] {
     if (VALID_COMMIT_FILE_STATUSES.has(code as CommitFile["status"])) {
         return code as CommitFile["status"];
     }
     return "M";
+}
+
+function mapProjectComparisonStatus(code: string): ProjectComparisonFile["status"] | null {
+    if (VALID_PROJECT_COMPARISON_STATUSES.has(code as ProjectComparisonFile["status"])) {
+        return code as ProjectComparisonFile["status"];
+    }
+    return null;
+}
+
+function normalizeNumstatPath(rawPath: string): string {
+    const pathText = rawPath.trim();
+    const braceRename = pathText.match(/^(.*)\{(.+)\s=>\s(.+)\}(.*)$/);
+    if (braceRename) {
+        return `${braceRename[1] ?? ""}${braceRename[3] ?? ""}${braceRename[4] ?? ""}`;
+    }
+
+    const simpleRename = pathText.match(/^(.+)\s=>\s(.+)$/);
+    if (simpleRename) {
+        return simpleRename[2] ?? pathText;
+    }
+
+    return pathText;
 }
 
 function mapStatusCode(code: string): WorkingFile["status"] | null {

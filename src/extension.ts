@@ -10,6 +10,7 @@ import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
 import { MergeConflictSessionPanel } from "./views/MergeConflictSessionPanel";
 import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
 import { NoWorkspaceViewProvider } from "./views/NoWorkspaceViewProvider";
+import { ProjectBranchComparisonPanel } from "./views/ProjectBranchComparisonPanel";
 import type { Branch } from "./types";
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
@@ -112,6 +113,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const resolveRepositoryForEditorContext = (ctx?: unknown) => {
         const fileUri = getEditorContextFileUri(ctx);
         return repositoryService.getRepositoryForUri(fileUri ?? undefined) ?? getCurrentRepository();
+    };
+    const getFileUriFromCommandContext = (ctx?: unknown): vscode.Uri | null => {
+        if (!ctx || typeof ctx !== "object") return null;
+        const maybe = ctx as { scheme?: unknown; fsPath?: unknown; path?: unknown };
+        if (typeof maybe.scheme === "string" && typeof maybe.fsPath === "string") {
+            return ctx as vscode.Uri;
+        }
+        return null;
+    };
+    const resolveRepositoryForResourceContext = (ctx?: unknown) => {
+        const fileUri = getFileUriFromCommandContext(ctx);
+        if (fileUri) {
+            return repositoryService.getRepositoryForUri(fileUri) ?? getCurrentRepository();
+        }
+        return getCurrentRepository();
     };
     let commitDiffSourceContextSeq = 0;
     const updateCommitDiffSourceContext = async (
@@ -524,6 +540,51 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             await compareEditorFileWithBranch(ctx, repository.root, repository.gitOps);
         }),
+        vscode.commands.registerCommand(
+            "intelligit.compareProjectWithBranch",
+            async (ctx?: unknown) => {
+                const repository = resolveRepositoryForResourceContext(ctx);
+                if (!repository) {
+                    vscode.window.showWarningMessage("No git repository found for the selected resource.");
+                    return;
+                }
+
+                try {
+                    const branches = await repository.gitOps.getBranches();
+                    const picks = branches
+                        .slice()
+                        .sort((a, b) => {
+                            if (a.isRemote !== b.isRemote) return a.isRemote ? 1 : -1;
+                            if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+                            return a.name.localeCompare(b.name);
+                        })
+                        .map((branch) => ({
+                            label: branch.isCurrent ? `${branch.name} (current)` : branch.name,
+                            description: branch.isRemote ? "remote branch" : "local branch",
+                            detail: branch.hash,
+                            refName: branch.name,
+                        }));
+
+                    const picked = await vscode.window.showQuickPick(picks, {
+                        title: "Compare Project with Branch",
+                        placeHolder: `Select a branch for ${repository.info.relativePath ?? repository.info.name}`,
+                        ignoreFocusOut: true,
+                        matchOnDescription: true,
+                        matchOnDetail: true,
+                    });
+                    if (!picked) return;
+
+                    ProjectBranchComparisonPanel.open(
+                        context.extensionUri,
+                        repository,
+                        picked.refName,
+                    );
+                } catch (error) {
+                    const message = getErrorMessage(error);
+                    vscode.window.showErrorMessage(`Compare project with branch failed: ${message}`);
+                }
+            },
+        ),
         vscode.commands.registerCommand("intelligit.openConflictSession", async () => {
             const conflicts = await gitOps.getConflictFilesDetailed();
             if (conflicts.length === 0) {

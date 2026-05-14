@@ -94,6 +94,17 @@ export interface WorkingFile {
     icon?: ThemeTreeIcon;
 }
 
+export interface ProjectComparisonFile {
+    repoId: string;
+    repoRoot: string;
+    path: string;
+    oldPath?: string;
+    status: "A" | "M" | "D" | "R" | "C" | "T";
+    additions: number;
+    deletions: number;
+    icon?: ThemeTreeIcon;
+}
+
 export interface StashEntry {
     index: number;
     message: string;

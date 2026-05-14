@@ -79,6 +79,80 @@ describe("GitOps", () => {
         });
     });
 
+    describe("getBranchComparisonFiles", () => {
+        it("parses branch diff files with stats", async () => {
+            const executor = createMockExecutor({
+                "diff --name-status --find-renames feature --": [
+                    "M\tsrc/changed.ts",
+                    "A\tsrc/added.ts",
+                    "D\tsrc/deleted.ts",
+                    "R100\tsrc/old.ts\tsrc/new.ts",
+                ].join("\n"),
+                "diff --numstat --find-renames feature --": [
+                    "3\t1\tsrc/changed.ts",
+                    "5\t0\tsrc/added.ts",
+                    "0\t7\tsrc/deleted.ts",
+                    "2\t2\tsrc/{old.ts => new.ts}",
+                ].join("\n"),
+            });
+            const ops = new GitOps(executor, undefined, {
+                repoId: ".",
+                repoRoot: "/repo",
+            });
+
+            const files = await ops.getBranchComparisonFiles("feature");
+
+            expect(files).toEqual([
+                {
+                    repoId: ".",
+                    repoRoot: "/repo",
+                    path: "src/added.ts",
+                    oldPath: undefined,
+                    status: "A",
+                    additions: 5,
+                    deletions: 0,
+                },
+                {
+                    repoId: ".",
+                    repoRoot: "/repo",
+                    path: "src/changed.ts",
+                    oldPath: undefined,
+                    status: "M",
+                    additions: 3,
+                    deletions: 1,
+                },
+                {
+                    repoId: ".",
+                    repoRoot: "/repo",
+                    path: "src/deleted.ts",
+                    oldPath: undefined,
+                    status: "D",
+                    additions: 0,
+                    deletions: 7,
+                },
+                {
+                    repoId: ".",
+                    repoRoot: "/repo",
+                    path: "src/new.ts",
+                    oldPath: "src/old.ts",
+                    status: "R",
+                    additions: 2,
+                    deletions: 2,
+                },
+            ]);
+        });
+
+        it("returns an empty list for an empty branch diff", async () => {
+            const executor = createMockExecutor({
+                "diff --name-status --find-renames main --": "",
+                "diff --numstat --find-renames main --": "",
+            });
+            const ops = new GitOps(executor);
+
+            await expect(ops.getBranchComparisonFiles("main")).resolves.toEqual([]);
+        });
+    });
+
     describe("getLog", () => {
         const FIELD_SEP = "<<|>>";
         const RECORD_SEP = "<<||>>";

@@ -8,6 +8,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
+import type { ProjectComparisonFile } from "../types";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
 import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from "./gitHelpers";
@@ -342,6 +343,47 @@ export async function openCommitFileDiff(
     const shortCommit = commitHash.slice(0, 8);
     const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightDoc.uri, title);
+}
+
+export async function openBranchComparisonFileDiff(
+    file: ProjectComparisonFile,
+    ref: string,
+    repoRoot: string,
+    gitOps: GitOps,
+): Promise<void> {
+    const safePath = assertRepoRelativePath(file.path);
+    const leftPath = assertRepoRelativePath(file.oldPath ?? file.path);
+    const trimmedRef = ref.trim();
+    if (!trimmedRef) return;
+
+    const leftContent = await gitOps.getFileContentAtRef(leftPath, trimmedRef).catch(() => "");
+
+    const leftDoc = await vscode.workspace.openTextDocument(
+        getDiffContentProvider().createUri(leftPath, trimmedRef, leftContent),
+    );
+
+    let rightUri: vscode.Uri;
+    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+    if (file.status !== "D" && (await fileExists(workingTreeUri))) {
+        rightUri = workingTreeUri;
+    } else {
+        const rightDoc = await vscode.workspace.openTextDocument(
+            getDiffContentProvider().createUri(safePath, "current", ""),
+        );
+        rightUri = rightDoc.uri;
+    }
+
+    const title = `${safePath} (${trimmedRef} ↔ Current)`;
+    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
+}
+
+async function fileExists(uri: vscode.Uri): Promise<boolean> {
+    try {
+        await vscode.workspace.fs.stat(uri);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 export async function openCommitDiffSourceFile(

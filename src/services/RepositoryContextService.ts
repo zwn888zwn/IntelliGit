@@ -224,7 +224,7 @@ function stableColorIndex(value: string): number {
     return hash;
 }
 
-function isPathInsideRepository(filePath: string, repoRoot: string): boolean {
+export function isPathInsideRepository(filePath: string, repoRoot: string): boolean {
     const relative = path.relative(repoRoot, filePath);
-    return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
