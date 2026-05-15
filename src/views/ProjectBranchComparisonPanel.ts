@@ -15,11 +15,11 @@ import type {
     ProjectComparisonOutbound,
 } from "../webviews/react/project-comparison/types";
 import type { DiffNavigationState } from "./CommitPanelViewProvider";
-
-interface DiffHunkRange {
-    start: number;
-    end: number;
-}
+import {
+    getAdjacentHunkIndex,
+    parseChangedNewFileHunks,
+    type DiffHunkRange,
+} from "../services/diffNavigation";
 
 export class ProjectBranchComparisonPanel implements vscode.Disposable {
     static readonly viewType = "intelligit.projectBranchComparison";
@@ -314,33 +314,4 @@ function getNativeDiffNavigationCommand(direction: "next" | "previous"): string 
     return direction === "next"
         ? "workbench.action.compareEditor.nextChange"
         : "workbench.action.compareEditor.previousChange";
-}
-
-function parseChangedNewFileHunks(diff: string): DiffHunkRange[] {
-    const ranges: DiffHunkRange[] = [];
-    const hunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
-    let match: RegExpExecArray | null;
-    while ((match = hunkPattern.exec(diff)) !== null) {
-        const start = Number.parseInt(match[1] ?? "0", 10);
-        const count = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
-        if (!Number.isFinite(start) || !Number.isFinite(count)) continue;
-        const zeroBasedStart = Math.max(0, start - 1);
-        const zeroBasedEnd = zeroBasedStart + Math.max(1, count) - 1;
-        ranges.push({ start: zeroBasedStart, end: zeroBasedEnd });
-    }
-    return ranges.sort((left, right) => left.start - right.start);
-}
-
-function getAdjacentHunkIndex(
-    ranges: DiffHunkRange[],
-    currentIndex: number | null,
-    direction: "next" | "previous",
-): number | null {
-    if (ranges.length <= 1) return null;
-    const boundedIndex =
-        currentIndex === null
-            ? 0
-            : Math.min(Math.max(currentIndex, 0), ranges.length - 1);
-    const targetIndex = direction === "next" ? boundedIndex + 1 : boundedIndex - 1;
-    return targetIndex >= 0 && targetIndex < ranges.length ? targetIndex : null;
 }

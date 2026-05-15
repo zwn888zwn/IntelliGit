@@ -1510,6 +1510,25 @@ describe("extension integration", () => {
         const firstDiffEditor = activeTextEditor;
         expect(firstDiffEditor?.document.uri.query).toContain("path=src%2Fa.ts");
 
+        latestCommitGraphProvider!.emitCommitSelected("feed1234");
+        await waitForAsync();
+
+        activeTextEditor = firstDiffEditor;
+        executeCommandFallback.mockClear();
+        await activeEditorListeners[0]?.(activeTextEditor);
+        await waitForAsync();
+
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.diffNavigation.active",
+            true,
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.diffNavigation.hasNext",
+            true,
+        );
+
         latestCommitGraphProvider!.emitOpenCommitFileDiff({
             commitHash: "feed1234",
             filePath: "src/c.ts",
@@ -1532,6 +1551,61 @@ describe("extension integration", () => {
             "setContext",
             "intelligit.diffNavigation.hasNext",
             true,
+        );
+    });
+
+    it("marks next unavailable for the final commit diff file opened at the top", async () => {
+        gitOpsState.getCommitDetail.mockResolvedValue({
+            repoId: ".",
+            repoRoot: "/repo-a",
+            hash: "a1b2c3d4",
+            shortHash: "a1b2c3d",
+            message: "msg",
+            body: "",
+            author: "Mahesh",
+            email: "m@example.com",
+            date: "2026-02-19T00:00:00Z",
+            parentHashes: ["parent1"],
+            refs: [],
+            files: [
+                { path: "src/a.ts", status: "M", additions: 1, deletions: 1 },
+                { path: "src/b.ts", status: "M", additions: 1, deletions: 1 },
+            ],
+        });
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "diff" && args.includes("src/b.ts")) {
+                return "@@ -10 +10 @@\n-old\n+new";
+            }
+            return defaultExecutorRunImpl(args);
+        });
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+        executeCommandFallback.mockClear();
+
+        latestCommitGraphProvider!.emitOpenCommitFileDiff({
+            commitHash: "a1b2c3d4",
+            filePath: "src/b.ts",
+            repoRoot: "/repo-a",
+        });
+        await waitForAsync();
+        await new Promise((resolve) => setTimeout(resolve, 90));
+        await waitForAsync();
+
+        expect(activeTextEditor?.selection.active.line).toBe(0);
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.diffNavigation.hasPrevious",
+            true,
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.diffNavigation.hasNext",
+            false,
         );
     });
 

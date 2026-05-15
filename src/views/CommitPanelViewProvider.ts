@@ -26,11 +26,11 @@ import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
-
-interface DiffHunkRange {
-    start: number;
-    end: number;
-}
+import {
+    hasAdjacentHunk,
+    parseChangedNewFileHunks,
+    type DiffHunkRange,
+} from "../services/diffNavigation";
 
 export interface DiffNavigationState {
     active: boolean;
@@ -321,10 +321,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         const hasNextFile = Boolean(this.getAdjacentWorkingFileTarget("next", activeFile));
         const changeRanges = await this.getFileChangeRanges(activeFile);
         const currentLine = editor?.selection?.active?.line ?? this.activeEditorLine;
-        const hasPreviousChange =
-            currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, "previous");
-        const hasNextChange =
-            currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, "next");
+        const hasPreviousChange = hasAdjacentHunk(changeRanges, currentLine, "previous");
+        const hasNextChange = hasAdjacentHunk(changeRanges, currentLine, "next");
         return {
             active: true,
             hasPrevious: hasPreviousChange || hasPreviousFile,
@@ -464,8 +462,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         if (!this.activeFile) return false;
         const changeRanges = await this.getActiveFileChangeRanges();
         const currentLine = this.activeEditorLine;
-        const hasAdjacentChange =
-            currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, direction);
+        const hasAdjacentChange = hasAdjacentHunk(changeRanges, currentLine, direction);
         return hasAdjacentChange || Boolean(this.getAdjacentWorkingFileTarget(direction));
     }
 
@@ -882,33 +879,4 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private disposeThemeChangeDisposables(): void {
         disposeAll(this.themeChangeDisposables);
     }
-}
-
-function parseChangedNewFileHunks(diff: string): DiffHunkRange[] {
-    const ranges: DiffHunkRange[] = [];
-    const hunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
-    let match: RegExpExecArray | null;
-    while ((match = hunkPattern.exec(diff)) !== null) {
-        const start = Number.parseInt(match[1] ?? "0", 10);
-        const count = match[2] === undefined ? 1 : Number.parseInt(match[2], 10);
-        if (!Number.isFinite(start) || !Number.isFinite(count)) continue;
-        const zeroBasedStart = Math.max(0, start - 1);
-        const zeroBasedEnd = zeroBasedStart + Math.max(1, count) - 1;
-        ranges.push({ start: zeroBasedStart, end: zeroBasedEnd });
-    }
-    return ranges.sort((left, right) => left.start - right.start);
-}
-
-function hasAdjacentHunk(
-    ranges: DiffHunkRange[],
-    currentLine: number,
-    direction: "next" | "previous",
-): boolean {
-    const currentRange = ranges.find(
-        (range) => currentLine >= range.start && currentLine <= range.end,
-    );
-    const referenceLine = currentRange?.start ?? currentLine;
-    return direction === "next"
-        ? ranges.some((range) => range.start > referenceLine)
-        : ranges.some((range) => range.start < referenceLine);
 }

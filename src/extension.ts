@@ -44,6 +44,11 @@ import {
     createRepositoryScopedExecutor,
     createRepositoryScopedGitOps,
 } from "./services/RepositoryContextService";
+import {
+    hasAdjacentHunk,
+    parseChangedNewFileHunks,
+    type DiffHunkRange,
+} from "./services/diffNavigation";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
@@ -166,7 +171,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
     const getCommitDiffChangeRanges = async (
         active: ActiveCommitDiffNavigation,
-    ): Promise<Array<{ start: number; end: number }>> => {
+    ): Promise<DiffHunkRange[]> => {
         const repository = repositoryService
             .listRepositories()
             .find((entry) => entry.root === active.repoRoot);
@@ -332,6 +337,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await vscode.commands.executeCommand("workbench.action.compareEditor.previousChange");
             await waitForEditorCommand();
             commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
+        } else {
+            await waitForEditorCommand();
+            await vscode.commands.executeCommand("workbench.action.compareEditor.nextChange");
+            await waitForEditorCommand();
+            commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
         }
     };
     const openCommitDiffNavigationFile = async (
@@ -365,6 +375,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (initialHunk === "last") {
             await waitForEditorCommand();
             await vscode.commands.executeCommand("workbench.action.compareEditor.previousChange");
+            await waitForEditorCommand();
+        } else {
+            await waitForEditorCommand();
+            await vscode.commands.executeCommand("workbench.action.compareEditor.nextChange");
             await waitForEditorCommand();
         }
     };
@@ -560,7 +574,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 const detail = await repository.gitOps.getCommitDetail(hash);
                 if (requestId !== commitDetailRequestSeq) return;
                 currentCommitDetail = detail;
-                commitDiffNavigationsByUri.clear();
                 commitGraph.setCommitDetail(detail);
                 commitInfo.setCommitDetail(detail);
             } catch (err) {
@@ -575,7 +588,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             commitGraph.clearCommitDetail();
             commitInfo.clear();
             currentCommitDetail = null;
-            commitDiffNavigationsByUri.clear();
         }),
     );
 
@@ -665,7 +677,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         commitGraph.clearCommitDetail();
         commitInfo.clear();
         currentCommitDetail = null;
-        commitDiffNavigationsByUri.clear();
     };
 
     // --- Commands ---
@@ -1152,28 +1163,3 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {}
-
-function parseChangedNewFileHunks(diff: string): Array<{ start: number; end: number }> {
-    const ranges: Array<{ start: number; end: number }> = [];
-    const hunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
-    let match: RegExpExecArray | null;
-    while ((match = hunkPattern.exec(diff)) !== null) {
-        const start = Number.parseInt(match[1], 10);
-        const count = match[2] ? Number.parseInt(match[2], 10) : 1;
-        if (Number.isNaN(start) || Number.isNaN(count)) continue;
-        const normalizedCount = Math.max(count, 1);
-        ranges.push({ start: start - 1, end: start - 1 + normalizedCount });
-    }
-    return ranges;
-}
-
-function hasAdjacentHunk(
-    ranges: Array<{ start: number; end: number }>,
-    currentLine: number,
-    direction: "next" | "previous",
-): boolean {
-    if (direction === "next") {
-        return ranges.some((range) => range.start > currentLine);
-    }
-    return ranges.some((range) => range.end < currentLine);
-}
