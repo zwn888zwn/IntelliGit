@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
+import path from "path";
 
 import {
     getExtensionId,
@@ -157,5 +159,57 @@ describe("lookupPublishStatus", () => {
         expect(thrownError).toBeInstanceOf(Error);
         expect(thrownError.message).toContain("Open VSX lookup failed");
         expect(thrownError.cause).toBe(rootCause);
+    });
+});
+
+describe("package editor title contributions", () => {
+    it("shows both IntelliGit diff navigation buttons from one shared active context", () => {
+        const packageJson = JSON.parse(
+            readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+        ) as {
+            contributes: {
+                menus: {
+                    "editor/title": Array<{
+                        command: string;
+                        when?: string;
+                        group?: string;
+                        enablement?: string;
+                    }>;
+                };
+            };
+        };
+
+        const navigationItems = packageJson.contributes.menus["editor/title"].filter((item) =>
+            [
+                "intelligit.previousDiffChange",
+                "intelligit.previousDiffChangeUnavailable",
+                "intelligit.nextDiffChange",
+                "intelligit.nextDiffChangeUnavailable",
+            ].includes(item.command),
+        );
+
+        expect(navigationItems).toEqual([
+            {
+                command: "intelligit.previousDiffChange",
+                when: "intelligit.diffNavigation.active && intelligit.diffNavigation.hasPrevious",
+                group: "navigation@6",
+            },
+            {
+                command: "intelligit.previousDiffChangeUnavailable",
+                when: "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasPrevious",
+                group: "navigation@6",
+            },
+            {
+                command: "intelligit.nextDiffChange",
+                when: "intelligit.diffNavigation.active && intelligit.diffNavigation.hasNext",
+                group: "navigation@7",
+            },
+            {
+                command: "intelligit.nextDiffChangeUnavailable",
+                when: "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasNext",
+                group: "navigation@7",
+            },
+        ]);
+        expect(navigationItems.some((item) => item.enablement !== undefined)).toBe(false);
     });
 });

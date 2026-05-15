@@ -70,6 +70,7 @@ let activeTextEditor:
           document: {
               uri: { fsPath: string; path: string; scheme: string };
           };
+          selection?: { active: { line: number; character: number } };
       }
     | undefined = undefined;
 
@@ -302,6 +303,11 @@ class MockCommitPanelViewProvider {
     canNavigateWorkingFileChange = vi.fn(async () => true);
     getAdjacentWorkingFileTarget = vi.fn(() => null);
     openWorkingFileDiff = vi.fn(async () => undefined);
+    getDiffNavigationState = vi.fn(async () => ({
+        active: true,
+        hasPrevious: true,
+        hasNext: true,
+    }));
     dispose = vi.fn();
     emitFileCount(count: number): void {
         this.fileCountEmitter.fire(count);
@@ -353,7 +359,7 @@ vi.mock("vscode", () => ({
         NoPermissions: (message: string) => new Error(message),
     },
     Uri: {
-        file: (value: string) => ({ fsPath: value, path: value }),
+        file: (value: string) => ({ scheme: "file", fsPath: value, path: value }),
         from: ({
             scheme,
             path,
@@ -381,6 +387,14 @@ vi.mock("vscode", () => ({
             return { dispose: vi.fn() };
         }),
         executeCommand: vi.fn(async (id: string, ...args: unknown[]) => {
+            if (id === "vscode.diff" && args[1] && typeof args[1] === "object") {
+                activeTextEditor = {
+                    document: {
+                        uri: args[1] as { fsPath: string; path: string; scheme: string },
+                    },
+                    selection: { active: { line: 0, character: 0 } },
+                };
+            }
             const handler = registeredCommands.get(id);
             if (handler) return handler(...args);
             return executeCommandFallback(id, ...args);
@@ -797,8 +811,14 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
         expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
         expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
-        expect(registeredCommands.has("intelligit.previousProjectComparisonChange")).toBe(true);
-        expect(registeredCommands.has("intelligit.nextProjectComparisonChange")).toBe(true);
+        expect(registeredCommands.has("intelligit.previousDiffChange")).toBe(true);
+        expect(registeredCommands.has("intelligit.previousDiffChangeUnavailable")).toBe(true);
+        expect(registeredCommands.has("intelligit.nextDiffChange")).toBe(true);
+        expect(registeredCommands.has("intelligit.nextDiffChangeUnavailable")).toBe(true);
+        expect(registeredCommands.has("intelligit.previousWorkingFileChange")).toBe(false);
+        expect(registeredCommands.has("intelligit.nextWorkingFileChange")).toBe(false);
+        expect(registeredCommands.has("intelligit.previousProjectComparisonChange")).toBe(false);
+        expect(registeredCommands.has("intelligit.nextProjectComparisonChange")).toBe(false);
 
         function getCommand(id: string): CommandHandler {
             const cmd = registeredCommands.get(id);
@@ -882,6 +902,47 @@ describe("extension integration", () => {
         expect(latestBlameController!.annotateActiveEditor).toHaveBeenCalled();
         expect(latestBlameController!.clear).toHaveBeenCalled();
         expect(latestCommitGraphProvider!.revealCommit).toHaveBeenCalledWith("deadbee");
+    });
+
+    it("opens the previous working file at its last diff hunk", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+
+        activeTextEditor = {
+            document: {
+                uri: {
+                    scheme: "intelligit-diff-editable",
+                    fsPath: "/__intelligit_text_diff__/1.txt",
+                    path: "/__intelligit_text_diff__/1.txt",
+                    query: "ref=working-tree&path=src/current.ts",
+                    toString: () =>
+                        "intelligit-diff-editable:/__intelligit_text_diff__/1.txt?ref=working-tree&path=src/current.ts",
+                },
+            },
+            selection: { active: { line: 10, character: 0 } },
+        } as unknown as typeof activeTextEditor;
+        latestCommitPanelProvider!.getAdjacentWorkingFileTarget.mockReturnValueOnce({
+            repoRoot: "/repo",
+            path: "src/previous.ts",
+        });
+        executeCommandFallback.mockClear();
+
+        await registeredCommands.get("intelligit.previousDiffChange")?.();
+        await new Promise((resolve) => setTimeout(resolve, 190));
+
+        expect(latestCommitPanelProvider!.openWorkingFileDiff).toHaveBeenCalledWith({
+            repoRoot: "/repo",
+            path: "src/previous.ts",
+        });
+        const previousChangeCalls = executeCommandFallback.mock.calls.filter(
+            (call) => call[0] === "workbench.action.compareEditor.previousChange",
+        );
+        expect(previousChangeCalls).toHaveLength(2);
     });
 
     it("updates non-current local branch via fetch refspec without checkout", async () => {
@@ -1173,18 +1234,18 @@ describe("extension integration", () => {
         await waitForAsync();
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasNextDiffFile",
+            "intelligit.diffNavigation.hasNext",
             true,
         );
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasPreviousDiffFile",
+            "intelligit.diffNavigation.hasPrevious",
             false,
         );
         executeCommandFallback.mockClear();
         gitOpsState.getFileContentAtRef.mockClear();
 
-        await registeredCommands.get("intelligit.nextProjectComparisonChange")?.();
+        await registeredCommands.get("intelligit.nextDiffChange")?.();
         await new Promise((resolve) => setTimeout(resolve, 90));
         await waitForAsync();
 
@@ -1193,7 +1254,7 @@ describe("extension integration", () => {
         );
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasPreviousDiffFile",
+            "intelligit.diffNavigation.hasPrevious",
             true,
         );
         expect(gitOpsState.getFileContentAtRef).not.toHaveBeenCalledWith(
@@ -1202,7 +1263,7 @@ describe("extension integration", () => {
         );
         executeCommandFallback.mockClear();
 
-        await registeredCommands.get("intelligit.nextProjectComparisonChange")?.();
+        await registeredCommands.get("intelligit.nextDiffChange")?.();
         await new Promise((resolve) => setTimeout(resolve, 90));
         await waitForAsync();
 
@@ -1216,17 +1277,17 @@ describe("extension integration", () => {
         });
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasNextDiffFile",
+            "intelligit.diffNavigation.hasNext",
             false,
         );
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasPreviousDiffFile",
+            "intelligit.diffNavigation.hasPrevious",
             true,
         );
         executeCommandFallback.mockClear();
 
-        await registeredCommands.get("intelligit.previousProjectComparisonChange")?.();
+        await registeredCommands.get("intelligit.previousDiffChange")?.();
         await waitForAsync();
 
         expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
@@ -1242,12 +1303,12 @@ describe("extension integration", () => {
         );
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasPreviousDiffFile",
+            "intelligit.diffNavigation.hasPrevious",
             true,
         );
         executeCommandFallback.mockClear();
 
-        await registeredCommands.get("intelligit.previousProjectComparisonChange")?.();
+        await registeredCommands.get("intelligit.previousDiffChange")?.();
         await waitForAsync();
 
         expect(executeCommandFallback).toHaveBeenCalledWith(
@@ -1255,16 +1316,68 @@ describe("extension integration", () => {
         );
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "setContext",
-            "intelligit.projectComparison.hasPreviousDiffFile",
+            "intelligit.diffNavigation.hasPrevious",
             false,
         );
         executeCommandFallback.mockClear();
 
-        await registeredCommands.get("intelligit.previousProjectComparisonChange")?.();
+        await registeredCommands.get("intelligit.previousDiffChange")?.();
         await waitForAsync();
 
         expect(executeCommandFallback).not.toHaveBeenCalledWith(
             "workbench.action.compareEditor.previousChange",
+        );
+    });
+
+    it("opens renamed project comparison files against the old path on the compared branch", async () => {
+        gitOpsState.getBranchComparisonFiles.mockResolvedValueOnce([
+            {
+                repoId: ".",
+                repoRoot: "/repo-a",
+                path: "src/new.ts",
+                oldPath: "src/old.ts",
+                status: "R",
+                additions: 2,
+                deletions: 1,
+            },
+        ]);
+        const { activate } = await import("../../src/extension");
+        const vscode = await import("vscode");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: mockDisposables,
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        showQuickPick.mockImplementationOnce(async (items: Array<Record<string, unknown>>) => {
+            return items.find((item) => item.refName === "feature-local");
+        });
+
+        await registeredCommands.get("intelligit.compareProjectWithBranch")?.({
+            scheme: "file",
+            fsPath: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+
+        await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/new.ts" });
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/old.ts",
+            "feature-local",
+        );
+        expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("path=src%2Fold.ts"),
+            }),
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.anything(),
+            expect.objectContaining({ fsPath: "/repo-a/src/new.ts" }),
+            expect.stringContaining("feature-local"),
         );
     });
 
@@ -1354,6 +1467,72 @@ describe("extension integration", () => {
         expect(diffCall?.[1]).toMatchObject({ scheme: "intelligit-diff" });
         expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff-editable" });
         expect(diffCall?.[3]).toBe("src/feature.ts (parent1 ↔ a1b2c3d4)");
+    });
+
+    it("keeps commit diff navigation available when switching back to an older diff tab", async () => {
+        gitOpsState.getCommitDetail.mockImplementation(async (hash: string) => ({
+            repoId: ".",
+            repoRoot: "/repo-a",
+            hash,
+            shortHash: hash.slice(0, 7),
+            message: "msg",
+            body: "",
+            author: "Mahesh",
+            email: "m@example.com",
+            date: "2026-02-19T00:00:00Z",
+            parentHashes: ["parent1"],
+            refs: [],
+            files:
+                hash === "a1b2c3d4"
+                    ? [
+                          { path: "src/a.ts", status: "M", additions: 1, deletions: 1 },
+                          { path: "src/b.ts", status: "M", additions: 1, deletions: 1 },
+                      ]
+                    : [
+                          { path: "src/c.ts", status: "M", additions: 1, deletions: 1 },
+                          { path: "src/d.ts", status: "M", additions: 1, deletions: 1 },
+                      ],
+        }));
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+
+        latestCommitGraphProvider!.emitOpenCommitFileDiff({
+            commitHash: "a1b2c3d4",
+            filePath: "src/a.ts",
+            repoRoot: "/repo-a",
+        });
+        await waitForAsync();
+        const firstDiffEditor = activeTextEditor;
+        expect(firstDiffEditor?.document.uri.query).toContain("path=src%2Fa.ts");
+
+        latestCommitGraphProvider!.emitOpenCommitFileDiff({
+            commitHash: "feed1234",
+            filePath: "src/c.ts",
+            repoRoot: "/repo-a",
+        });
+        await waitForAsync();
+        expect(activeTextEditor?.document.uri.query).toContain("path=src%2Fc.ts");
+
+        activeTextEditor = firstDiffEditor;
+        executeCommandFallback.mockClear();
+        await activeEditorListeners[0]?.(activeTextEditor);
+        await waitForAsync();
+
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.diffNavigation.active",
+            true,
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "setContext",
+            "intelligit.diffNavigation.hasNext",
+            true,
+        );
     });
 
     it("opens the working tree file from an IntelliGit commit diff editor", async () => {

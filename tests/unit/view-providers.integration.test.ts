@@ -36,12 +36,39 @@ class FakeThemeColor {
     constructor(public readonly id: string) {}
 }
 
+class FakeDisposable {
+    constructor(private readonly disposeFn?: () => void) {}
+    dispose(): void {
+        this.disposeFn?.();
+    }
+}
+
 const showErrorMessage = vi.fn(async () => undefined);
 const showWarningMessage = vi.fn(async () => undefined);
 const showInformationMessage = vi.fn(async () => undefined);
 const showTextDocument = vi.fn(async () => undefined);
 const executeCommand = vi.fn(async () => undefined);
-const openTextDocument = vi.fn(async (arg) => arg);
+const openTextDocument = vi.fn(async (arg) => {
+    if (arg && typeof arg === "object" && "scheme" in arg && "path" in arg) {
+        return { uri: arg, ...arg };
+    }
+    return {
+        ...arg,
+        uri: {
+            scheme: "untitled",
+            path: "/snapshot",
+            fsPath: "/snapshot",
+            toString: () => "untitled:/snapshot",
+        },
+    };
+});
+const readFile = vi.fn(async () => Buffer.from("working tree content", "utf8"));
+const writeFile = vi.fn(async () => undefined);
+let registeredEditableDiffProvider:
+    | {
+          writeFile?: (uri: unknown, content: Uint8Array) => Promise<void> | void;
+      }
+    | undefined;
 const postMessageSpy = vi.fn();
 const withProgress = vi.fn(
     async (_options: unknown, task: (progress: unknown, token: unknown) => Promise<unknown>) =>
@@ -59,12 +86,39 @@ const workspaceState: {
 
 const vscodeMock = {
     EventEmitter: FakeEventEmitter,
+    Disposable: FakeDisposable,
     TreeItem: FakeTreeItem,
     ThemeIcon: FakeThemeIcon,
     ThemeColor: FakeThemeColor,
     ProgressLocation: { Notification: 15 },
+    FileType: { File: 1 },
+    FileChangeType: { Changed: 0, Created: 1, Deleted: 2 },
+    FileSystemError: {
+        FileNotFound: (uri: unknown) => new Error(`File not found: ${String(uri)}`),
+        NoPermissions: (message: string) => new Error(message),
+    },
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     Uri: {
+        from: ({
+            scheme,
+            path,
+            query,
+        }: {
+            scheme: string;
+            path: string;
+            query?: string;
+        }): { scheme: string; path: string; query: string; fsPath: string; toString: () => string } => ({
+            scheme,
+            path,
+            query: query ?? "",
+            fsPath: path,
+            toString: () => `${scheme}:${path}${query ? `?${query}` : ""}`,
+        }),
+        file: (value: string): { scheme: string; fsPath: string; path: string } => ({
+            scheme: "file",
+            fsPath: value,
+            path: value,
+        }),
         joinPath: (
             base: { fsPath?: string; path?: string },
             ...segments: string[]
@@ -103,6 +157,13 @@ const vscodeMock = {
             workspaceState.workspaceFolders = value;
         },
         openTextDocument,
+        fs: { readFile, writeFile },
+        registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
+        registerFileSystemProvider: vi.fn((_scheme, provider) => {
+            registeredEditableDiffProvider = provider as typeof registeredEditableDiffProvider;
+            return { dispose: vi.fn() };
+        }),
+        onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
         onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
     },
 };
@@ -191,6 +252,7 @@ function makeGitOpsMock() {
         getStatus: vi.fn(async () => [
             { path: "src/a.ts", status: "M", staged: false, additions: 1, deletions: 0 },
         ]),
+        getFileContentAtRef: vi.fn(async (filePath: string, ref: string) => `${ref}:${filePath}`),
         listShelved: vi.fn(async () => [
             { index: 0, message: "On main: save", date: "2026-02-19T00:00:00Z", hash: "stashhash" },
         ]),
@@ -237,10 +299,13 @@ async function setupCommitPanelProvider() {
 }
 
 describe("view providers integration", () => {
-    beforeEach(() => {
+    beforeEach(async () => {
         vi.clearAllMocks();
         workspaceState.workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
+        readFile.mockResolvedValue(Buffer.from("working tree content", "utf8"));
         showWarningMessage.mockResolvedValue(undefined);
+        const { registerDiffContentProvider } = await import("../../src/services/diffService");
+        registerDiffContentProvider([]);
     });
 
     it("CommitInfoViewProvider handles ready/set/clear lifecycle", async () => {
@@ -613,11 +678,195 @@ describe("view providers integration", () => {
     it("CommitPanelViewProvider handles diff/open/history actions", async () => {
         const { provider, webview } = await setupCommitPanelProvider();
         await webview.send({ type: "showDiff", path: "src/a.ts" });
-        expect(executeCommand).toHaveBeenCalledWith("git.openChange", expect.any(Object));
+        const diffCall = executeCommand.mock.calls.find((call) => call[0] === "vscode.diff");
+        expect(diffCall).toEqual([
+            "vscode.diff",
+            expect.any(Object),
+            expect.objectContaining({
+                scheme: "intelligit-diff-editable",
+                path: expect.stringMatching(/\.txt$/),
+                query: expect.stringContaining("working-tree"),
+            }),
+            expect.stringContaining("src/a.ts"),
+        ]);
+        expect(diffCall?.[1]).toEqual(
+            expect.objectContaining({
+                path: expect.stringMatching(/\.txt$/),
+                query: expect.stringContaining("path=src%2Fa.ts"),
+            }),
+        );
+        expect(diffCall?.[2]).toEqual(
+            expect.objectContaining({
+                query: expect.stringContaining("path=src%2Fa.ts"),
+            }),
+        );
+        expect(readFile).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: "/repo/src/a.ts",
+            }),
+        );
+        expect(openTextDocument).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                content: expect.any(String),
+            }),
+        );
+        await registeredEditableDiffProvider?.writeFile?.(
+            diffCall?.[2],
+            Buffer.from("updated working tree content", "utf8"),
+        );
+        expect(writeFile).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: "/repo/src/a.ts",
+            }),
+            Buffer.from("updated working tree content", "utf8"),
+        );
         await webview.send({ type: "openFile", path: "src/a.ts" });
         await webview.send({ type: "showHistory", path: "src/a.ts" });
         expect(openTextDocument).toHaveBeenCalled();
         expect(showTextDocument).toHaveBeenCalled();
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider opens binary working files as placeholder diffs", async () => {
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getStatus.mockResolvedValueOnce([
+            {
+                repoRoot: "/repo",
+                path: "profiles/cpu.pb.gz",
+                status: "?",
+                staged: false,
+                additions: 0,
+                deletions: 0,
+            },
+        ]);
+        const provider = new CommitPanelViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => ({ fsPath: "/repo", path: "/repo" }) as unknown as { fsPath: string; path: string },
+            () => [
+                {
+                    root: "/repo",
+                    uri: { fsPath: "/repo", path: "/repo" },
+                    info: testRepository,
+                    gitOps,
+                    executor: { run: vi.fn(async () => "") },
+                } as unknown as never,
+            ],
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "profiles/cpu.pb.gz" });
+
+        expect(openTextDocument).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("working-tree"),
+            }),
+        );
+        expect(readFile).not.toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.any(Object),
+            expect.any(Object),
+            expect.stringContaining("profiles/cpu.pb.gz"),
+        );
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider keeps diff navigation active for virtual diff editors", async () => {
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getStatus.mockResolvedValueOnce([
+            {
+                repoRoot: "/repo",
+                path: "todo.md",
+                status: "M",
+                staged: false,
+                additions: 16,
+                deletions: 16,
+            },
+            {
+                repoRoot: "/repo",
+                path: "go.sum",
+                status: "M",
+                staged: false,
+                additions: 1,
+                deletions: 0,
+            },
+        ]);
+        const executor = {
+            run: vi.fn(async () => "@@ -1 +1 @@\n-old\n+new"),
+        };
+        const provider = new CommitPanelViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => ({ fsPath: "/repo", path: "/repo" }) as unknown as { fsPath: string; path: string },
+            () => [
+                {
+                    root: "/repo",
+                    uri: { fsPath: "/repo", path: "/repo" },
+                    info: testRepository,
+                    gitOps,
+                    executor,
+                } as unknown as never,
+            ],
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "todo.md" });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const markdownDiffCall = executeCommand.mock.calls.find((call) => call[0] === "vscode.diff");
+        expect(markdownDiffCall?.[1]).toEqual(
+            expect.objectContaining({
+                path: expect.stringMatching(/\.txt$/),
+                query: expect.stringContaining("path=todo.md"),
+            }),
+        );
+        expect(markdownDiffCall?.[2]).toEqual(
+            expect.objectContaining({
+                path: expect.stringMatching(/\.txt$/),
+                query: expect.stringContaining("path=todo.md"),
+            }),
+        );
+        executeCommand.mockClear();
+
+        provider.syncActiveEditor({
+            document: {
+                uri: {
+                    scheme: "intelligit-diff-editable",
+                    path: "/__intelligit_text_diff__/1.txt",
+                    query: "ref=working-tree&path=todo.md",
+                    fsPath: "/__intelligit_text_diff__/1.txt",
+                },
+            },
+            selection: { active: { line: 1, character: 0 } },
+        } as unknown as Parameters<typeof provider.syncActiveEditor>[0]);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        await expect(provider.getDiffNavigationState()).resolves.toMatchObject({ active: true });
+        executeCommand.mockClear();
+
+        provider.syncActiveEditor(undefined);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        await expect(provider.getDiffNavigationState()).resolves.toMatchObject({ active: true });
         provider.dispose();
     });
 

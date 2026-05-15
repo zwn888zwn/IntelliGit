@@ -90,6 +90,31 @@ describe("app logic coverage", () => {
 
         await import("../../src/webviews/react/CommitGraphApp");
         await flush();
+        await act(async () => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "loadCommits",
+                        commits: [
+                            {
+                                hash: "abc1234",
+                                shortHash: "abc1234",
+                                message: "feat: test",
+                                author: "Mahesh",
+                                email: "m@example.com",
+                                date: "2026-02-19T00:00:00Z",
+                                parentHashes: [],
+                                refs: [],
+                                repoRoot: "/repo",
+                            },
+                        ],
+                        hasMore: true,
+                        unpushedHashes: [],
+                    },
+                }),
+            );
+        });
+        await flush();
 
         act(() => {
             document
@@ -172,6 +197,7 @@ describe("app logic coverage", () => {
             ],
         }));
         vi.doMock("../../src/webviews/react/commit-panel/hooks/useCheckedFiles", () => ({
+            getCheckedFileKey: (file: { path: string }) => file.path,
             useCheckedFiles: () => ({
                 checkedPaths: new Set(["src/a.ts"]),
                 toggleFile: vi.fn(),
@@ -263,6 +289,7 @@ describe("app logic coverage", () => {
             ],
         }));
         vi.doMock("../../src/webviews/react/commit-panel/hooks/useCheckedFiles", () => ({
+            getCheckedFileKey: (file: { path: string }) => file.path,
             useCheckedFiles: () => ({
                 checkedPaths: new Set<string>(),
                 toggleFile: vi.fn(),
@@ -325,6 +352,7 @@ describe("app logic coverage", () => {
             ],
         }));
         vi.doMock("../../src/webviews/react/commit-panel/hooks/useCheckedFiles", () => ({
+            getCheckedFileKey: (file: { path: string }) => file.path,
             useCheckedFiles: () => ({
                 checkedPaths: new Set<string>(),
                 toggleFile: vi.fn(),
@@ -371,7 +399,7 @@ describe("app logic coverage", () => {
                 message: "",
                 amend: false,
                 push: false,
-                paths: [],
+                targets: [],
             }),
         );
     });

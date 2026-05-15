@@ -178,32 +178,34 @@
                 "enablement": "resourceScheme == intelligit-diff-editable && intelligit.commitDiffSourceExists"
             },
             {
-                "command": "intelligit.previousWorkingFileChange",
+                "command": "intelligit.previousDiffChange",
                 "title": "Previous IntelliGit Change",
                 "category": "IntelliGit",
-                "icon": "$(arrow-up)",
-                "enablement": "intelligit.commitPanel.hasPreviousDiffFile"
+                "icon": "$(arrow-up)"
             },
             {
-                "command": "intelligit.nextWorkingFileChange",
+                "command": "intelligit.previousDiffChangeUnavailable",
+                "title": "Previous IntelliGit Change",
+                "category": "IntelliGit",
+                "icon": {
+                    "light": "media/icons/arrow-up-muted.svg",
+                    "dark": "media/icons/arrow-up-muted.svg"
+                }
+            },
+            {
+                "command": "intelligit.nextDiffChange",
                 "title": "Next IntelliGit Change",
                 "category": "IntelliGit",
-                "icon": "$(arrow-down)",
-                "enablement": "intelligit.commitPanel.hasNextDiffFile"
+                "icon": "$(arrow-down)"
             },
             {
-                "command": "intelligit.previousProjectComparisonChange",
-                "title": "Previous IntelliGit Compare Change",
+                "command": "intelligit.nextDiffChangeUnavailable",
+                "title": "Next IntelliGit Change",
                 "category": "IntelliGit",
-                "icon": "$(arrow-up)",
-                "enablement": "intelligit.projectComparison.hasPreviousDiffFile"
-            },
-            {
-                "command": "intelligit.nextProjectComparisonChange",
-                "title": "Next IntelliGit Compare Change",
-                "category": "IntelliGit",
-                "icon": "$(arrow-down)",
-                "enablement": "intelligit.projectComparison.hasNextDiffFile"
+                "icon": {
+                    "light": "media/icons/arrow-down-muted.svg",
+                    "dark": "media/icons/arrow-down-muted.svg"
+                }
             },
             {
                 "command": "intelligit.fileDelete",
@@ -407,24 +409,24 @@
             ],
             "editor/title": [
                 {
-                    "command": "intelligit.previousWorkingFileChange",
-                    "when": "intelligit.commitPanel.activeDiff",
+                    "command": "intelligit.previousDiffChange",
+                    "when": "intelligit.diffNavigation.active && intelligit.diffNavigation.hasPrevious",
                     "group": "navigation@6"
                 },
                 {
-                    "command": "intelligit.nextWorkingFileChange",
-                    "when": "intelligit.commitPanel.activeDiff",
+                    "command": "intelligit.previousDiffChangeUnavailable",
+                    "when": "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasPrevious",
+                    "group": "navigation@6"
+                },
+                {
+                    "command": "intelligit.nextDiffChange",
+                    "when": "intelligit.diffNavigation.active && intelligit.diffNavigation.hasNext",
                     "group": "navigation@7"
                 },
                 {
-                    "command": "intelligit.previousProjectComparisonChange",
-                    "when": "intelligit.projectComparison.activeDiff",
-                    "group": "navigation@-20"
-                },
-                {
-                    "command": "intelligit.nextProjectComparisonChange",
-                    "when": "intelligit.projectComparison.activeDiff",
-                    "group": "navigation@-19"
+                    "command": "intelligit.nextDiffChangeUnavailable",
+                    "when": "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasNext",
+                    "group": "navigation@7"
                 },
                 {
                     "command": "intelligit.openCommitDiffSource",

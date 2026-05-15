@@ -8,7 +8,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
-import type { ProjectComparisonFile } from "../types";
+import type { ProjectComparisonFile, WorkingFile } from "../types";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
 import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from "./gitHelpers";
@@ -18,6 +18,27 @@ import { EMPTY_TREE_HASH } from "../utils/constants";
 const DIFF_DOCUMENT_SCHEME = "intelligit-diff";
 const DIFF_EDITABLE_SCHEME = "intelligit-diff-editable";
 
+const BINARY_FILE_EXTENSIONS = new Set([
+    ".7z",
+    ".bmp",
+    ".class",
+    ".dll",
+    ".dylib",
+    ".exe",
+    ".gif",
+    ".gz",
+    ".ico",
+    ".jar",
+    ".jpeg",
+    ".jpg",
+    ".pdf",
+    ".png",
+    ".so",
+    ".tar",
+    ".webp",
+    ".zip",
+]);
+
 class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
     private readonly contents = new Map<string, string>();
     private readonly changeEmitter = new vscode.EventEmitter<vscode.Uri>();
@@ -26,12 +47,14 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
     readonly onDidChange = this.changeEmitter.event;
 
     createUri(filePath: string, ref: string, content: string): vscode.Uri {
+        const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
-            path: `/${normalizeGitPath(filePath)}`,
+            path: makeTextDiffUriPath(id),
             query: new URLSearchParams({
                 ref,
-                id: String(this.nextId++),
+                id,
+                path: normalizeGitPath(filePath),
             }).toString(),
         });
         this.contents.set(uri.toString(), content);
@@ -56,21 +79,40 @@ class IntelliGitEditableDiffFileSystemProvider
     implements vscode.FileSystemProvider, vscode.Disposable
 {
     private readonly files = new Map<string, Uint8Array>();
+    private readonly workingTreeTargets = new Map<string, vscode.Uri>();
     private readonly changeEmitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
     private nextId = 1;
 
     readonly onDidChangeFile = this.changeEmitter.event;
 
     createUri(filePath: string, ref: string, content: string): vscode.Uri {
+        const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_EDITABLE_SCHEME,
-            path: `/${normalizeGitPath(filePath)}`,
+            path: makeTextDiffUriPath(id),
             query: new URLSearchParams({
                 ref,
-                id: String(this.nextId++),
+                id,
+                path: normalizeGitPath(filePath),
             }).toString(),
         });
         this.files.set(uri.toString(), Buffer.from(content, "utf8"));
+        return uri;
+    }
+
+    createWorkingTreeUri(filePath: string, content: Uint8Array, targetUri: vscode.Uri): vscode.Uri {
+        const id = String(this.nextId++);
+        const uri = vscode.Uri.from({
+            scheme: DIFF_EDITABLE_SCHEME,
+            path: makeTextDiffUriPath(id),
+            query: new URLSearchParams({
+                ref: "working-tree",
+                id,
+                path: normalizeGitPath(filePath),
+            }).toString(),
+        });
+        this.files.set(uri.toString(), content);
+        this.workingTreeTargets.set(uri.toString(), targetUri);
         return uri;
     }
 
@@ -108,7 +150,11 @@ class IntelliGitEditableDiffFileSystemProvider
         return content;
     }
 
-    writeFile(uri: vscode.Uri, content: Uint8Array): void {
+    async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
+        const targetUri = this.workingTreeTargets.get(uri.toString());
+        if (targetUri) {
+            await vscode.workspace.fs.writeFile(targetUri, content);
+        }
         this.files.set(uri.toString(), content);
         this.changeEmitter.fire([{ type: vscode.FileChangeType.Changed, uri }]);
     }
@@ -133,10 +179,12 @@ class IntelliGitEditableDiffFileSystemProvider
 
     release(uri: vscode.Uri): void {
         this.files.delete(uri.toString());
+        this.workingTreeTargets.delete(uri.toString());
     }
 
     dispose(): void {
         this.files.clear();
+        this.workingTreeTargets.clear();
         this.changeEmitter.dispose();
     }
 }
@@ -191,6 +239,10 @@ export function normalizeGitPath(fsPathValue: string): string {
     return fsPathValue.split(path.sep).join("/");
 }
 
+function makeTextDiffUriPath(id: string): string {
+    return `/__intelligit_text_diff__/${id}.txt`;
+}
+
 export function getRepoRelativeFilePathFromUri(uri: vscode.Uri, repoRoot: string): string | null {
     if (uri.scheme !== "file") return null;
     const relative = path.relative(repoRoot, uri.fsPath);
@@ -218,7 +270,18 @@ export function getCommitDiffEditorUri(ctx?: unknown): vscode.Uri | null {
 
 export function getCommitDiffFilePathFromUri(uri: vscode.Uri): string | null {
     if (uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
-    const rawPath = uri.path.replace(/^\/+/, "").trim();
+    const rawPath =
+        new URLSearchParams(uri.query).get("path")?.trim() ??
+        uri.path.replace(/^\/+/, "").trim();
+    if (!rawPath) return null;
+    return assertRepoRelativePath(rawPath);
+}
+
+export function getDiffOriginalFilePathFromUri(uri: vscode.Uri): string | null {
+    if (uri.scheme !== DIFF_DOCUMENT_SCHEME && uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
+    const rawPath =
+        new URLSearchParams(uri.query).get("path")?.trim() ??
+        uri.path.replace(/^\/+/, "").trim();
     if (!rawPath) return null;
     return assertRepoRelativePath(rawPath);
 }
@@ -296,26 +359,37 @@ export async function openCommitFileDiff(
     repoRoot: string,
     gitOps: GitOps,
     executor: GitExecutor,
-): Promise<void> {
+    options: { parentRef?: string; parentDisplayHash?: string } = {},
+): Promise<{
+    parentRef: string;
+    parentDisplayHash: string;
+    leftUri: vscode.Uri;
+    rightUri: vscode.Uri;
+} | null> {
     const safePath = assertRepoRelativePath(filePath);
-    const parents = await getCommitParentHashes(commitHash, executor);
 
     let parentRef: string;
     let parentDisplayHash: string;
-    if (parents.length > 1) {
-        const result = await pickMainlineParent(
-            commitHash,
-            "Open Commit File Diff",
-            executor,
-            parents,
-        );
-        if (result.kind === "cancelled") return;
-        if (result.kind === "notMerge") return;
-        parentRef = `${commitHash}^${result.parentNumber}`;
-        parentDisplayHash = parents[result.parentNumber! - 1] ?? parentRef;
+    if (options.parentRef) {
+        parentRef = options.parentRef;
+        parentDisplayHash = options.parentDisplayHash ?? options.parentRef;
     } else {
-        parentRef = parents.length === 0 ? EMPTY_TREE_HASH : parents[0];
-        parentDisplayHash = parentRef;
+        const parents = await getCommitParentHashes(commitHash, executor);
+        if (parents.length <= 1) {
+            parentRef = parents.length === 0 ? EMPTY_TREE_HASH : parents[0];
+            parentDisplayHash = parentRef;
+        } else {
+            const result = await pickMainlineParent(
+                commitHash,
+                "Open Commit File Diff",
+                executor,
+                parents,
+            );
+            if (result.kind === "cancelled") return null;
+            if (result.kind === "notMerge") return null;
+            parentRef = `${commitHash}^${result.parentNumber}`;
+            parentDisplayHash = parents[result.parentNumber! - 1] ?? parentRef;
+        }
     }
 
     let leftContent: string;
@@ -343,6 +417,7 @@ export async function openCommitFileDiff(
     const shortCommit = commitHash.slice(0, 8);
     const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightDoc.uri, title);
+    return { parentRef, parentDisplayHash, leftUri: leftDoc.uri, rightUri: rightDoc.uri };
 }
 
 export async function openBranchComparisonFileDiff(
@@ -352,7 +427,7 @@ export async function openBranchComparisonFileDiff(
     gitOps: GitOps,
 ): Promise<void> {
     const safePath = assertRepoRelativePath(file.path);
-    const leftPath = assertRepoRelativePath(file.oldPath ?? file.path);
+    const leftPath = file.oldPath ? assertRepoRelativePath(file.oldPath) : safePath;
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
 
@@ -377,6 +452,53 @@ export async function openBranchComparisonFileDiff(
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
 }
 
+export async function openWorkingTreeFileDiff(
+    file: WorkingFile,
+    repoRoot: string,
+    gitOps: GitOps,
+): Promise<void> {
+    const safePath = assertRepoRelativePath(file.path);
+    const leftPath = safePath;
+    const isBinary = isBinaryFilePath(safePath);
+    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+    const leftContent =
+        file.status === "?" || file.status === "A"
+            ? ""
+            : isBinary
+              ? binaryPlaceholder(leftPath, "HEAD")
+              : await gitOps.getFileContentAtRef(leftPath, "HEAD").catch(() => "");
+
+    const diffProvider = getDiffContentProvider();
+    const leftDoc = await vscode.workspace.openTextDocument(
+        diffProvider.createUri(leftPath, "HEAD", leftContent),
+    );
+    let rightUri: vscode.Uri;
+    if (file.status === "D" || isBinary) {
+        const rightContent =
+            file.status === "D"
+                ? ""
+                : await readWorkingTreeTextSnapshot(workingTreeUri);
+        const rightDoc = await vscode.workspace.openTextDocument(
+            diffProvider.createUri(safePath, "working-tree", rightContent),
+        );
+        rightUri = rightDoc.uri;
+    } else {
+        let workingTreeContent: Uint8Array;
+        try {
+            workingTreeContent = await vscode.workspace.fs.readFile(workingTreeUri);
+        } catch {
+            workingTreeContent = new Uint8Array();
+        }
+        rightUri = getEditableDiffProvider().createWorkingTreeUri(
+            safePath,
+            workingTreeContent,
+            workingTreeUri,
+        );
+    }
+    const title = `${safePath} (HEAD ↔ Working Tree)`;
+    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
+}
+
 async function fileExists(uri: vscode.Uri): Promise<boolean> {
     try {
         await vscode.workspace.fs.stat(uri);
@@ -384,6 +506,43 @@ async function fileExists(uri: vscode.Uri): Promise<boolean> {
     } catch {
         return false;
     }
+}
+
+async function readWorkingTreeTextSnapshot(uri: vscode.Uri): Promise<string> {
+    const filePath = uri.fsPath;
+    if (isBinaryFilePath(filePath)) {
+        return binaryPlaceholder(path.basename(filePath), "working tree");
+    }
+    try {
+        const bytes = await vscode.workspace.fs.readFile(uri);
+        if (isProbablyBinary(bytes)) {
+            return binaryPlaceholder(path.basename(filePath), "working tree");
+        }
+        return Buffer.from(bytes).toString("utf8");
+    } catch {
+        return "";
+    }
+}
+
+function isBinaryFilePath(filePath: string): boolean {
+    const lower = filePath.toLowerCase();
+    if (lower.endsWith(".pb.gz")) return true;
+    return BINARY_FILE_EXTENSIONS.has(path.extname(lower));
+}
+
+function isProbablyBinary(bytes: Uint8Array): boolean {
+    const sample = bytes.subarray(0, Math.min(bytes.length, 8192));
+    if (sample.length === 0) return false;
+    let suspicious = 0;
+    for (const byte of sample) {
+        if (byte === 0) return true;
+        if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
+    }
+    return suspicious / sample.length > 0.08;
+}
+
+function binaryPlaceholder(filePath: string, side: string): string {
+    return `Binary file snapshot is not displayed as text.\n\nFile: ${filePath}\nSide: ${side}\n`;
 }
 
 export async function openCommitDiffSourceFile(

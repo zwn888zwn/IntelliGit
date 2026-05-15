@@ -94,12 +94,12 @@ describe("low coverage components", () => {
         );
 
         const branchCount = container.querySelector(
-            'span[title*="Branches (3):"][title*="HEAD -> main"][title*="origin/main"][title*="feature/demo"]',
+            'span[aria-label*="Branches (3):"][aria-label*="main"][aria-label*="origin/main"][aria-label*="feature/demo"]',
         );
         expect(branchCount).toBeTruthy();
         expect(container.textContent).toContain("v1.0.0");
         const messageCell = container.querySelector(
-            'span[title="feat: row coverage"]',
+            'span[title*="feat: row coverage"]',
         ) as HTMLElement;
         expect(messageCell).toBeTruthy();
         const compactRefCell = container.querySelector(

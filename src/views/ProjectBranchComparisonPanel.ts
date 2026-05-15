@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { ProjectComparisonFile } from "../types";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
 import {
+    getDiffOriginalFilePathFromUri,
     getRepoRelativeFilePathFromUri,
     openBranchComparisonFileDiff,
 } from "../services/diffService";
@@ -13,6 +14,7 @@ import type {
     ProjectComparisonInbound,
     ProjectComparisonOutbound,
 } from "../webviews/react/project-comparison/types";
+import type { DiffNavigationState } from "./CommitPanelViewProvider";
 
 interface DiffHunkRange {
     start: number;
@@ -28,15 +30,20 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     private files: ProjectComparisonFile[] = [];
     private activeFile: ProjectComparisonFile | null = null;
     private activeHunkIndex: number | null = null;
-    private navigationContextSeq = 0;
     private disposed = false;
 
     static open(
         extensionUri: vscode.Uri,
         repository: RepositoryEntry,
         branchName: string,
+        onNavigationStateChange: () => void = () => {},
     ): ProjectBranchComparisonPanel {
-        return new ProjectBranchComparisonPanel(extensionUri, repository, branchName);
+        return new ProjectBranchComparisonPanel(
+            extensionUri,
+            repository,
+            branchName,
+            onNavigationStateChange,
+        );
     }
 
     static getActivePanel(): ProjectBranchComparisonPanel | null {
@@ -47,6 +54,7 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         private readonly extensionUri: vscode.Uri,
         private readonly repository: RepositoryEntry,
         private readonly branchName: string,
+        private readonly onNavigationStateChange: () => void,
     ) {
         this.panel = vscode.window.createWebviewPanel(
             ProjectBranchComparisonPanel.viewType,
@@ -163,12 +171,15 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         this.updateNavigationContexts();
     }
 
-    private getAdjacentFile(direction: "next" | "previous"): ProjectComparisonFile | null {
+    private getAdjacentFile(
+        direction: "next" | "previous",
+        activeFile: ProjectComparisonFile | null = this.activeFile,
+    ): ProjectComparisonFile | null {
         if (this.files.length === 0) return null;
-        if (!this.activeFile) {
+        if (!activeFile) {
             return direction === "next" ? this.files[0] : this.files[this.files.length - 1];
         }
-        const currentIndex = this.files.findIndex((file) => file.path === this.activeFile?.path);
+        const currentIndex = this.files.findIndex((file) => file.path === activeFile.path);
         if (currentIndex < 0) {
             return direction === "next" ? this.files[0] : this.files[this.files.length - 1];
         }
@@ -221,6 +232,26 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         return hasAdjacentChange || Boolean(this.getAdjacentFile(direction));
     }
 
+    async getDiffNavigationState(
+        editor: vscode.TextEditor | null | undefined = undefined,
+    ): Promise<DiffNavigationState> {
+        if (editor === null) return { active: false, hasPrevious: false, hasNext: false };
+        const activeFile = editor ? this.getFileForUri(editor.document.uri) : this.activeFile;
+        if (!activeFile) return { active: false, hasPrevious: false, hasNext: false };
+        const activeHunkIndex =
+            activeFile.path === this.activeFile?.path ? this.activeHunkIndex : 0;
+        const changeRanges = await this.getFileChangeRanges(activeFile);
+        const hasPreviousChange =
+            getAdjacentHunkIndex(changeRanges, activeHunkIndex, "previous") !== null;
+        const hasNextChange =
+            getAdjacentHunkIndex(changeRanges, activeHunkIndex, "next") !== null;
+        return {
+            active: true,
+            hasPrevious: hasPreviousChange || Boolean(this.getAdjacentFile("previous", activeFile)),
+            hasNext: hasNextChange || Boolean(this.getAdjacentFile("next", activeFile)),
+        };
+    }
+
     private async getActiveFileChangeRanges(): Promise<DiffHunkRange[]> {
         if (!this.activeFile) return [];
         return this.getFileChangeRanges(this.activeFile);
@@ -237,62 +268,28 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     }
 
     private getFileForUri(uri: vscode.Uri | undefined): ProjectComparisonFile | null {
-        const path = getProjectComparisonPathFromUri(uri, this.repository.root);
+        const path = this.getProjectComparisonPathFromUri(uri);
         if (!path) return null;
         return this.files.find((file) => file.path === path || file.oldPath === path) ?? null;
     }
 
+    private getProjectComparisonPathFromUri(uri: vscode.Uri | undefined): string | null {
+        if (!uri) return null;
+        if (uri.scheme === "file") {
+            return getRepoRelativeFilePathFromUri(uri, this.repository.root);
+        }
+        if (uri.scheme !== "intelligit-diff") return null;
+        const ref = new URLSearchParams(uri.query).get("ref");
+        if (ref !== this.branchName && ref !== "current") return null;
+        return getDiffOriginalFilePathFromUri(uri);
+    }
+
     private updateNavigationContexts(): void {
-        const requestId = ++this.navigationContextSeq;
-        const hasActiveDiff = Boolean(this.activeFile);
-        void (async () => {
-            const hasPreviousFile = Boolean(this.getAdjacentFile("previous"));
-            const hasNextFile = Boolean(this.getAdjacentFile("next"));
-            const changeRanges = await this.getActiveFileChangeRanges();
-            if (requestId !== this.navigationContextSeq) return;
-            const hasPreviousChange =
-                getAdjacentHunkIndex(changeRanges, this.activeHunkIndex, "previous") !== null;
-            const hasNextChange =
-                getAdjacentHunkIndex(changeRanges, this.activeHunkIndex, "next") !== null;
-            await Promise.all([
-                vscode.commands.executeCommand(
-                    "setContext",
-                    "intelligit.projectComparison.activeDiff",
-                    hasActiveDiff,
-                ),
-                vscode.commands.executeCommand(
-                    "setContext",
-                    "intelligit.projectComparison.hasPreviousDiffFile",
-                    hasPreviousChange || hasPreviousFile,
-                ),
-                vscode.commands.executeCommand(
-                    "setContext",
-                    "intelligit.projectComparison.hasNextDiffFile",
-                    hasNextChange || hasNextFile,
-                ),
-            ]);
-        })().catch(() => {});
+        this.onNavigationStateChange();
     }
 
     private clearNavigationContexts(): void {
-        ++this.navigationContextSeq;
-        void Promise.all([
-            vscode.commands.executeCommand(
-                "setContext",
-                "intelligit.projectComparison.activeDiff",
-                false,
-            ),
-            vscode.commands.executeCommand(
-                "setContext",
-                "intelligit.projectComparison.hasPreviousDiffFile",
-                false,
-            ),
-            vscode.commands.executeCommand(
-                "setContext",
-                "intelligit.projectComparison.hasNextDiffFile",
-                false,
-            ),
-        ]).catch(() => {});
+        this.onNavigationStateChange();
     }
 
     private post(message: ProjectComparisonInbound): void {
@@ -317,20 +314,6 @@ function getNativeDiffNavigationCommand(direction: "next" | "previous"): string 
     return direction === "next"
         ? "workbench.action.compareEditor.nextChange"
         : "workbench.action.compareEditor.previousChange";
-}
-
-function getProjectComparisonPathFromUri(
-    uri: vscode.Uri | undefined,
-    repoRoot: string,
-): string | null {
-    if (!uri) return null;
-    if (uri.scheme === "file") {
-        return getRepoRelativeFilePathFromUri(uri, repoRoot);
-    }
-    if (uri.scheme !== "intelligit-diff") return null;
-    const normalizedPath = uri.path.replace(/^\/+/, "");
-    if (!normalizedPath) return null;
-    return assertRepoRelativePath(normalizedPath);
 }
 
 function parseChangedNewFileHunks(diff: string): DiffHunkRange[] {
