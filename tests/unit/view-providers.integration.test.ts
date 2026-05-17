@@ -729,6 +729,52 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("openCommitFileDiff decodes git-quoted file paths before reading diff content", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async (_filePath: string, ref: string) => `content:${ref}`),
+        };
+        const executor = {
+            run: vi.fn(async () => "a1b2c3d4 parent1234"),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            '"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"',
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result).not.toBeNull();
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(
+            1,
+            "docs/新文件.txt",
+            "parent1234",
+        );
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(
+            2,
+            "docs/新文件.txt",
+            "a1b2c3d4",
+        );
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining(
+                    "path=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt",
+                ),
+            }),
+            expect.objectContaining({
+                scheme: "intelligit-diff-editable",
+                query: expect.stringContaining(
+                    "path=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt",
+                ),
+            }),
+            "docs/新文件.txt (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
     it("CommitPanelViewProvider opens binary working files as placeholder diffs", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();

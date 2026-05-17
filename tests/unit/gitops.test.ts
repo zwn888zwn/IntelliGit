@@ -151,6 +151,27 @@ describe("GitOps", () => {
 
             await expect(ops.getBranchComparisonFiles("main")).resolves.toEqual([]);
         });
+
+        it("decodes git quoted paths in branch comparisons", async () => {
+            const quotedPath = '"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"';
+            const executor = createMockExecutor({
+                "diff --name-status --find-renames feature --": `A\t${quotedPath}\n`,
+                "diff --numstat --find-renames feature --": `4\t0\t${quotedPath}\n`,
+            });
+            const ops = new GitOps(executor);
+
+            await expect(ops.getBranchComparisonFiles("feature")).resolves.toEqual([
+                {
+                    repoId: ".",
+                    repoRoot: "",
+                    path: "docs/新文件.txt",
+                    oldPath: undefined,
+                    status: "A",
+                    additions: 4,
+                    deletions: 0,
+                },
+            ]);
+        });
     });
 
     describe("getLog", () => {
@@ -287,6 +308,42 @@ describe("GitOps", () => {
             expect(detail.files[1].status).toBe("A");
             expect(detail.files[1].additions).toBe(5);
         });
+
+        it("decodes git quoted non-ASCII commit file paths and stats", async () => {
+            const showOutput = [
+                "abc123full",
+                "abc123",
+                "Fix Chinese path",
+                "",
+                "John",
+                "john@test.com",
+                "2024-01-01T00:00:00Z",
+                "parent1",
+                "",
+            ].join(FIELD_SEP);
+            const quotedPath = '"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"';
+
+            const executor = {
+                run: vi.fn(async (args: string[]) => {
+                    if (args[0] === "show") return showOutput;
+                    if (args.includes("--name-status")) return `A\t${quotedPath}\n`;
+                    if (args.includes("--numstat")) return `12\t0\t${quotedPath}\n`;
+                    return "";
+                }),
+            } as unknown as GitExecutor;
+
+            const ops = new GitOps(executor);
+            const detail = await ops.getCommitDetail("abc123full");
+
+            expect(detail.files).toEqual([
+                {
+                    path: "docs/新文件.txt",
+                    status: "A",
+                    additions: 12,
+                    deletions: 0,
+                },
+            ]);
+        });
     });
 
     describe("getStatus", () => {
@@ -313,6 +370,35 @@ describe("GitOps", () => {
             expect(unstaged.some((f) => f.path === "src/foo.ts" && f.status === "M")).toBe(true);
             expect(unstaged.some((f) => f.path === "src/new.ts" && f.status === "?")).toBe(true);
             expect(staged.some((f) => f.path === "src/added.ts" && f.status === "A")).toBe(true);
+        });
+
+        it("decodes git quoted paths in working tree stats", async () => {
+            const quotedPath = '"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"';
+            const statusOutput = " M docs/新文件.txt\0";
+            const diffStatOutput = `7\t1\t${quotedPath}\n`;
+
+            const executor = {
+                run: vi.fn(async (args: string[]) => {
+                    if (args.includes("--porcelain=v1")) return statusOutput;
+                    if (args[0] === "diff" && args.includes("--numstat")) return diffStatOutput;
+                    return "";
+                }),
+            } as unknown as GitExecutor;
+
+            const ops = new GitOps(executor);
+            const files = await ops.getStatus();
+
+            expect(files).toEqual([
+                {
+                    repoId: ".",
+                    repoRoot: "",
+                    path: "docs/新文件.txt",
+                    status: "M",
+                    staged: false,
+                    additions: 7,
+                    deletions: 1,
+                },
+            ]);
         });
 
         it("emits two entries for files with both staged and unstaged changes", async () => {
@@ -980,6 +1066,34 @@ describe("GitOps", () => {
             await expect(ops.getShelvedFilePatch(0, "src/a.ts")).resolves.toContain("diff --git");
             expect((executor.run as ReturnType<typeof vi.fn>).mock.calls).toContainEqual([
                 ["diff", "stash@{0}^", "stash@{0}", "--", "src/a.ts"],
+            ]);
+        });
+
+        it("decodes git quoted paths in shelved files", async () => {
+            const quotedPath = '"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"';
+            const executor = {
+                run: vi.fn(async (args: string[]) => {
+                    if (args.join(" ") === "stash show --name-status stash@{0}") {
+                        return `A\t${quotedPath}\n`;
+                    }
+                    if (args.join(" ") === "stash show --numstat stash@{0}") {
+                        return `2\t0\t${quotedPath}\n`;
+                    }
+                    return "";
+                }),
+            } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+
+            await expect(ops.getShelvedFiles(0)).resolves.toEqual([
+                {
+                    repoId: ".",
+                    repoRoot: "",
+                    path: "docs/新文件.txt",
+                    status: "A",
+                    staged: false,
+                    additions: 2,
+                    deletions: 0,
+                },
             ]);
         });
 

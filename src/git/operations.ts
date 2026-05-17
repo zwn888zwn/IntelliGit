@@ -1,5 +1,6 @@
 import * as path from "path";
 import { GitExecutor } from "./executor";
+import { decodeGitQuotedPath } from "./pathEncoding";
 import type {
     Branch,
     Commit,
@@ -70,13 +71,14 @@ function assertStashIndex(index: number): void {
 }
 
 function assertGitRelativePath(filePath: string): string {
-    if (!filePath || path.isAbsolute(filePath)) {
+    const decodedPath = decodeGitQuotedPath(filePath);
+    if (!decodedPath || path.isAbsolute(decodedPath)) {
         throw new Error(`Rejected non-relative path: ${filePath}`);
     }
-    if (filePath.includes("\0") || filePath.includes("\r") || filePath.includes("\n")) {
+    if (decodedPath.includes("\0") || decodedPath.includes("\r") || decodedPath.includes("\n")) {
         throw new Error(`Rejected path containing control characters: ${filePath}`);
     }
-    const normalized = path.normalize(filePath);
+    const normalized = path.normalize(decodedPath);
     if (normalized === ".") {
         throw new Error(`Rejected repo root path: ${filePath}`);
     }
@@ -85,6 +87,10 @@ function assertGitRelativePath(filePath: string): string {
         throw new Error(`Rejected path escaping repo root: ${filePath}`);
     }
     return normalized.split(path.sep).join("/");
+}
+
+function normalizeGitOutputPath(filePath: string | undefined): string {
+    return decodeGitQuotedPath(filePath ?? "");
 }
 
 export class UpstreamPushDeclinedError extends Error {
@@ -272,8 +278,11 @@ export class GitOps {
                 const rawCode = cols[0].charAt(0);
                 const status: CommitFile["status"] = mapCommitFileStatus(rawCode);
                 const isRenameOrCopy = status === "R" || status === "C";
-                const path = isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1];
-                upsertFile(path, status);
+                const filePath = normalizeGitOutputPath(
+                    isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1],
+                );
+                if (!filePath) continue;
+                upsertFile(filePath, status);
             }
         }
 
@@ -292,7 +301,8 @@ export class GitOps {
                 if (cols.length < 3) continue;
                 const add = cols[0];
                 const del = cols[1];
-                const filePath = cols[cols.length - 1];
+                const filePath = normalizeGitOutputPath(cols[cols.length - 1]);
+                if (!filePath) continue;
                 const file = upsertFile(filePath, "M");
                 const parsedAdd = add === "-" ? 0 : parseInt(add);
                 const parsedDel = del === "-" ? 0 : parseInt(del);
@@ -347,7 +357,7 @@ export class GitOps {
             const stagedStatus = mapStatusCode(index);
             const unstagedStatus = mapStatusCode(worktree);
 
-            const path = entry.slice(3);
+            const path = normalizeGitOutputPath(entry.slice(3));
             if (!path) continue;
 
             const isRenameOrCopy =
@@ -424,7 +434,8 @@ export class GitOps {
                     if (cols.length < 3) continue;
                     const add = cols[0];
                     const del = cols[1];
-                    const filePath = cols[cols.length - 1];
+                    const filePath = normalizeGitOutputPath(cols[cols.length - 1]);
+                    if (!filePath) continue;
                     const parsedAdd = add === "-" ? 0 : parseInt(add);
                     const parsedDel = del === "-" ? 0 : parseInt(del);
                     const key = `${filePath}:${staged}`;
@@ -514,8 +525,12 @@ export class GitOps {
             if (!status) continue;
 
             const isRenameOrCopy = status === "R" || status === "C";
-            const filePath = isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1];
-            const oldPath = isRenameOrCopy && cols.length >= 3 ? cols[1] : undefined;
+            const filePath = normalizeGitOutputPath(
+                isRenameOrCopy && cols.length >= 3 ? cols[2] : cols[cols.length - 1],
+            );
+            if (!filePath) continue;
+            const oldPath =
+                isRenameOrCopy && cols.length >= 3 ? normalizeGitOutputPath(cols[1]) : undefined;
             upsertFile(filePath, status, oldPath);
         }
 
@@ -822,10 +837,11 @@ export class GitOps {
                 if (parts.length < 2) continue;
                 const code = parts[0].trim();
                 const status = mapStatusCode(code[0]) ?? "M";
-                const path =
+                const path = normalizeGitOutputPath(
                     code.startsWith("R") || code.startsWith("C")
-                        ? (parts[2]?.trim() ?? parts[1]?.trim())
-                        : parts[1]?.trim();
+                        ? (parts[2] ?? parts[1])
+                        : parts[1],
+                );
                 if (!path) continue;
                 upsert(path, status);
             }
@@ -841,7 +857,7 @@ export class GitOps {
                 if (parts.length < 3) continue;
                 const adds = parts[0] === "-" ? 0 : Number(parts[0]) || 0;
                 const dels = parts[1] === "-" ? 0 : Number(parts[1]) || 0;
-                const path = parts[2].trim();
+                const path = normalizeGitOutputPath(parts[2]);
                 if (!path) continue;
                 const entry = upsert(path);
                 const updated = { ...entry, additions: adds, deletions: dels };
@@ -943,7 +959,7 @@ export class GitOps {
             const oursCode = entry.charAt(0);
             const theirsCode = entry.charAt(1);
             const code = `${oursCode}${theirsCode}`;
-            const path = entry.slice(3);
+            const path = normalizeGitOutputPath(entry.slice(3));
             if (!path) continue;
 
             const isRenameOrCopy =
@@ -1028,7 +1044,7 @@ function mapProjectComparisonStatus(code: string): ProjectComparisonFile["status
 }
 
 function normalizeNumstatPath(rawPath: string): string {
-    const pathText = rawPath.trim();
+    const pathText = decodeGitQuotedPath(rawPath.trim());
     const braceRename = pathText.match(/^(.*)\{(.+)\s=>\s(.+)\}(.*)$/);
     if (braceRename) {
         return `${braceRename[1] ?? ""}${braceRename[3] ?? ""}${braceRename[4] ?? ""}`;

@@ -3,6 +3,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
 import type { GitOps } from "../git/operations";
+import { decodeGitQuotedPath } from "../git/pathEncoding";
 import { getErrorMessage, isUntrackedPathspecError } from "./errors";
 
 /**
@@ -11,13 +12,14 @@ import { getErrorMessage, isUntrackedPathspecError } from "./errors";
  * Returns the normalized relative path or throws.
  */
 export function assertRepoRelativePath(filePath: string): string {
-    if (!filePath || path.isAbsolute(filePath)) {
+    const decodedPath = decodeGitQuotedPath(filePath);
+    if (!decodedPath || path.isAbsolute(decodedPath)) {
         throw new Error(`Rejected non-relative path: ${filePath}`);
     }
-    if (filePath.includes("\0") || filePath.includes("\r") || filePath.includes("\n")) {
+    if (decodedPath.includes("\0") || decodedPath.includes("\r") || decodedPath.includes("\n")) {
         throw new Error(`Rejected path containing control characters: ${filePath}`);
     }
-    const normalized = path.normalize(filePath);
+    const normalized = path.normalize(decodedPath);
     if (normalized === ".") {
         throw new Error(`Rejected repo root path: ${filePath}`);
     }

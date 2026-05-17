@@ -8,6 +8,6 @@ export class GitExecutor {
     }
 
     async run(args: string[]): Promise<string> {
-        return this.git.raw(args);
+        return this.git.raw(["-c", "core.quotepath=false", ...args]);
     }
 }

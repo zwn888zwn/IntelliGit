@@ -33,7 +33,24 @@ describe("core utilities", () => {
 
         expect(out).toBe("ok");
         expect(simpleGit).toHaveBeenCalledWith("/tmp/repo", { maxConcurrentProcesses: 6 });
-        expect(raw).toHaveBeenCalledWith(["status", "--short"]);
+        expect(raw).toHaveBeenCalledWith([
+            "-c",
+            "core.quotepath=false",
+            "status",
+            "--short",
+        ]);
+    });
+
+    it("decodes git quoted UTF-8 paths", async () => {
+        const { decodeGitQuotedPath } = await import("../../src/git/pathEncoding");
+
+        expect(
+            decodeGitQuotedPath('"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"'),
+        ).toBe("docs/新文件.txt");
+        expect(decodeGitQuotedPath('"docs/name with spaces.txt"')).toBe(
+            "docs/name with spaces.txt",
+        );
+        expect(decodeGitQuotedPath("docs/plain.txt")).toBe("docs/plain.txt");
     });
 
     it("deleteFileWithFallback uses git rm success path", async () => {
@@ -149,6 +166,9 @@ describe("core utilities", () => {
         expect(assertRepoRelativePath("..env")).toBe("..env");
         expect(assertRepoRelativePath("..foo/bar.ts")).toBe("..foo/bar.ts");
         expect(assertRepoRelativePath(".config/file.ts")).toBe(".config/file.ts");
+        expect(
+            assertRepoRelativePath('"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"'),
+        ).toBe("docs/新文件.txt");
 
         // Traversal — rejected
         expect(() => assertRepoRelativePath("../etc/passwd")).toThrow("escaping repo root");
