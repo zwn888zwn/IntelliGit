@@ -2,9 +2,10 @@
 
 import React, { act, useRef } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { Branch, Commit } from "../../src/types";
+import type { Branch, Commit, RepositoryContextInfo } from "../../src/types";
 import { BranchColumn } from "../../src/webviews/react/BranchColumn";
 import { CommitList } from "../../src/webviews/react/CommitList";
+import { BranchPopupOverlay } from "../../src/webviews/react/branch-column/components/BranchPopupOverlay";
 import { CommitRow } from "../../src/webviews/react/commit-list/CommitRow";
 import { useDragResize } from "../../src/webviews/react/commit-panel/hooks/useDragResize";
 import { ContextMenu } from "../../src/webviews/react/shared/components/ContextMenu";
@@ -23,6 +24,117 @@ vi.mock("../../src/webviews/react/shared/vscodeApi", () => ({
 initReactDomTestEnvironment();
 
 describe("low coverage components", () => {
+    it("BranchPopupOverlay keeps the current repository list stable while opening repository submenus", async () => {
+        const repositories: RepositoryContextInfo[] = [
+            {
+                repoId: "pic",
+                name: "PicMath",
+                root: "/repos/PicMath",
+                color: "#ff5722",
+            },
+            {
+                repoId: "ios",
+                name: "IosLatex",
+                root: "/repos/IosLatex",
+                color: "#8bc34a",
+            },
+        ];
+        const currentBranches: Branch[] = [
+            {
+                name: "pic-current",
+                hash: "abc1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const iosBranches: Branch[] = [
+            {
+                name: "ios-current",
+                hash: "def5678",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "ios-other",
+                hash: "9876def",
+                isRemote: false,
+                isCurrent: false,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const onOpenBranchMenu = vi.fn();
+        const { root, container } = mount(
+            <BranchPopupOverlay
+                branches={currentBranches}
+                repositories={repositories}
+                repository={repositories[0]}
+                repositoryBranches={{
+                    [repositories[0].root]: currentBranches,
+                    [repositories[1].root]: iosBranches,
+                }}
+                onTopAction={vi.fn()}
+                onOpenBranchMenu={onOpenBranchMenu}
+                onClose={vi.fn()}
+            />,
+        );
+
+        const iosRow = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.includes("IosLatex"),
+        ) as HTMLElement;
+        expect(iosRow).toBeTruthy();
+
+        act(() => {
+            iosRow.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+        });
+        await flush();
+        expect(document.body.textContent).not.toContain("Recent Branches in IosLatex");
+
+        act(() => {
+            iosRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        await flush();
+
+        expect(document.body.textContent).toContain("Recent Branches in PicMath");
+        expect(document.body.textContent).toContain("Recent Branches in IosLatex");
+        expect(document.body.textContent).toContain("pic-current");
+        expect(document.body.textContent).toContain("ios-current");
+        expect(document.body.textContent).toContain("ios-other");
+
+        const iosCurrent = Array.from(document.querySelectorAll("button")).filter(
+            (button) => button.textContent?.includes("ios-current"),
+        ).at(-1) as HTMLElement;
+        expect(iosCurrent.getAttribute("data-selected")).toBe("true");
+
+        const iosOther = Array.from(document.querySelectorAll("button")).filter(
+            (button) => button.textContent?.includes("ios-other"),
+        ).at(-1) as HTMLElement;
+        act(() => {
+            iosOther.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+        });
+        await flush();
+        expect(iosCurrent.getAttribute("data-selected")).toBe("false");
+        expect(iosOther.getAttribute("data-selected")).toBe("true");
+
+        const iosBranch = Array.from(document.querySelectorAll("button")).filter(
+            (button) => button.textContent?.includes("ios-current"),
+        ).at(-1) as HTMLElement;
+        act(() => {
+            iosBranch.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onOpenBranchMenu).toHaveBeenCalledWith(
+            iosBranches[0],
+            "/repos/IosLatex",
+            expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+        );
+
+        unmount(root, container);
+    });
+
     it("useDragResize updates and clamps height", () => {
         const onResize = vi.fn();
         function Harness(): React.ReactElement {
@@ -253,7 +365,7 @@ describe("low coverage components", () => {
         act(() => {
             rename.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main");
+        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main", undefined);
 
         const searchInput = container.querySelector(
             'input[placeholder="Search branches"]',

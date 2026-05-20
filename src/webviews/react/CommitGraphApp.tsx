@@ -18,6 +18,7 @@ import type {
 } from "../../types";
 import type {
     BranchAction,
+    BranchPopupAction,
     CommitAction,
     CommitGraphOutbound,
     CommitGraphInbound,
@@ -97,6 +98,7 @@ function useColumnDrag(
 function App(): React.ReactElement {
     const [commits, setCommits] = useState<Commit[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
+    const [repositoryBranches, setRepositoryBranches] = useState<Record<string, Branch[]>>({});
     const [repositories, setRepositories] = useState<RepositoryContextInfo[]>([]);
     const [repository, setRepository] = useState<RepositoryContextInfo | null>(null);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
@@ -119,6 +121,7 @@ function App(): React.ReactElement {
     const [branchFolderIconsByName, setBranchFolderIconsByName] = useState<
         ThemeFolderIconMap | undefined
     >(undefined);
+    const [branchPopupRequest, setBranchPopupRequest] = useState<{ seq: number } | null>(null);
     const [iconFonts, setIconFonts] = useState<ThemeIconFont[]>([]);
     const [branchWidth, setBranchWidth] = useState(() => {
         try {
@@ -211,11 +214,17 @@ function App(): React.ReactElement {
                 case "setRepositories":
                     setRepositories(data.repositories);
                     break;
+                case "setRepositoryBranches":
+                    setRepositoryBranches(data.branchesByRoot);
+                    break;
                 case "setSelectedBranch":
                     setSelectedBranch(data.branch ?? null);
                     break;
                 case "setFilterText":
                     setFilterText(data.text);
+                    break;
+                case "openBranchPopup":
+                    setBranchPopupRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1 }));
                     break;
                 case "setCommitDetail":
                     setSelectedDetail(data.detail);
@@ -289,8 +298,12 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "filterBranch", branch: name });
     }, []);
 
-    const handleBranchAction = useCallback((action: BranchAction, branchName: string) => {
-        vscode.postMessage({ type: "branchAction", action, branchName });
+    const handleBranchAction = useCallback((action: BranchAction, branchName: string, repoRoot?: string) => {
+        vscode.postMessage({ type: "branchAction", action, branchName, repoRoot });
+    }, []);
+
+    const handleBranchPopupAction = useCallback((action: BranchPopupAction, root?: string) => {
+        vscode.postMessage({ type: "branchPopupAction", action, root });
     }, []);
 
     const handleCommitAction = useCallback((action: CommitAction, hash: string) => {
@@ -316,9 +329,14 @@ function App(): React.ReactElement {
                 <div style={{ width: branchWidth, flexShrink: 0, overflow: "hidden" }}>
                     <BranchColumn
                         branches={branches}
+                        repositoryBranches={repositoryBranches}
+                        repositories={repositories}
+                        repository={repository}
                         selectedBranch={selectedBranch}
+                        openPopupRequest={branchPopupRequest}
                         onSelectBranch={handleSelectBranch}
                         onBranchAction={handleBranchAction}
+                        onBranchPopupAction={handleBranchPopupAction}
                         folderIcon={branchFolderIcon}
                         folderExpandedIcon={branchFolderExpandedIcon}
                         folderIconsByName={branchFolderIconsByName}

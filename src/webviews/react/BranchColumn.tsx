@@ -3,14 +3,15 @@
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import type { Branch, ThemeFolderIconMap, ThemeTreeIcon } from "../../types";
-import { isBranchAction, type BranchAction } from "./commitGraphTypes";
+import type { Branch, RepositoryContextInfo, ThemeFolderIconMap, ThemeTreeIcon } from "../../types";
+import { isBranchAction, type BranchAction, type BranchPopupAction } from "./commitGraphTypes";
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getBranchMenuItems } from "./branch-column/menu";
 import { buildPrefixTree, buildRemoteGroups } from "./branch-column/treeModel";
 import { BranchTreeNodeRow } from "./branch-column/components/BranchTreeNodeRow";
 import { BranchSectionHeader } from "./branch-column/components/BranchSectionHeader";
 import { BranchSearchBar } from "./branch-column/components/BranchSearchBar";
+import { BranchPopupOverlay } from "./branch-column/components/BranchPopupOverlay";
 import { RepoIcon, TagRightIcon } from "./branch-column/icons";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import {
@@ -26,9 +27,14 @@ import {
 
 interface Props {
     branches: Branch[];
+    repositoryBranches: Record<string, Branch[]>;
+    repositories: RepositoryContextInfo[];
+    repository: RepositoryContextInfo | null;
     selectedBranch: string | null;
+    openPopupRequest?: { seq: number } | null;
     onSelectBranch: (name: string | null) => void;
-    onBranchAction: (action: BranchAction, branchName: string) => void;
+    onBranchAction: (action: BranchAction, branchName: string, repoRoot?: string) => void;
+    onBranchPopupAction: (action: BranchPopupAction, root?: string) => void;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
@@ -99,9 +105,14 @@ function computeAnchorPosition(
 
 export function BranchColumn({
     branches,
+    repositoryBranches,
+    repositories,
+    repository,
     selectedBranch,
+    openPopupRequest,
     onSelectBranch,
     onBranchAction,
+    onBranchPopupAction,
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
@@ -123,7 +134,9 @@ export function BranchColumn({
         x: number;
         y: number;
         branch: Branch;
+        repoRoot?: string;
     } | null>(null);
+    const [branchPopupOpen, setBranchPopupOpen] = useState(false);
 
     const filterNeedle = branchFilter.trim().toLowerCase();
     const actualCurrent = useMemo(() => branches.find((b) => b.isCurrent), [branches]);
@@ -175,7 +188,7 @@ export function BranchColumn({
         (action: string) => {
             if (!contextMenu) return;
             if (!isBranchAction(action)) return;
-            onBranchAction(action, contextMenu.branch.name);
+            onBranchAction(action, contextMenu.branch.name, contextMenu.repoRoot);
         },
         [contextMenu, onBranchAction],
     );
@@ -189,6 +202,11 @@ export function BranchColumn({
             expandedFolders: Array.from(expandedFolders),
         });
     }, [branchFilter, expandedSections, expandedFolders]);
+
+    useEffect(() => {
+        if (!openPopupRequest) return;
+        setBranchPopupOpen(true);
+    }, [openPopupRequest]);
 
     return (
         <div style={PANEL_STYLE}>
@@ -316,6 +334,23 @@ export function BranchColumn({
                     minWidth={310}
                     onSelect={handleContextMenuAction}
                     onClose={closeContextMenu}
+                />
+            )}
+
+            {branchPopupOpen && (
+                <BranchPopupOverlay
+                    branches={branches}
+                    repositories={repositories}
+                    repository={repository}
+                    repositoryBranches={repositoryBranches}
+                    onTopAction={(action, root) => {
+                        setBranchPopupOpen(false);
+                        onBranchPopupAction(action, root);
+                    }}
+                    onOpenBranchMenu={(branch, repoRoot, anchor) => {
+                        setContextMenu({ branch, repoRoot, x: anchor.x, y: anchor.y });
+                    }}
+                    onClose={() => setBranchPopupOpen(false)}
                 />
             )}
         </div>

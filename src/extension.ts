@@ -16,6 +16,7 @@ import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
 import { createBranchCommands } from "./commands/branchCommands";
+import { BranchStatusBarController } from "./commands/branchPopup";
 import { RefreshService } from "./services/refreshService";
 import {
     openJetBrainsMergeToolForFile,
@@ -111,6 +112,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         (root) => repositoryService.listRepositories().find((entry) => entry.root === root) ?? null,
     );
     const commitInfo = new CommitInfoViewProvider(context.extensionUri);
+    const branchStatusBar = new BranchStatusBarController();
     const commitPanel = new CommitPanelViewProvider(
         context.extensionUri,
         gitOps,
@@ -445,6 +447,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!repository) {
             currentBranches = [];
             currentCommitDetail = null;
+            branchStatusBar.update(null, currentBranches);
             commitDiffNavigationsByUri.clear();
             commitGraph.setBranches([]);
             await commitGraph.refresh({ reset: true });
@@ -456,6 +459,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
 
         currentBranches = await repository.gitOps.getBranches();
+        branchStatusBar.update(repository, currentBranches);
         commitGraph.setBranches(currentBranches);
         await commitGraph.refresh({ reset: options.resetGraph ?? true });
         await commitPanel.refresh();
@@ -497,6 +501,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             mergeConflictsView,
             onBranchesUpdated: (branches) => {
                 currentBranches = branches;
+                branchStatusBar.update(getCurrentRepository(), currentBranches);
             },
         },
         repositoryService.listRepositories().map((entry) => entry.root),
@@ -593,11 +598,84 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Forward branch actions from webview context menu to VS Code commands
     context.subscriptions.push(
-        commitGraph.onBranchAction(({ action, branchName }) => {
-            const branch = currentBranches.find((b) => b.name === branchName);
+        commitGraph.onBranchAction(async ({ action, branchName, repoRoot }) => {
+            const targetRepository =
+                (repoRoot
+                    ? repositoryService.listRepositories().find((entry) => entry.root === repoRoot)
+                    : null) ?? getCurrentRepository();
+            if (!targetRepository) return;
+            const branches =
+                targetRepository.root === getCurrentRepository()?.root
+                    ? currentBranches
+                    : await targetRepository.gitOps.getBranches();
+            const branch = branches.find((b) => b.name === branchName);
             if (!branch) return;
+            if (targetRepository.root !== getCurrentRepository()?.root) {
+                repositoryService.switchRepository(targetRepository.root);
+                await applyCurrentRepositoryContext({ resetGraph: true });
+            }
             const item: { branch: Branch } = { branch };
-            vscode.commands.executeCommand(`intelligit.${action}`, item);
+            await vscode.commands.executeCommand(`intelligit.${action}`, item);
+        }),
+    );
+
+    context.subscriptions.push(
+        commitGraph.onBranchPopupAction(async ({ action, root }) => {
+            const targetRepository =
+                (root
+                    ? repositoryService.listRepositories().find((entry) => entry.root === root)
+                    : null) ?? getCurrentRepository();
+            if (targetRepository && targetRepository.root !== getCurrentRepository()?.root) {
+                repositoryService.switchRepository(targetRepository.root);
+                await applyCurrentRepositoryContext({ resetGraph: true });
+            }
+            const currentBranch = currentBranches.find((branch) => branch.isCurrent && !branch.isRemote);
+            switch (action) {
+                case "switchRepository":
+                    return;
+                case "commit":
+                    await vscode.commands.executeCommand("intelligit.commitPanel.focus");
+                    return;
+                case "checkoutRevision": {
+                    const revision = await vscode.window.showInputBox({
+                        prompt: "Checkout tag, branch, or revision",
+                        placeHolder: "tag, branch, or commit hash",
+                        ignoreFocusOut: true,
+                    });
+                    const trimmed = revision?.trim();
+                    if (!trimmed) return;
+                    try {
+                        await executor.run(["checkout", trimmed]);
+                        vscode.window.showInformationMessage(`Checked out ${trimmed}`);
+                        await vscode.commands.executeCommand("intelligit.refresh");
+                    } catch (error) {
+                        const message = getErrorMessage(error);
+                        vscode.window.showErrorMessage(`Checkout failed: ${message}`);
+                    }
+                    return;
+                }
+                case "updateProject":
+                    if (currentBranch) {
+                        await vscode.commands.executeCommand("intelligit.updateBranch", {
+                            branch: currentBranch,
+                        });
+                    }
+                    return;
+                case "push":
+                    if (currentBranch) {
+                        await vscode.commands.executeCommand("intelligit.pushBranch", {
+                            branch: currentBranch,
+                        });
+                    }
+                    return;
+                case "newBranch":
+                    if (currentBranch) {
+                        await vscode.commands.executeCommand("intelligit.newBranchFrom", {
+                            branch: currentBranch,
+                        });
+                    }
+                    return;
+            }
         }),
     );
 
@@ -732,6 +810,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             await repositoryService.refreshRepositories();
             const nextRoot = repositoryService.getCurrentRepository()?.root ?? null;
             await applyCurrentRepositoryContext({ resetGraph: previousRoot !== nextRoot });
+        }),
+
+        vscode.commands.registerCommand("intelligit.showBranchPopup", async () => {
+            await vscode.commands.executeCommand("intelligit.commitGraph.focus");
+            commitGraph.openBranchPopup();
         }),
 
         vscode.commands.registerCommand("intelligit.annotateWithGitBlame", async () => {
@@ -1154,6 +1237,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         refreshService,
+        branchStatusBar,
         blameController,
         commitGraph,
         commitInfo,

@@ -23,6 +23,15 @@ export const BRANCH_ACTION_VALUES = [
     "deleteBranch",
 ] as const;
 
+export const BRANCH_POPUP_ACTION_VALUES = [
+    "updateProject",
+    "commit",
+    "push",
+    "newBranch",
+    "checkoutRevision",
+    "switchRepository",
+] as const;
+
 export const COMMIT_ACTION_VALUES = [
     "copyRevision",
     "createPatch",
@@ -40,6 +49,7 @@ export const COMMIT_ACTION_VALUES = [
 ] as const;
 
 export type BranchAction = (typeof BRANCH_ACTION_VALUES)[number];
+export type BranchPopupAction = (typeof BRANCH_POPUP_ACTION_VALUES)[number];
 export type CommitAction = (typeof COMMIT_ACTION_VALUES)[number];
 
 export function isBranchAction(value: string): value is BranchAction {
@@ -57,7 +67,8 @@ export type CommitGraphOutbound =
     | { type: "filterText"; text: string }
     | { type: "loadMore" }
     | { type: "filterBranch"; branch: string | null }
-    | { type: "branchAction"; action: BranchAction; branchName: string }
+    | { type: "branchAction"; action: BranchAction; branchName: string; repoRoot?: string }
+    | { type: "branchPopupAction"; action: BranchPopupAction; root?: string }
     | { type: "commitAction"; action: CommitAction; hash: string; repoRoot: string }
     | { type: "openCommitFileDiff"; commitHash: string; filePath: string; repoRoot: string };
 
@@ -79,9 +90,11 @@ export type CommitGraphInbound =
           iconFonts?: ThemeIconFont[];
       }
     | { type: "setRepositories"; repositories: RepositoryContextInfo[] }
+    | { type: "setRepositoryBranches"; branchesByRoot: Record<string, Branch[]> }
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "setSelectedBranch"; branch: string | null }
     | { type: "setFilterText"; text: string }
+    | { type: "openBranchPopup" }
     | {
           type: "setCommitDetail";
           detail: CommitDetail;

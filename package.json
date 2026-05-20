@@ -116,6 +116,12 @@
                 "icon": "$(refresh)"
             },
             {
+                "command": "intelligit.showBranchPopup",
+                "title": "Branches...",
+                "category": "IntelliGit",
+                "icon": "$(git-branch)"
+            },
+            {
                 "command": "intelligit.checkout",
                 "title": "Checkout",
                 "category": "IntelliGit"

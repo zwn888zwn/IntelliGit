@@ -13,6 +13,7 @@ import type {
 } from "../types";
 import type {
     BranchAction,
+    BranchPopupAction,
     CommitAction,
     CommitGraphOutbound,
     CommitGraphInbound,
@@ -37,6 +38,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private loadingMore = false;
     private webviewReady = false;
     private pendingRevealHash: string | null = null;
+    private pendingBranchPopup = false;
     private requestSeq = 0;
     private readonly PAGE_SIZE = 500;
     private repository: RepositoryContextInfo | null = null;
@@ -59,8 +61,15 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private readonly _onBranchAction = new vscode.EventEmitter<{
         action: BranchAction;
         branchName: string;
+        repoRoot?: string;
     }>();
     readonly onBranchAction = this._onBranchAction.event;
+
+    private readonly _onBranchPopupAction = new vscode.EventEmitter<{
+        action: BranchPopupAction;
+        root?: string;
+    }>();
+    readonly onBranchPopupAction = this._onBranchPopupAction.event;
 
     private readonly _onCommitAction = new vscode.EventEmitter<{
         action: CommitAction;
@@ -127,6 +136,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                             this.pendingRevealHash = null;
                             await this.revealCommit(hash);
                         }
+                        if (this.pendingBranchPopup) {
+                            this.pendingBranchPopup = false;
+                            this.postToWebview({ type: "openBranchPopup" });
+                        }
                         break;
                     case "selectCommit":
                         if (msg.repoRoot) {
@@ -153,6 +166,13 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         this._onBranchAction.fire({
                             action: msg.action,
                             branchName: msg.branchName,
+                            repoRoot: msg.repoRoot,
+                        });
+                        break;
+                    case "branchPopupAction":
+                        this._onBranchPopupAction.fire({
+                            action: msg.action,
+                            root: msg.root,
                         });
                         break;
                     case "commitAction":
@@ -198,6 +218,15 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             const message = getErrorMessage(err);
             vscode.window.showErrorMessage(`Branch update error: ${message}`);
         });
+    }
+
+    openBranchPopup(): void {
+        if (!this.webviewReady) {
+            this.pendingBranchPopup = true;
+            return;
+        }
+
+        this.postToWebview({ type: "openBranchPopup" });
     }
 
     setRepositoryContext(repository: RepositoryContextInfo | null): void {
@@ -337,12 +366,24 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async sendBranches(): Promise<void> {
+        const repositories = this.getRepositories();
+        const branchesByRoot: Record<string, Branch[]> = {};
+        await Promise.all(
+            repositories.map(async (entry) => {
+                if (entry.root === this.repository?.root) {
+                    branchesByRoot[entry.root] = this.branches;
+                    return;
+                }
+                branchesByRoot[entry.root] = await entry.gitOps.getBranches().catch(() => []);
+            }),
+        );
         this.branchFolderIconsByName = await this.iconTheme.getFolderIconsByBranches(this.branches);
         const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
         this.postToWebview({
             type: "setRepositories",
-            repositories: this.getRepositories().map((entry) => entry.info),
+            repositories: repositories.map((entry) => entry.info),
         });
+        this.postToWebview({ type: "setRepositoryBranches", branchesByRoot });
         this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.postToWebview({
             type: "setBranches",

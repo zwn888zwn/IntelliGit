@@ -26,6 +26,30 @@ const writeFile = vi.fn(async () => undefined);
 const fsStat = vi.fn(async () => ({ type: 1, ctime: 0, mtime: 0, size: 1 }));
 const clipboardWriteText = vi.fn(async () => undefined);
 const createOutputChannel = vi.fn(() => ({ appendLine: vi.fn() }));
+const createdStatusBarItems: Array<{
+    text?: string;
+    tooltip?: string;
+    command?: string;
+    name?: string;
+    accessibilityInformation?: unknown;
+    show: ReturnType<typeof vi.fn>;
+    hide: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn>;
+}> = [];
+const createStatusBarItem = vi.fn(() => {
+    const item = {
+        text: "",
+        tooltip: "",
+        command: "",
+        name: "",
+        accessibilityInformation: undefined,
+        show: vi.fn(),
+        hide: vi.fn(),
+        dispose: vi.fn(),
+    };
+    createdStatusBarItems.push(item);
+    return item;
+});
 const withProgress = vi.fn(
     async (
         _options: unknown,
@@ -233,6 +257,10 @@ class MockCommitGraphViewProvider {
     private commitSelectedEmitter = new MockEventEmitter<string>();
     private branchFilterEmitter = new MockEventEmitter<string | null>();
     private branchActionEmitter = new MockEventEmitter<{ action: string; branchName: string }>();
+    private branchPopupActionEmitter = new MockEventEmitter<{
+        action: string;
+        root?: string;
+    }>();
     private commitActionEmitter = new MockEventEmitter<{
         action: string;
         hash: string;
@@ -249,6 +277,7 @@ class MockCommitGraphViewProvider {
     onCommitSelected = this.commitSelectedEmitter.event;
     onBranchFilterChanged = this.branchFilterEmitter.event;
     onBranchAction = this.branchActionEmitter.event;
+    onBranchPopupAction = this.branchPopupActionEmitter.event;
     onCommitAction = this.commitActionEmitter.event;
     onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
     setBranches = vi.fn();
@@ -256,6 +285,7 @@ class MockCommitGraphViewProvider {
     refresh = vi.fn(async () => undefined);
     filterByBranch = vi.fn(async () => undefined);
     revealCommit = vi.fn(async () => undefined);
+    openBranchPopup = vi.fn();
     setCommitDetail = vi.fn();
     clearCommitDetail = vi.fn();
     dispose = vi.fn();
@@ -268,6 +298,9 @@ class MockCommitGraphViewProvider {
     }
     emitBranchAction(payload: { action: string; branchName: string }): void {
         this.branchActionEmitter.fire(payload);
+    }
+    emitBranchPopupAction(payload: { action: string; root?: string }): void {
+        this.branchPopupActionEmitter.fire(payload);
     }
     emitCommitAction(payload: { action: string; hash: string }): void {
         this.commitActionEmitter.fire(payload);
@@ -349,6 +382,8 @@ vi.mock("vscode", () => ({
     TreeItem: class {
         constructor(_label: string, _state?: unknown) {}
     },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+    QuickPickItemKind: { Separator: -1 },
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     ViewColumn: { Active: -1, One: 1, Two: 2, Three: 3 },
     ProgressLocation: { Notification: 15 },
@@ -455,6 +490,7 @@ vi.mock("vscode", () => ({
         showSaveDialog,
         showQuickPick,
         showTextDocument,
+        createStatusBarItem,
         createTerminal,
         createOutputChannel,
         withProgress,
@@ -677,6 +713,7 @@ describe("extension integration", () => {
         latestCommitPanelProvider = undefined;
         latestBlameController = undefined;
         latestWebviewPanel = undefined;
+        createdStatusBarItems.length = 0;
         openTextDocument.mockImplementation(async (arg: unknown) => ({
             uri: arg,
             languageId: "typescript",
@@ -811,6 +848,7 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
         expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
         expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
+        expect(registeredCommands.has("intelligit.showBranchPopup")).toBe(true);
         expect(registeredCommands.has("intelligit.previousDiffChange")).toBe(true);
         expect(registeredCommands.has("intelligit.previousDiffChangeUnavailable")).toBe(true);
         expect(registeredCommands.has("intelligit.nextDiffChange")).toBe(true);
@@ -825,6 +863,18 @@ describe("extension integration", () => {
             if (!cmd) throw new Error(`Missing command registration: ${id}`);
             return cmd;
         }
+
+        expect(createStatusBarItem).toHaveBeenCalledWith(1, 100);
+        expect(createdStatusBarItems[0]?.command).toBe("intelligit.showBranchPopup");
+        expect(createdStatusBarItems[0]?.text).toContain("main");
+        expect(createdStatusBarItems[0]?.text).not.toContain("chevron-down");
+        expect(createdStatusBarItems[0]?.text).not.toContain("↗");
+        expect(createdStatusBarItems[0]?.text).not.toContain("↙");
+        expect(createdStatusBarItems[0]?.show).toHaveBeenCalled();
+
+        await getCommand("intelligit.showBranchPopup")();
+        expect(executeCommandFallback).toHaveBeenCalledWith("intelligit.commitGraph.focus");
+        expect(latestCommitGraphProvider!.openBranchPopup).toHaveBeenCalled();
 
         await getCommand("intelligit.refresh")();
         await getCommand("intelligit.filterByBranch")("main");
