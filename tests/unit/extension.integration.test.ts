@@ -1025,6 +1025,77 @@ describe("extension integration", () => {
         );
     });
 
+    it("updates current local branch by fetching and merging FETCH_HEAD", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await registeredCommands.get("intelligit.updateBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true },
+        });
+
+        expect(executorRun).toHaveBeenCalledWith([
+            "fetch",
+            "origin",
+            "main",
+            "--recurse-submodules=no",
+            "--progress",
+            "--prune",
+        ]);
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--no-ff", "--no-edit", "FETCH_HEAD"]);
+        expect(executorRun).not.toHaveBeenCalledWith(["pull", "--ff-only"]);
+    });
+
+    it("opens conflict session when current branch update merge has conflicts", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (
+                args[0] === "merge" &&
+                args[1] === "--no-ff" &&
+                args[2] === "--no-edit" &&
+                args[3] === "FETCH_HEAD"
+            ) {
+                throw new Error("merge conflict");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([
+            {
+                path: "src/conflicted.ts",
+                code: "UU",
+                ours: "Modified",
+                theirs: "Modified",
+            },
+        ]);
+
+        await registeredCommands.get("intelligit.updateBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true },
+        });
+
+        const vscode = await import("vscode");
+        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
+        expect(createWebviewPanelMock).toHaveBeenCalledWith(
+            "intelligit.mergeConflictSession",
+            "Conflicts",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Update produced 1 unresolved conflict file. Opened Conflicts session.",
+        );
+        expect(showInformationMessage).not.toHaveBeenCalledWith("Updated main");
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
     it("opens conflict session when merge fails with unresolved conflicts", async () => {
         const { activate } = await import("../../src/extension");
         const context = {

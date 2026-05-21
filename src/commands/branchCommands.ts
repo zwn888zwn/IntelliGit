@@ -182,18 +182,42 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 const name = branch?.name;
                 if (!name || branch?.isRemote) return;
                 try {
+                    let openedConflictSession = false;
                     await runWithNotificationProgress(`Updating ${name}...`, async () => {
                         const tracked = resolveTrackedRemoteBranch(branch, getCurrentBranches());
                         if (branch.isCurrent) {
-                            if (tracked) {
-                                await executor.run([
-                                    "pull",
-                                    "--ff-only",
-                                    tracked.remote,
-                                    tracked.remoteBranch,
-                                ]);
-                            } else {
-                                await executor.run(["pull", "--ff-only"]);
+                            if (!tracked) {
+                                throw new Error(`No tracked remote branch configured for '${name}'.`);
+                            }
+                            await executor.run([
+                                "fetch",
+                                tracked.remote,
+                                tracked.remoteBranch,
+                                "--recurse-submodules=no",
+                                "--progress",
+                                "--prune",
+                            ]);
+                            try {
+                                await executor.run(["merge", "--no-ff", "--no-edit", "FETCH_HEAD"]);
+                            } catch (err) {
+                                try {
+                                    const conflicts = await gitOps.getConflictFilesDetailed();
+                                    if (conflicts.length > 0) {
+                                        await openConflictSession({
+                                            sourceBranch: `${tracked.remote}/${tracked.remoteBranch}`,
+                                            targetBranch: getCurrentBranchName() || undefined,
+                                        });
+                                        await refreshConflictUi();
+                                        vscode.window.showWarningMessage(
+                                            `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
+                                        );
+                                        openedConflictSession = true;
+                                        return;
+                                    }
+                                } catch {
+                                    // Fall back to the update error if conflict inspection/session launch fails.
+                                }
+                                throw err;
                             }
                             return;
                         }
@@ -211,6 +235,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                             "--prune",
                         ]);
                     });
+                    if (openedConflictSession) return;
                     vscode.window.showInformationMessage(`Updated ${name}`);
                     await vscode.commands.executeCommand("intelligit.refresh");
                 } catch (err) {
