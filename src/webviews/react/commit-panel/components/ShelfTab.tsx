@@ -10,7 +10,8 @@ import { getVsCodeApi } from "../hooks/useVsCodeApi";
 import type { StashEntry, ThemeFolderIconMap, ThemeTreeIcon, WorkingFile } from "../../../../types";
 import { useFileTree, collectAllDirPaths } from "../hooks/useFileTree";
 import type { TreeEntry } from "../types";
-import { getLeafName, resolveFolderIcon } from "../../shared/utils";
+import { TEST_FILE_ROW_BACKGROUND } from "../../shared/tokens";
+import { getLeafName, isTestFilePath, resolveFolderIcon } from "../../shared/utils";
 
 interface Props {
     stashes: StashEntry[];
@@ -381,6 +382,9 @@ function ShelfFileTree({
             {entries.map((entry) => {
                 if (entry.type === "file") {
                     const fileName = getLeafName(entry.file.path);
+                    const rowBackground = isTestFilePath(entry.file.path)
+                        ? TEST_FILE_ROW_BACKGROUND
+                        : undefined;
                     return (
                         <Flex
                             key={entry.file.path}
@@ -392,6 +396,7 @@ function ShelfFileTree({
                             fontSize="12px"
                             fontFamily={SYSTEM_FONT_STACK}
                             cursor="pointer"
+                            bg={rowBackground}
                             _hover={{ bg: "var(--vscode-list-hoverBackground)" }}
                             onClick={() => onFileClick(entry.file.path)}
                             title={entry.file.path}

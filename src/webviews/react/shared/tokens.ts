@@ -22,6 +22,8 @@ export const GIT_STATUS_COLORS: Record<string, string> = {
     T: "var(--vscode-gitDecoration-modifiedResourceForeground, #d19a66)",
 };
 
+export const TEST_FILE_ROW_BACKGROUND = "rgba(80, 140, 88, 0.26)";
+
 export const GIT_STATUS_LABELS: Record<string, string> = {
     M: "Modified",
     A: "Added",

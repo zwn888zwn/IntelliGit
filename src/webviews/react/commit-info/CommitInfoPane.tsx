@@ -7,7 +7,8 @@ import { FileTypeIcon } from "../commit-panel/components/FileTypeIcon";
 import { StatusBadge } from "../commit-panel/components/StatusBadge";
 import { useDragResize } from "../commit-panel/hooks/useDragResize";
 import { RefTypeIcon, TreeFolderIcon } from "../shared/components";
-import { getLeafName, resolveFolderIcon, splitCommitRefs } from "../shared/utils";
+import { TEST_FILE_ROW_BACKGROUND } from "../shared/tokens";
+import { getLeafName, isTestFilePath, resolveFolderIcon, splitCommitRefs } from "../shared/utils";
 import {
     buildFileTree,
     collectDirPaths,
@@ -486,6 +487,7 @@ const CommitFileRow = React.memo(function CommitFileRow({
 }): React.ReactElement {
     const padLeft = INFO_INDENT_BASE + depth * INFO_INDENT_STEP;
     const fileName = getLeafName(file.path);
+    const rowBackground = isTestFilePath(file.path) ? TEST_FILE_ROW_BACKGROUND : undefined;
     const rowRef = useRef<HTMLDivElement>(null);
 
     const openDiff = useCallback(() => {
@@ -543,7 +545,7 @@ const CommitFileRow = React.memo(function CommitFileRow({
             tabIndex={0}
             role="treeitem"
             aria-selected={isSelected}
-            bg={isSelected ? "var(--vscode-list-activeSelectionBackground)" : undefined}
+            bg={isSelected ? "var(--vscode-list-activeSelectionBackground)" : rowBackground}
             color={isSelected ? "var(--vscode-list-activeSelectionForeground)" : undefined}
             _hover={{
                 bg: isSelected

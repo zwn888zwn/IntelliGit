@@ -7,8 +7,8 @@ import { buildFileTree, collectDirPaths, countFiles, type TreeEntry } from "../s
 import { ThemeIconFontFaces, TreeFileIcon, TreeFolderIcon } from "../shared/components";
 import { StatusBadge } from "../commit-panel/components/StatusBadge";
 import { SYSTEM_FONT_STACK } from "../../../utils/constants";
-import { GIT_STATUS_COLORS } from "../shared/tokens";
-import { getLeafName, getParentPath, resolveFolderIcon } from "../shared/utils";
+import { GIT_STATUS_COLORS, TEST_FILE_ROW_BACKGROUND } from "../shared/tokens";
+import { getLeafName, getParentPath, isTestFilePath, resolveFolderIcon } from "../shared/utils";
 import type { ProjectComparisonFile } from "../../../types";
 import type {
     ProjectComparisonInbound,
@@ -354,6 +354,7 @@ function ComparisonFileRow({
     const fileName = getLeafName(file.path);
     const dir = getParentPath(file.path);
     const statusColor = GIT_STATUS_COLORS[file.status] ?? "var(--vscode-foreground)";
+    const rowBackground = isTestFilePath(file.path) ? TEST_FILE_ROW_BACKGROUND : undefined;
 
     return (
         <Flex
@@ -368,7 +369,7 @@ function ComparisonFileRow({
             cursor="pointer"
             role="treeitem"
             aria-selected={isActive}
-            bg={isActive ? "var(--vscode-list-activeSelectionBackground)" : undefined}
+            bg={isActive ? "var(--vscode-list-activeSelectionBackground)" : rowBackground}
             color={isActive ? "var(--vscode-list-activeSelectionForeground)" : undefined}
             title={file.oldPath && file.oldPath !== file.path ? `${file.oldPath} -> ${file.path}` : file.path}
             _hover={{

@@ -13,6 +13,7 @@ import {
 } from "../../src/webviews/react/commitGraphTypes";
 import { getCommitMenuItems } from "../../src/webviews/react/commit-list/commitMenu";
 import { buildFileTree, collectDirPaths, countFiles } from "../../src/webviews/react/shared/fileTree";
+import { isTestFilePath } from "../../src/webviews/react/shared/utils";
 
 function makeBranch(overrides: Partial<Branch> = {}): Branch {
     return {
@@ -244,5 +245,17 @@ describe("shared file tree helpers", () => {
             "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/service",
         ]);
         expect(countFiles(compactTree)).toBe(2);
+    });
+});
+
+describe("shared path helpers", () => {
+    it("detects common test file names", () => {
+        expect(isTestFilePath("Admin/click_sta_client_version_test.go")).toBe(true);
+        expect(isTestFilePath("src/button.test.tsx")).toBe(true);
+        expect(isTestFilePath("src/button.spec.ts")).toBe(true);
+        expect(isTestFilePath("tests/api_test.py")).toBe(true);
+        expect(isTestFilePath("tests/test_api.py")).toBe(true);
+        expect(isTestFilePath("src/tree_token_sta.go")).toBe(false);
+        expect(isTestFilePath("src/contest_rules.ts")).toBe(false);
     });
 });

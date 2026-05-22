@@ -9,7 +9,8 @@ import { FileTypeIcon } from "./FileTypeIcon";
 import { StatusBadge } from "./StatusBadge";
 import { IndentGuides, INDENT_BASE, INDENT_STEP } from "./IndentGuides";
 import type { WorkingFile } from "../../../../types";
-import { getLeafName, getParentPath } from "../../shared/utils";
+import { TEST_FILE_ROW_BACKGROUND } from "../../shared/tokens";
+import { getLeafName, getParentPath, isTestFilePath } from "../../shared/utils";
 
 interface Props {
     file: WorkingFile;
@@ -33,6 +34,7 @@ function FileRowInner({
     const padLeft = INDENT_BASE + depth * INDENT_STEP;
     const fileName = getLeafName(file.path);
     const dir = getParentPath(file.path);
+    const rowBackground = isTestFilePath(file.path) ? TEST_FILE_ROW_BACKGROUND : undefined;
 
     return (
         <Flex
@@ -48,7 +50,7 @@ function FileRowInner({
             position="relative"
             role="treeitem"
             aria-selected={isActive}
-            bg={isActive ? "var(--vscode-list-activeSelectionBackground)" : undefined}
+            bg={isActive ? "var(--vscode-list-activeSelectionBackground)" : rowBackground}
             color={isActive ? "var(--vscode-list-activeSelectionForeground)" : undefined}
             _hover={{
                 bg: isActive

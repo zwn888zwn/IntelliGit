@@ -12,3 +12,15 @@ export function getParentPath(path: string): string {
     if (parts.length <= 1) return "";
     return parts.slice(0, -1).join("/");
 }
+
+export function isTestFilePath(path: string): boolean {
+    const leaf = getLeafName(path).toLowerCase();
+    return (
+        leaf.includes("_test.") ||
+        leaf.startsWith("test_") ||
+        leaf.includes(".test.") ||
+        leaf.includes(".spec.") ||
+        leaf.endsWith(".test") ||
+        leaf.endsWith(".spec")
+    );
+}
