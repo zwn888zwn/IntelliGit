@@ -184,7 +184,10 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 try {
                     let openedConflictSession = false;
                     await runWithNotificationProgress(`Updating ${name}...`, async () => {
-                        const tracked = resolveTrackedRemoteBranch(branch, getCurrentBranches());
+                        const branchSnapshot = getCurrentBranches();
+                        const branchesForTracking =
+                            branchSnapshot.length > 0 ? branchSnapshot : await gitOps.getBranches();
+                        const tracked = resolveTrackedRemoteBranch(branch, branchesForTracking);
                         if (branch.isCurrent) {
                             if (!tracked) {
                                 throw new Error(`No tracked remote branch configured for '${name}'.`);

@@ -45,6 +45,7 @@ import {
     createRepositoryScopedExecutor,
     createRepositoryScopedGitOps,
 } from "./services/RepositoryContextService";
+import { checkoutBranch, isValidBranchName } from "./services/gitHelpers";
 import {
     hasAdjacentHunk,
     parseChangedNewFileHunks,
@@ -598,7 +599,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // Forward branch actions from webview context menu to VS Code commands
     context.subscriptions.push(
-        commitGraph.onBranchAction(async ({ action, branchName, repoRoot }) => {
+        commitGraph.onBranchAction(async ({ action, branchName, repoRoot, allRepositories }) => {
+            if (allRepositories) {
+                if (action === "checkout") {
+                    await checkoutBranchInAllRepositories(branchName);
+                }
+                return;
+            }
             const targetRepository =
                 (repoRoot
                     ? repositoryService.listRepositories().find((entry) => entry.root === repoRoot)
@@ -620,7 +627,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
 
     context.subscriptions.push(
-        commitGraph.onBranchPopupAction(async ({ action, root }) => {
+        commitGraph.onBranchPopupAction(async ({ action, root, refName, allRepositories }) => {
             const targetRepository =
                 (root
                     ? repositoryService.listRepositories().find((entry) => entry.root === root)
@@ -637,11 +644,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     await vscode.commands.executeCommand("intelligit.commitPanel.focus");
                     return;
                 case "checkoutRevision": {
-                    const revision = await vscode.window.showInputBox({
-                        prompt: "Checkout tag, branch, or revision",
-                        placeHolder: "tag, branch, or commit hash",
-                        ignoreFocusOut: true,
-                    });
+                    if (allRepositories && refName) {
+                        await checkoutRefInAllRepositories(refName);
+                        return;
+                    }
+                    const revision =
+                        refName ??
+                        (await vscode.window.showInputBox({
+                            prompt: "Checkout tag, branch, or revision",
+                            placeHolder: "tag, branch, or commit hash",
+                            ignoreFocusOut: true,
+                        }));
                     const trimmed = revision?.trim();
                     if (!trimmed) return;
                     try {
@@ -669,11 +682,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     }
                     return;
                 case "newBranch":
-                    if (currentBranch) {
-                        await vscode.commands.executeCommand("intelligit.newBranchFrom", {
-                            branch: currentBranch,
-                        });
-                    }
+                    await createBranchFromPopup(targetRepository);
                     return;
             }
         }),
@@ -755,6 +764,134 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         commitGraph.clearCommitDetail();
         commitInfo.clear();
         currentCommitDetail = null;
+    };
+
+    const checkoutBranchInAllRepositories = async (branchName: string): Promise<void> => {
+        const repositories = repositoryService.listRepositories();
+        const targets: Array<{ repository: (typeof repositories)[number]; branch: Branch; branches: Branch[] }> = [];
+        for (const repository of repositories) {
+            const branches =
+                repository.root === getCurrentRepository()?.root
+                    ? currentBranches
+                    : await repository.gitOps.getBranches();
+            const branch = branches.find((item) => item.name === branchName);
+            if (!branch) {
+                vscode.window.showErrorMessage(
+                    `Checkout failed: '${branchName}' does not exist in ${repository.info.name}.`,
+                );
+                return;
+            }
+            targets.push({ repository, branch, branches });
+        }
+
+        try {
+            await runWithNotificationProgress(`Checking out ${branchName} in all repositories...`, async () => {
+                for (const target of targets) {
+                    await checkoutBranch(target.branch, target.branches, target.repository.executor);
+                }
+            });
+            vscode.window.showInformationMessage(
+                `Checked out ${branchName} in ${targets.length} repositories.`,
+            );
+            await vscode.commands.executeCommand("intelligit.refresh");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Checkout failed: ${message}`);
+        }
+    };
+
+    const checkoutRefInAllRepositories = async (refName: string): Promise<void> => {
+        const repositories = repositoryService.listRepositories();
+        for (const repository of repositories) {
+            try {
+                await repository.executor.run(["show-ref", "--verify", `refs/tags/${refName}`]);
+            } catch {
+                vscode.window.showErrorMessage(
+                    `Checkout failed: tag '${refName}' does not exist in ${repository.info.name}.`,
+                );
+                return;
+            }
+        }
+        try {
+            await runWithNotificationProgress(`Checking out ${refName} in all repositories...`, async () => {
+                for (const repository of repositories) {
+                    await repository.executor.run(["checkout", refName]);
+                }
+            });
+            vscode.window.showInformationMessage(
+                `Checked out ${refName} in ${repositories.length} repositories.`,
+            );
+            await vscode.commands.executeCommand("intelligit.refresh");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Checkout failed: ${message}`);
+        }
+    };
+
+    const createBranchFromPopup = async (
+        preferredRepository: ReturnType<typeof getCurrentRepository>,
+    ): Promise<void> => {
+        const repositories = repositoryService.listRepositories();
+        let selectedRoots: string[] | null = preferredRepository ? [preferredRepository.root] : null;
+        if (repositories.length > 1) {
+            const picked = await vscode.window.showQuickPick(
+                [
+                    {
+                        label: "All",
+                        description: "Create and checkout in every repository",
+                        roots: repositories.map((repository) => repository.root),
+                    },
+                    ...repositories.map((repository) => ({
+                        label: repository.info.name,
+                        description: repository.info.relativePath ?? repository.info.root,
+                        roots: [repository.root],
+                    })),
+                ],
+                { placeHolder: "Select repository root", ignoreFocusOut: true },
+            );
+            if (!picked) return;
+            selectedRoots = picked.roots;
+        }
+
+        const branchName = await vscode.window.showInputBox({
+            prompt: "New branch from current branch",
+            placeHolder: "branch-name",
+            ignoreFocusOut: true,
+        });
+        const trimmed = branchName?.trim();
+        if (!trimmed) return;
+        if (!isValidBranchName(trimmed)) {
+            vscode.window.showErrorMessage(
+                `Invalid branch name '${trimmed}'. Names must contain only alphanumeric characters, dots, dashes, underscores, or slashes, and must not start with a dash.`,
+            );
+            return;
+        }
+
+        const roots = selectedRoots ?? repositories.map((repository) => repository.root);
+        const targets = repositories.filter((repository) => roots.includes(repository.root));
+        for (const repository of targets) {
+            const branches = await repository.gitOps.getBranches();
+            if (branches.some((branch) => !branch.isRemote && branch.name === trimmed)) {
+                vscode.window.showErrorMessage(
+                    `Failed to create branch: '${trimmed}' already exists in ${repository.info.name}.`,
+                );
+                return;
+            }
+        }
+        try {
+            await runWithNotificationProgress(`Creating ${trimmed}...`, async () => {
+                for (const repository of targets) {
+                    await repository.executor.run(["checkout", "-b", trimmed]);
+                }
+            });
+            vscode.window.showInformationMessage(
+                `Created and checked out ${trimmed} in ${targets.length} repository${targets.length === 1 ? "" : "s"}.`,
+            );
+            await vscode.commands.executeCommand("intelligit.refresh");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to create branch: ${message}`);
+        }
     };
 
     // --- Commands ---

@@ -9,6 +9,11 @@ export interface Branch {
     behind: number;
 }
 
+export interface GitTag {
+    name: string;
+    hash: string;
+}
+
 export interface RepositoryContextInfo {
     repoId: string;
     name: string;

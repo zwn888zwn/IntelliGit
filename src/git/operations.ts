@@ -11,6 +11,7 @@ import type {
     WorkingFile,
     StashEntry,
     MergeConflictFile,
+    GitTag,
 } from "../types";
 import { getErrorMessage, isUntrackedPathspecError, sanitizeErrorMessage } from "../utils/errors";
 
@@ -160,6 +161,22 @@ export class GitOps {
             });
         }
         return branches;
+    }
+
+    async getTags(): Promise<GitTag[]> {
+        const format = "%(refname:short)\t%(objectname:short)";
+        const result = await this.executor.run(["tag", "--list", `--format=${format}`]);
+        return result
+            .trim()
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => {
+                const [name, hash = ""] = line.split("\t");
+                return { name, hash };
+            })
+            .filter((tag) => !!tag.name)
+            .sort((a, b) => a.name.localeCompare(b.name));
     }
 
     async getLog(

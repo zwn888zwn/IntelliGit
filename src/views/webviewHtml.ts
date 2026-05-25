@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { randomBytes } from "crypto";
 import { SYSTEM_FONT_STACK } from "../utils/constants";
 
 interface WebviewShellOptions {
@@ -56,8 +57,10 @@ ${styleLinks ? `${styleLinks}\n` : ""}
 
 function createNonce(): string {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
+    const bytes =
+        typeof globalThis.crypto?.getRandomValues === "function"
+            ? globalThis.crypto.getRandomValues(new Uint8Array(32))
+            : randomBytes(32);
     let r = "";
     for (let i = 0; i < 32; i++) r += chars.charAt(bytes[i] % chars.length);
     return r;

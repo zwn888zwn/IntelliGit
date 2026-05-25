@@ -11,6 +11,7 @@ import type {
     Branch,
     Commit,
     CommitDetail,
+    GitTag,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -99,6 +100,7 @@ function App(): React.ReactElement {
     const [commits, setCommits] = useState<Commit[]>([]);
     const [branches, setBranches] = useState<Branch[]>([]);
     const [repositoryBranches, setRepositoryBranches] = useState<Record<string, Branch[]>>({});
+    const [repositoryTags, setRepositoryTags] = useState<Record<string, GitTag[]>>({});
     const [repositories, setRepositories] = useState<RepositoryContextInfo[]>([]);
     const [repository, setRepository] = useState<RepositoryContextInfo | null>(null);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
@@ -217,6 +219,9 @@ function App(): React.ReactElement {
                 case "setRepositoryBranches":
                     setRepositoryBranches(data.branchesByRoot);
                     break;
+                case "setRepositoryTags":
+                    setRepositoryTags(data.tagsByRoot);
+                    break;
                 case "setSelectedBranch":
                     setSelectedBranch(data.branch ?? null);
                     break;
@@ -298,13 +303,27 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "filterBranch", branch: name });
     }, []);
 
-    const handleBranchAction = useCallback((action: BranchAction, branchName: string, repoRoot?: string) => {
-        vscode.postMessage({ type: "branchAction", action, branchName, repoRoot });
+    const handleBranchAction = useCallback((
+        action: BranchAction,
+        branchName: string,
+        repoRoot?: string,
+        allRepositories?: boolean,
+    ) => {
+        vscode.postMessage({ type: "branchAction", action, branchName, repoRoot, allRepositories });
     }, []);
 
-    const handleBranchPopupAction = useCallback((action: BranchPopupAction, root?: string) => {
-        vscode.postMessage({ type: "branchPopupAction", action, root });
-    }, []);
+    const handleBranchPopupAction = useCallback(
+        (action: BranchPopupAction, root?: string, refName?: string, allRepositories?: boolean) => {
+            vscode.postMessage({
+                type: "branchPopupAction",
+                action,
+                root,
+                refName,
+                allRepositories,
+            });
+        },
+        [],
+    );
 
     const handleCommitAction = useCallback((action: CommitAction, hash: string) => {
         const commit = commits.find((item) => item.hash === hash);
@@ -330,6 +349,7 @@ function App(): React.ReactElement {
                     <BranchColumn
                         branches={branches}
                         repositoryBranches={repositoryBranches}
+                        repositoryTags={repositoryTags}
                         repositories={repositories}
                         repository={repository}
                         selectedBranch={selectedBranch}

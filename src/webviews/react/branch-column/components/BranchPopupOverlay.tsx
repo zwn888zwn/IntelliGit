@@ -9,10 +9,12 @@ import {
     LuPlus,
     LuSearch,
 } from "react-icons/lu";
-import type { Branch, RepositoryContextInfo } from "../../../../types";
+import type { Branch, GitTag, RepositoryContextInfo } from "../../../../types";
 import type { BranchPopupAction } from "../../commitGraphTypes";
 import { GitBranchIcon, StarIcon, TagRightIcon } from "../icons";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
+import { buildPrefixTree, buildRemoteGroups } from "../treeModel";
+import type { TreeNode } from "../types";
 
 const CURRENT_BRANCH_ICON_TEAL = "var(--vscode-charts-green, #7fd4cf)";
 const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
@@ -36,8 +38,19 @@ interface Props {
     repositories: RepositoryContextInfo[];
     repository: RepositoryContextInfo | null;
     repositoryBranches: Record<string, Branch[]>;
-    onTopAction: (action: BranchPopupAction, root?: string) => void;
-    onOpenBranchMenu: (branch: Branch, repoRoot: string, anchor: { x: number; y: number }) => void;
+    repositoryTags: Record<string, GitTag[]>;
+    onTopAction: (
+        action: BranchPopupAction,
+        root?: string,
+        refName?: string,
+        allRepositories?: boolean,
+    ) => void;
+    onOpenBranchMenu: (
+        branch: Branch,
+        repoRoot: string,
+        anchor: { x: number; y: number },
+        options?: { allRepositories?: boolean },
+    ) => void;
     onClose: () => void;
 }
 
@@ -46,6 +59,7 @@ export function BranchPopupOverlay({
     repositories,
     repository,
     repositoryBranches,
+    repositoryTags,
     onTopAction,
     onOpenBranchMenu,
     onClose,
@@ -59,8 +73,42 @@ export function BranchPopupOverlay({
         y: number;
     } | null>(null);
     const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
+    const [expandedCommonSections, setExpandedCommonSections] = useState<Set<string>>(
+        () => new Set(),
+    );
     const filter = query.trim().toLowerCase();
+    const hasMultipleRepositories = repositories.length > 1;
     const current = branches.find((branch) => branch.isCurrent);
+    const commonLocalBranches = useMemo(
+        () =>
+            buildCommonLocalBranches(repositories, repositoryBranches)
+                .filter((branch) => !filter || branch.name.toLowerCase().includes(filter))
+                .sort(sortBranches),
+        [filter, repositories, repositoryBranches],
+    );
+    const commonRemoteBranches = useMemo(
+        () =>
+            buildCommonRemoteBranches(repositories, repositoryBranches)
+                .filter((branch) => !filter || branch.name.toLowerCase().includes(filter))
+                .sort(sortBranches),
+        [filter, repositories, repositoryBranches],
+    );
+    const commonTags = useMemo(
+        () =>
+            buildCommonTags(repositories, repositoryTags).filter(
+                (tag) => !filter || tag.name.toLowerCase().includes(filter),
+            ),
+        [filter, repositories, repositoryTags],
+    );
+    const commonLocalTree = useMemo(
+        () => buildPrefixTree(commonLocalBranches),
+        [commonLocalBranches],
+    );
+    const commonRemoteGroups = useMemo(
+        () => buildRemoteGroups(commonRemoteBranches),
+        [commonRemoteBranches],
+    );
+    const commonTagTree = useMemo(() => buildTagTree(commonTags), [commonTags]);
 
     const locals = useMemo(
         () =>
@@ -124,6 +172,19 @@ export function BranchPopupOverlay({
         });
     };
 
+    const openCommonBranchMenu = (event: React.MouseEvent<HTMLElement>, branch: Branch): void => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        onOpenBranchMenu(
+            branch,
+            repository?.root ?? "",
+            {
+                x: Math.min(rect.right - 8, window.innerWidth - 330),
+                y: rect.top + 1,
+            },
+            { allRepositories: true },
+        );
+    };
+
     const openRepositorySubmenu = (
         event: React.MouseEvent<HTMLElement>,
         repo: RepositoryContextInfo,
@@ -142,6 +203,15 @@ export function BranchPopupOverlay({
             ) {
                 return previous;
             }
+            return next;
+        });
+    };
+
+    const toggleCommonSection = (key: string): void => {
+        setExpandedCommonSections((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
             return next;
         });
     };
@@ -204,7 +274,7 @@ export function BranchPopupOverlay({
                 onClick={() => onTopAction("checkoutRevision", repository?.root)}
             />
 
-            {repositories.length > 1 && (
+            {hasMultipleRepositories && (
                 <>
                     <Separator />
                     {repositories.map((repo) => {
@@ -231,40 +301,105 @@ export function BranchPopupOverlay({
                 </>
             )}
 
-            <Separator />
-            <SectionTitle label={`Recent Branches${repository ? ` in ${repository.name}` : ""}`} />
-            {recent.map((branch) => {
-                const rowKey = `recent-${branch.name}`;
-                return (
-                    <BranchPopupRow
-                        key={rowKey}
-                        branch={branch}
-                        selected={activeRowKey ? activeRowKey === rowKey : branch.isCurrent}
-                        onHover={() => setActiveRowKey(rowKey)}
-                        onClick={openBranchMenu}
-                    />
-                );
-            })}
-
-            <SectionTitle label={`Local Branches${repository ? ` in ${repository.name}` : ""}`} collapsed />
-            {locals.map((branch) => {
-                const rowKey = `local-${branch.name}`;
-                return (
-                    <BranchPopupRow
-                        key={rowKey}
-                        branch={branch}
-                        selected={activeRowKey ? activeRowKey === rowKey : branch.isCurrent}
-                        onHover={() => setActiveRowKey(rowKey)}
-                        onClick={openBranchMenu}
-                    />
-                );
-            })}
-
-            {remotes.length > 0 && (
+            {(commonLocalBranches.length > 0 ||
+                commonRemoteBranches.length > 0 ||
+                commonTags.length > 0) && (
                 <>
-                    <SectionTitle label={`Remote Branches${repository ? ` in ${repository.name}` : ""}`} collapsed />
-                    {remotes.map((branch) => {
-                        const rowKey = `remote-${branch.name}`;
+                    <Separator />
+                    {commonLocalBranches.length > 0 && (
+                        <>
+                            <ExpandableSectionTitle
+                                label="Common Local Branches"
+                                expanded={expandedCommonSections.has("local")}
+                                onToggle={() => toggleCommonSection("local")}
+                            />
+                            {expandedCommonSections.has("local") && (
+                                <PopupTreeRows
+                                    nodes={commonLocalTree}
+                                    depth={1}
+                                    prefix="common-local"
+                                    activeRowKey={activeRowKey}
+                                    expandedFolders={expandedCommonSections}
+                                    onHover={setActiveRowKey}
+                                    onToggleFolder={toggleCommonSection}
+                                    onBranchClick={openCommonBranchMenu}
+                                />
+                            )}
+                        </>
+                    )}
+                    {commonRemoteBranches.length > 0 && (
+                        <>
+                            <ExpandableSectionTitle
+                                label="Common Remote Branches"
+                                expanded={expandedCommonSections.has("remote")}
+                                onToggle={() => toggleCommonSection("remote")}
+                            />
+                            {expandedCommonSections.has("remote") &&
+                                Array.from(commonRemoteGroups.entries()).map(([remote, group]) => {
+                                    const remoteKey = `common-remote/${remote}`;
+                                    return (
+                                        <div key={remoteKey}>
+                                            <PopupFolderRow
+                                                label={remote}
+                                                depth={1}
+                                                folderKey={remoteKey}
+                                                expandedFolders={expandedCommonSections}
+                                                onToggleFolder={toggleCommonSection}
+                                            />
+                                            {expandedCommonSections.has(remoteKey) && (
+                                                <PopupTreeRows
+                                                    nodes={group.tree}
+                                                    depth={2}
+                                                    prefix={remoteKey}
+                                                    activeRowKey={activeRowKey}
+                                                    expandedFolders={expandedCommonSections}
+                                                    onHover={setActiveRowKey}
+                                                    onToggleFolder={toggleCommonSection}
+                                                    onBranchClick={openCommonBranchMenu}
+                                                />
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                        </>
+                    )}
+                    {commonTags.length > 0 && (
+                        <>
+                            <ExpandableSectionTitle
+                                label="Common Tags"
+                                expanded={expandedCommonSections.has("tags")}
+                                onToggle={() => toggleCommonSection("tags")}
+                            />
+                            {expandedCommonSections.has("tags") && (
+                                <TagTreeRows
+                                    nodes={commonTagTree}
+                                    depth={1}
+                                    prefix="common-tags"
+                                    expandedFolders={expandedCommonSections}
+                                    onToggleFolder={toggleCommonSection}
+                                    onCheckoutTag={(tag) =>
+                                        onTopAction(
+                                            "checkoutRevision",
+                                            undefined,
+                                            tag.name,
+                                            true,
+                                        )
+                                    }
+                                />
+                            )}
+                        </>
+                    )}
+                </>
+            )}
+
+            {!hasMultipleRepositories && (
+                <>
+                    <Separator />
+                    <SectionTitle
+                        label={`Recent Branches${repository ? ` in ${repository.name}` : ""}`}
+                    />
+                    {recent.map((branch) => {
+                        const rowKey = `recent-${branch.name}`;
                         return (
                             <BranchPopupRow
                                 key={rowKey}
@@ -275,6 +410,48 @@ export function BranchPopupOverlay({
                             />
                         );
                     })}
+
+                    <SectionTitle
+                        label={`Local Branches${repository ? ` in ${repository.name}` : ""}`}
+                        collapsed
+                    />
+                    {locals.map((branch) => {
+                        const rowKey = `local-${branch.name}`;
+                        return (
+                            <BranchPopupRow
+                                key={rowKey}
+                                branch={branch}
+                                selected={activeRowKey ? activeRowKey === rowKey : branch.isCurrent}
+                                onHover={() => setActiveRowKey(rowKey)}
+                                onClick={openBranchMenu}
+                            />
+                        );
+                    })}
+
+                    {remotes.length > 0 && (
+                        <>
+                            <SectionTitle
+                                label={`Remote Branches${repository ? ` in ${repository.name}` : ""}`}
+                                collapsed
+                            />
+                            {remotes.map((branch) => {
+                                const rowKey = `remote-${branch.name}`;
+                                return (
+                                    <BranchPopupRow
+                                        key={rowKey}
+                                        branch={branch}
+                                        selected={
+                                            activeRowKey
+                                                ? activeRowKey === rowKey
+                                                : branch.isCurrent
+                                        }
+                                        onHover={() => setActiveRowKey(rowKey)}
+                                        onClick={openBranchMenu}
+                                    />
+                                );
+                            })}
+                        </>
+                    )}
                 </>
             )}
             {repositorySubmenu && (
@@ -282,6 +459,7 @@ export function BranchPopupOverlay({
                     ref={repositorySubmenuRef}
                     repository={repositorySubmenu.repository}
                     branches={repositoryBranches[repositorySubmenu.repository.root] ?? []}
+                    tags={repositoryTags[repositorySubmenu.repository.root] ?? []}
                     x={repositorySubmenu.x}
                     y={repositorySubmenu.y}
                     onTopAction={onTopAction}
@@ -413,11 +591,13 @@ function BranchPopupRow({
     selected,
     onHover,
     onClick,
+    paddingLeft = 42,
 }: {
     branch: Branch;
     selected: boolean;
     onHover: () => void;
     onClick: (event: React.MouseEvent<HTMLElement>, branch: Branch) => void;
+    paddingLeft?: number;
 }): React.ReactElement {
     const shortName = branch.name.replace(/^.*\//, "");
     const mainLike = shortName === "main" || shortName === "master";
@@ -428,7 +608,7 @@ function BranchPopupRow({
             data-selected={selected ? "true" : "false"}
             onMouseEnter={onHover}
             onClick={(event) => onClick(event, branch)}
-            style={rowButtonStyle(42)}
+            style={rowButtonStyle(paddingLeft)}
         >
             {branch.isCurrent ? (
                 <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
@@ -454,21 +634,36 @@ const RepositorySubmenu = React.forwardRef<
     {
         repository: RepositoryContextInfo;
         branches: Branch[];
+        tags: GitTag[];
         x: number;
         y: number;
-        onTopAction: (action: BranchPopupAction, root?: string) => void;
+        onTopAction: (
+            action: BranchPopupAction,
+            root?: string,
+            refName?: string,
+            allRepositories?: boolean,
+        ) => void;
         onOpenBranchMenu: (branch: Branch, repoRoot: string, anchor: { x: number; y: number }) => void;
     }
 >(function RepositorySubmenu(
-    { repository, branches, x, y, onTopAction, onOpenBranchMenu },
+    { repository, branches, tags, x, y, onTopAction, onOpenBranchMenu },
     ref,
 ): React.ReactElement {
     const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
+    const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
+    const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
     const current = branches.find((branch) => branch.isCurrent);
     const locals = useMemo(
         () => branches.filter((branch) => !branch.isRemote).sort(sortBranches),
         [branches],
     );
+    const remotes = useMemo(
+        () => branches.filter((branch) => branch.isRemote).sort(sortBranches),
+        [branches],
+    );
+    const localTree = useMemo(() => buildPrefixTree(locals), [locals]);
+    const remoteGroups = useMemo(() => buildRemoteGroups(remotes), [remotes]);
+    const tagTree = useMemo(() => buildTagTree(tags), [tags]);
     const recent = useMemo(() => {
         const result: Branch[] = [];
         if (current) result.push(current);
@@ -485,6 +680,24 @@ const RepositorySubmenu = React.forwardRef<
         onOpenBranchMenu(branch, repository.root, {
             x: Math.max(8, Math.min(rect.right + 8, window.innerWidth - 330)),
             y: rect.top + 1,
+        });
+    };
+
+    const toggleSection = (key: string): void => {
+        setExpandedSections((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    };
+
+    const toggleFolder = (key: string): void => {
+        setExpandedFolders((prev) => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
         });
     };
 
@@ -538,9 +751,67 @@ const RepositorySubmenu = React.forwardRef<
                     />
                 );
             })}
-            <SectionTitle label={`Local Branches in ${repository.name}`} collapsed />
-            <SectionTitle label={`Remote Branches in ${repository.name}`} collapsed />
-            <SectionTitle label={`Tags in ${repository.name}`} collapsed />
+            <ExpandableSectionTitle
+                label={`Local Branches in ${repository.name}`}
+                expanded={expandedSections.has("local")}
+                onToggle={() => toggleSection("local")}
+            />
+            {expandedSections.has("local") && (
+                <PopupTreeRows
+                    nodes={localTree}
+                    depth={1}
+                    prefix={`submenu-local-${repository.root}`}
+                    activeRowKey={activeRowKey}
+                    expandedFolders={expandedFolders}
+                    onHover={setActiveRowKey}
+                    onToggleFolder={toggleFolder}
+                    onBranchClick={openBranchMenu}
+                />
+            )}
+            <ExpandableSectionTitle
+                label={`Remote Branches in ${repository.name}`}
+                expanded={expandedSections.has("remote")}
+                onToggle={() => toggleSection("remote")}
+            />
+            {expandedSections.has("remote") &&
+                Array.from(remoteGroups.entries()).map(([remote, group]) => (
+                    <div key={`remote-${remote}`}>
+                        <PopupFolderRow
+                            label={remote}
+                            depth={1}
+                            folderKey={`submenu-remote-${repository.root}/${remote}`}
+                            expandedFolders={expandedFolders}
+                            onToggleFolder={toggleFolder}
+                        />
+                        {expandedFolders.has(`submenu-remote-${repository.root}/${remote}`) && (
+                            <PopupTreeRows
+                                nodes={group.tree}
+                                depth={2}
+                                prefix={`submenu-remote-${repository.root}/${remote}`}
+                                activeRowKey={activeRowKey}
+                                expandedFolders={expandedFolders}
+                                onHover={setActiveRowKey}
+                                onToggleFolder={toggleFolder}
+                                onBranchClick={openBranchMenu}
+                            />
+                        )}
+                    </div>
+                ))}
+            <ExpandableSectionTitle
+                label={`Tags in ${repository.name}`}
+                expanded={expandedSections.has("tags")}
+                onToggle={() => toggleSection("tags")}
+            />
+            {expandedSections.has("tags") && (
+                <TagTreeRows
+                    nodes={tagTree}
+                    depth={1}
+                    prefix={`submenu-tags-${repository.root}`}
+                    expandedFolders={expandedFolders}
+                    onToggleFolder={toggleFolder}
+                    onCheckoutTag={(tag) => onTopAction("checkoutRevision", repository.root, tag.name)}
+                />
+            )}
         </div>
     );
 });
@@ -571,6 +842,190 @@ function SectionTitle({ label, collapsed }: { label: string; collapsed?: boolean
             {collapsed ? <LuChevronRight size={15} /> : <LuChevronDown size={15} />}
             <span>{label}</span>
         </div>
+    );
+}
+
+function ExpandableSectionTitle({
+    label,
+    expanded,
+    onToggle,
+}: {
+    label: string;
+    expanded: boolean;
+    onToggle: () => void;
+}): React.ReactElement {
+    return (
+        <button
+            type="button"
+            className="intelligit-branch-popup-row"
+            data-selected="false"
+            onClick={onToggle}
+            style={{ ...rowButtonStyle(18), fontWeight: 600, opacity: 0.82 }}
+        >
+            {expanded ? <LuChevronDown size={15} /> : <LuChevronRight size={15} />}
+            <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
+        </button>
+    );
+}
+
+function PopupTreeRows({
+    nodes,
+    depth,
+    prefix,
+    activeRowKey,
+    expandedFolders,
+    onHover,
+    onToggleFolder,
+    onBranchClick,
+}: {
+    nodes: TreeNode[];
+    depth: number;
+    prefix: string;
+    activeRowKey: string | null;
+    expandedFolders: Set<string>;
+    onHover: (key: string) => void;
+    onToggleFolder: (key: string) => void;
+    onBranchClick: (event: React.MouseEvent<HTMLElement>, branch: Branch) => void;
+}): React.ReactElement {
+    return (
+        <>
+            {nodes.map((node, index) => {
+                const key = `${prefix}/${node.branch?.name ?? node.label}-${index}`;
+                if (!node.branch) {
+                    const folderKey = `${prefix}/${node.label}`;
+                    return (
+                        <React.Fragment key={key}>
+                            <PopupFolderRow
+                                label={node.label}
+                                depth={depth}
+                                folderKey={folderKey}
+                                expandedFolders={expandedFolders}
+                                onToggleFolder={onToggleFolder}
+                            />
+                            {expandedFolders.has(folderKey) && (
+                                <PopupTreeRows
+                                    nodes={node.children}
+                                    depth={depth + 1}
+                                    prefix={folderKey}
+                                    activeRowKey={activeRowKey}
+                                    expandedFolders={expandedFolders}
+                                    onHover={onHover}
+                                    onToggleFolder={onToggleFolder}
+                                    onBranchClick={onBranchClick}
+                                />
+                            )}
+                        </React.Fragment>
+                    );
+                }
+                return (
+                    <BranchPopupRow
+                        key={key}
+                        branch={node.branch}
+                        selected={activeRowKey === key}
+                        onHover={() => onHover(key)}
+                        onClick={onBranchClick}
+                        paddingLeft={28 + depth * 18}
+                    />
+                );
+            })}
+        </>
+    );
+}
+
+function PopupFolderRow({
+    label,
+    depth,
+    folderKey,
+    expandedFolders,
+    onToggleFolder,
+}: {
+    label: string;
+    depth: number;
+    folderKey: string;
+    expandedFolders: Set<string>;
+    onToggleFolder: (key: string) => void;
+}): React.ReactElement {
+    const expanded = expandedFolders.has(folderKey);
+    return (
+        <button
+            type="button"
+            className="intelligit-branch-popup-row"
+            data-selected="false"
+            onClick={() => onToggleFolder(folderKey)}
+            style={rowButtonStyle(28 + depth * 18)}
+        >
+            {expanded ? <LuChevronDown size={15} /> : <LuChevronRight size={15} />}
+            <span style={{ flex: 1, textAlign: "left", fontWeight: 600 }}>{label}</span>
+        </button>
+    );
+}
+
+interface TagTreeNode {
+    label: string;
+    tag?: GitTag;
+    children: TagTreeNode[];
+}
+
+function TagTreeRows({
+    nodes,
+    depth,
+    prefix,
+    expandedFolders,
+    onToggleFolder,
+    onCheckoutTag,
+}: {
+    nodes: TagTreeNode[];
+    depth: number;
+    prefix: string;
+    expandedFolders: Set<string>;
+    onToggleFolder: (key: string) => void;
+    onCheckoutTag: (tag: GitTag) => void;
+}): React.ReactElement {
+    return (
+        <>
+            {nodes.map((node, index) => {
+                const key = `${prefix}/${node.tag?.name ?? node.label}-${index}`;
+                if (!node.tag) {
+                    return (
+                        <React.Fragment key={key}>
+                            <PopupFolderRow
+                                label={node.label}
+                                depth={depth}
+                                folderKey={key}
+                                expandedFolders={expandedFolders}
+                                onToggleFolder={onToggleFolder}
+                            />
+                            {expandedFolders.has(key) && (
+                                <TagTreeRows
+                                    nodes={node.children}
+                                    depth={depth + 1}
+                                    prefix={key}
+                                    expandedFolders={expandedFolders}
+                                    onToggleFolder={onToggleFolder}
+                                    onCheckoutTag={onCheckoutTag}
+                                />
+                            )}
+                        </React.Fragment>
+                    );
+                }
+                return (
+                    <button
+                        key={key}
+                        type="button"
+                        className="intelligit-branch-popup-row"
+                        data-selected="false"
+                        onClick={() => onCheckoutTag(node.tag!)}
+                        style={rowButtonStyle(28 + depth * 18)}
+                    >
+                        <TagRightIcon color={DEFAULT_BRANCH_ICON_YELLOW} />
+                        <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {node.label}
+                        </span>
+                        <span style={{ opacity: 0.58 }}>{node.tag.hash}</span>
+                    </button>
+                );
+            })}
+        </>
     );
 }
 
@@ -609,4 +1064,94 @@ function rowButtonStyle(paddingLeft: number): React.CSSProperties {
 function sortBranches(a: Branch, b: Branch): number {
     if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
     return a.name.localeCompare(b.name);
+}
+
+function buildCommonLocalBranches(
+    repositories: RepositoryContextInfo[],
+    branchesByRoot: Record<string, Branch[]>,
+): Branch[] {
+    return buildCommonBranches(repositories, branchesByRoot, false);
+}
+
+function buildCommonRemoteBranches(
+    repositories: RepositoryContextInfo[],
+    branchesByRoot: Record<string, Branch[]>,
+): Branch[] {
+    return buildCommonBranches(repositories, branchesByRoot, true);
+}
+
+function buildCommonBranches(
+    repositories: RepositoryContextInfo[],
+    branchesByRoot: Record<string, Branch[]>,
+    isRemote: boolean,
+): Branch[] {
+    if (repositories.length < 2) return [];
+    const localByRoot = repositories.map((repo) =>
+        (branchesByRoot[repo.root] ?? []).filter((branch) => branch.isRemote === isRemote),
+    );
+    if (localByRoot.some((branches) => branches.length === 0)) return [];
+
+    const commonNames = new Set(localByRoot[0].map((branch) => branch.name));
+    for (const branches of localByRoot.slice(1)) {
+        const names = new Set(branches.map((branch) => branch.name));
+        for (const name of Array.from(commonNames)) {
+            if (!names.has(name)) commonNames.delete(name);
+        }
+    }
+
+    return Array.from(commonNames)
+        .map((name) => {
+            const branches = localByRoot.map((items) => items.find((branch) => branch.name === name)!);
+            return {
+                ...branches[0],
+                isCurrent: branches.every((branch) => branch.isCurrent),
+                ahead: branches.reduce((sum, branch) => sum + Math.max(0, branch.ahead), 0),
+                behind: branches.reduce((sum, branch) => sum + Math.max(0, branch.behind), 0),
+            };
+        })
+        .sort(sortBranches);
+}
+
+function buildCommonTags(
+    repositories: RepositoryContextInfo[],
+    tagsByRoot: Record<string, GitTag[]>,
+): GitTag[] {
+    if (repositories.length < 2) return [];
+    const tagsByRepository = repositories.map((repo) => tagsByRoot[repo.root] ?? []);
+    if (tagsByRepository.some((tags) => tags.length === 0)) return [];
+
+    const commonNames = new Set(tagsByRepository[0].map((tag) => tag.name));
+    for (const tags of tagsByRepository.slice(1)) {
+        const names = new Set(tags.map((tag) => tag.name));
+        for (const name of Array.from(commonNames)) {
+            if (!names.has(name)) commonNames.delete(name);
+        }
+    }
+
+    return Array.from(commonNames)
+        .map((name) => tagsByRepository[0].find((tag) => tag.name === name)!)
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildTagTree(tags: GitTag[]): TagTreeNode[] {
+    const root: TagTreeNode[] = [];
+    for (const tag of [...tags].sort((a, b) => a.name.localeCompare(b.name))) {
+        const parts = tag.name.split("/");
+        let current = root;
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            const isLeaf = i === parts.length - 1;
+            if (isLeaf) {
+                current.push({ label: part, tag, children: [] });
+                continue;
+            }
+            let folder = current.find((node) => node.label === part && !node.tag);
+            if (!folder) {
+                folder = { label: part, children: [] };
+                current.push(folder);
+            }
+            current = folder.children;
+        }
+    }
+    return root;
 }

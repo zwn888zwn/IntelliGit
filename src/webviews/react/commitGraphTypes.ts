@@ -5,6 +5,7 @@ import type {
     Branch,
     Commit,
     CommitDetail,
+    GitTag,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -67,8 +68,20 @@ export type CommitGraphOutbound =
     | { type: "filterText"; text: string }
     | { type: "loadMore" }
     | { type: "filterBranch"; branch: string | null }
-    | { type: "branchAction"; action: BranchAction; branchName: string; repoRoot?: string }
-    | { type: "branchPopupAction"; action: BranchPopupAction; root?: string }
+    | {
+          type: "branchAction";
+          action: BranchAction;
+          branchName: string;
+          repoRoot?: string;
+          allRepositories?: boolean;
+      }
+    | {
+          type: "branchPopupAction";
+          action: BranchPopupAction;
+          root?: string;
+          refName?: string;
+          allRepositories?: boolean;
+      }
     | { type: "commitAction"; action: CommitAction; hash: string; repoRoot: string }
     | { type: "openCommitFileDiff"; commitHash: string; filePath: string; repoRoot: string };
 
@@ -91,6 +104,7 @@ export type CommitGraphInbound =
       }
     | { type: "setRepositories"; repositories: RepositoryContextInfo[] }
     | { type: "setRepositoryBranches"; branchesByRoot: Record<string, Branch[]> }
+    | { type: "setRepositoryTags"; tagsByRoot: Record<string, GitTag[]> }
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "setSelectedBranch"; branch: string | null }
     | { type: "setFilterText"; text: string }

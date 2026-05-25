@@ -8,6 +8,7 @@ import type {
     Branch,
     Commit,
     CommitDetail,
+    GitTag,
     RepositoryContextInfo,
     ThemeFolderIconMap,
 } from "../types";
@@ -62,12 +63,15 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         action: BranchAction;
         branchName: string;
         repoRoot?: string;
+        allRepositories?: boolean;
     }>();
     readonly onBranchAction = this._onBranchAction.event;
 
     private readonly _onBranchPopupAction = new vscode.EventEmitter<{
         action: BranchPopupAction;
         root?: string;
+        refName?: string;
+        allRepositories?: boolean;
     }>();
     readonly onBranchPopupAction = this._onBranchPopupAction.event;
 
@@ -167,12 +171,15 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                             action: msg.action,
                             branchName: msg.branchName,
                             repoRoot: msg.repoRoot,
+                            allRepositories: msg.allRepositories,
                         });
                         break;
                     case "branchPopupAction":
                         this._onBranchPopupAction.fire({
                             action: msg.action,
                             root: msg.root,
+                            refName: msg.refName,
+                            allRepositories: msg.allRepositories,
                         });
                         break;
                     case "commitAction":
@@ -368,13 +375,18 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private async sendBranches(): Promise<void> {
         const repositories = this.getRepositories();
         const branchesByRoot: Record<string, Branch[]> = {};
+        const tagsByRoot: Record<string, GitTag[]> = {};
         await Promise.all(
             repositories.map(async (entry) => {
                 if (entry.root === this.repository?.root) {
                     branchesByRoot[entry.root] = this.branches;
-                    return;
+                } else {
+                    branchesByRoot[entry.root] = await entry.gitOps.getBranches().catch(() => []);
                 }
-                branchesByRoot[entry.root] = await entry.gitOps.getBranches().catch(() => []);
+                tagsByRoot[entry.root] =
+                    typeof (entry.gitOps as Partial<GitOps>).getTags === "function"
+                        ? await entry.gitOps.getTags().catch(() => [])
+                        : [];
             }),
         );
         this.branchFolderIconsByName = await this.iconTheme.getFolderIconsByBranches(this.branches);
@@ -384,6 +396,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             repositories: repositories.map((entry) => entry.info),
         });
         this.postToWebview({ type: "setRepositoryBranches", branchesByRoot });
+        this.postToWebview({ type: "setRepositoryTags", tagsByRoot });
         this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.postToWebview({
             type: "setBranches",

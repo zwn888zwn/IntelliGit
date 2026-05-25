@@ -3,7 +3,7 @@
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import type { Branch, RepositoryContextInfo, ThemeFolderIconMap, ThemeTreeIcon } from "../../types";
+import type { Branch, GitTag, RepositoryContextInfo, ThemeFolderIconMap, ThemeTreeIcon } from "../../types";
 import { isBranchAction, type BranchAction, type BranchPopupAction } from "./commitGraphTypes";
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getBranchMenuItems } from "./branch-column/menu";
@@ -28,13 +28,24 @@ import {
 interface Props {
     branches: Branch[];
     repositoryBranches: Record<string, Branch[]>;
+    repositoryTags: Record<string, GitTag[]>;
     repositories: RepositoryContextInfo[];
     repository: RepositoryContextInfo | null;
     selectedBranch: string | null;
     openPopupRequest?: { seq: number } | null;
     onSelectBranch: (name: string | null) => void;
-    onBranchAction: (action: BranchAction, branchName: string, repoRoot?: string) => void;
-    onBranchPopupAction: (action: BranchPopupAction, root?: string) => void;
+    onBranchAction: (
+        action: BranchAction,
+        branchName: string,
+        repoRoot?: string,
+        allRepositories?: boolean,
+    ) => void;
+    onBranchPopupAction: (
+        action: BranchPopupAction,
+        root?: string,
+        refName?: string,
+        allRepositories?: boolean,
+    ) => void;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
@@ -106,6 +117,7 @@ function computeAnchorPosition(
 export function BranchColumn({
     branches,
     repositoryBranches,
+    repositoryTags,
     repositories,
     repository,
     selectedBranch,
@@ -135,6 +147,7 @@ export function BranchColumn({
         y: number;
         branch: Branch;
         repoRoot?: string;
+        allRepositories?: boolean;
     } | null>(null);
     const [branchPopupOpen, setBranchPopupOpen] = useState(false);
 
@@ -188,7 +201,12 @@ export function BranchColumn({
         (action: string) => {
             if (!contextMenu) return;
             if (!isBranchAction(action)) return;
-            onBranchAction(action, contextMenu.branch.name, contextMenu.repoRoot);
+            onBranchAction(
+                action,
+                contextMenu.branch.name,
+                contextMenu.repoRoot,
+                contextMenu.allRepositories,
+            );
         },
         [contextMenu, onBranchAction],
     );
@@ -330,7 +348,11 @@ export function BranchColumn({
                 <ContextMenu
                     x={contextMenu.x}
                     y={contextMenu.y}
-                    items={getBranchMenuItems(contextMenu.branch, actualCurrent?.name ?? "HEAD")}
+                    items={
+                        contextMenu.allRepositories
+                            ? [{ label: "Checkout", action: "checkout" }]
+                            : getBranchMenuItems(contextMenu.branch, actualCurrent?.name ?? "HEAD")
+                    }
                     minWidth={310}
                     onSelect={handleContextMenuAction}
                     onClose={closeContextMenu}
@@ -343,12 +365,19 @@ export function BranchColumn({
                     repositories={repositories}
                     repository={repository}
                     repositoryBranches={repositoryBranches}
-                    onTopAction={(action, root) => {
+                    repositoryTags={repositoryTags}
+                    onTopAction={(action, root, refName, allRepositories) => {
                         setBranchPopupOpen(false);
-                        onBranchPopupAction(action, root);
+                        onBranchPopupAction(action, root, refName, allRepositories);
                     }}
-                    onOpenBranchMenu={(branch, repoRoot, anchor) => {
-                        setContextMenu({ branch, repoRoot, x: anchor.x, y: anchor.y });
+                    onOpenBranchMenu={(branch, repoRoot, anchor, options) => {
+                        setContextMenu({
+                            branch,
+                            repoRoot,
+                            allRepositories: options?.allRepositories,
+                            x: anchor.x,
+                            y: anchor.y,
+                        });
                     }}
                     onClose={() => setBranchPopupOpen(false)}
                 />
