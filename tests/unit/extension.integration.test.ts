@@ -967,11 +967,11 @@ describe("extension integration", () => {
             document: {
                 uri: {
                     scheme: "intelligit-diff-editable",
-                    fsPath: "/__intelligit_text_diff__/1.txt",
-                    path: "/__intelligit_text_diff__/1.txt",
+                    fsPath: "/__intelligit_text_diff__/1/current.ts",
+                    path: "/__intelligit_text_diff__/1/current.ts",
                     query: "ref=working-tree&path=src/current.ts",
                     toString: () =>
-                        "intelligit-diff-editable:/__intelligit_text_diff__/1.txt?ref=working-tree&path=src/current.ts",
+                        "intelligit-diff-editable:/__intelligit_text_diff__/1/current.ts?ref=working-tree&path=src/current.ts",
                 },
             },
             selection: { active: { line: 10, character: 0 } },

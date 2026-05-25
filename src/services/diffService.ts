@@ -50,7 +50,7 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
         const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
-            path: makeTextDiffUriPath(id),
+            path: makeTextDiffUriPath(id, filePath),
             query: new URLSearchParams({
                 ref,
                 id,
@@ -89,7 +89,7 @@ class IntelliGitEditableDiffFileSystemProvider
         const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_EDITABLE_SCHEME,
-            path: makeTextDiffUriPath(id),
+            path: makeTextDiffUriPath(id, filePath),
             query: new URLSearchParams({
                 ref,
                 id,
@@ -104,7 +104,7 @@ class IntelliGitEditableDiffFileSystemProvider
         const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_EDITABLE_SCHEME,
-            path: makeTextDiffUriPath(id),
+            path: makeTextDiffUriPath(id, filePath),
             query: new URLSearchParams({
                 ref: "working-tree",
                 id,
@@ -239,8 +239,18 @@ export function normalizeGitPath(fsPathValue: string): string {
     return fsPathValue.split(path.sep).join("/");
 }
 
-function makeTextDiffUriPath(id: string): string {
-    return `/__intelligit_text_diff__/${id}.txt`;
+function makeTextDiffUriPath(id: string, filePath: string): string {
+    const normalized = normalizeGitPath(filePath);
+    if (shouldUsePlainTextDiffUri(normalized)) {
+        return `/__intelligit_text_diff__/${id}.txt`;
+    }
+    const fileName = path.posix.basename(normalized) || "file.txt";
+    return `/__intelligit_text_diff__/${id}/${fileName}`;
+}
+
+function shouldUsePlainTextDiffUri(filePath: string): boolean {
+    const extension = path.posix.extname(filePath).toLowerCase();
+    return extension === ".md" || isBinaryFilePath(filePath);
 }
 
 export function getRepoRelativeFilePathFromUri(uri: vscode.Uri, repoRoot: string): string | null {

@@ -684,14 +684,14 @@ describe("view providers integration", () => {
             expect.any(Object),
             expect.objectContaining({
                 scheme: "intelligit-diff-editable",
-                path: expect.stringMatching(/\.txt$/),
+                path: expect.stringMatching(/\/a\.ts$/),
                 query: expect.stringContaining("working-tree"),
             }),
             expect.stringContaining("src/a.ts"),
         ]);
         expect(diffCall?.[1]).toEqual(
             expect.objectContaining({
-                path: expect.stringMatching(/\.txt$/),
+                path: expect.stringMatching(/\/a\.ts$/),
                 query: expect.stringContaining("path=src%2Fa.ts"),
             }),
         );
