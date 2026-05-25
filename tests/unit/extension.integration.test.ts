@@ -1045,7 +1045,7 @@ describe("extension integration", () => {
             "--progress",
             "--prune",
         ]);
-        expect(executorRun).toHaveBeenCalledWith(["merge", "--no-ff", "--no-edit", "FETCH_HEAD"]);
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--no-stat", "-v", "--no-edit", "FETCH_HEAD"]);
         expect(executorRun).not.toHaveBeenCalledWith(["pull", "--ff-only"]);
     });
 
@@ -1060,9 +1060,10 @@ describe("extension integration", () => {
         executorRun.mockImplementation(async (args: string[]) => {
             if (
                 args[0] === "merge" &&
-                args[1] === "--no-ff" &&
-                args[2] === "--no-edit" &&
-                args[3] === "FETCH_HEAD"
+                args[1] === "--no-stat" &&
+                args[2] === "-v" &&
+                args[3] === "--no-edit" &&
+                args[4] === "FETCH_HEAD"
             ) {
                 throw new Error("merge conflict");
             }

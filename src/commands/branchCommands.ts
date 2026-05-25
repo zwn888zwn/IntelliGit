@@ -198,7 +198,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                                 "--prune",
                             ]);
                             try {
-                                await executor.run(["merge", "--no-ff", "--no-edit", "FETCH_HEAD"]);
+                                await executor.run(["merge", "--no-stat", "-v", "--no-edit", "FETCH_HEAD"]);
                             } catch (err) {
                                 try {
                                     const conflicts = await gitOps.getConflictFilesDetailed();
