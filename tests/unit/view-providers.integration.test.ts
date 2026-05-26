@@ -67,6 +67,7 @@ const writeFile = vi.fn(async () => undefined);
 let registeredEditableDiffProvider:
     | {
           writeFile?: (uri: unknown, content: Uint8Array) => Promise<void> | void;
+          readFile?: (uri: unknown) => Uint8Array;
       }
     | undefined;
 const postMessageSpy = vi.fn();
@@ -775,6 +776,45 @@ describe("view providers integration", () => {
         );
     });
 
+    it("openCommitFileDiff replaces binary commit content with text placeholders", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async (_filePath: string, ref: string) =>
+                ref === "parent1234" ? "parent\0binary" : "\u0001\u0002commit-binary",
+            ),
+        };
+        const executor = {
+            run: vi.fn(async () => "a1b2c3d4 parent1234"),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "profiles/cpu-hotspot.pprof",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result?.leftUri.path).toMatch(/\.txt$/);
+        expect(result?.rightUri.path).toMatch(/\.txt$/);
+        expect(registeredEditableDiffProvider?.readFile).toBeDefined();
+        const rightContent = Buffer.from(
+            registeredEditableDiffProvider!.readFile!(result!.rightUri),
+        ).toString("utf8");
+        expect(rightContent).toContain("Binary file snapshot is not displayed as text.");
+        expect(rightContent).not.toContain("\0");
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                path: expect.stringMatching(/\.txt$/),
+            }),
+            expect.objectContaining({
+                path: expect.stringMatching(/\.txt$/),
+            }),
+            "profiles/cpu-hotspot.pprof (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
     it("CommitPanelViewProvider opens binary working files as placeholder diffs", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();
@@ -825,6 +865,58 @@ describe("view providers integration", () => {
             expect.any(Object),
             expect.any(Object),
             expect.stringContaining("profiles/cpu.pb.gz"),
+        );
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider avoids editable diffs for binary working tree content", async () => {
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getStatus.mockResolvedValueOnce([
+            {
+                repoRoot: "/repo",
+                path: "profiles/cpu.sample",
+                status: "M",
+                staged: false,
+                additions: 1,
+                deletions: 1,
+            },
+        ]);
+        readFile.mockResolvedValue(Buffer.from([0, 1, 2, 3, 4]));
+        const provider = new CommitPanelViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => ({ fsPath: "/repo", path: "/repo" }) as unknown as { fsPath: string; path: string },
+            () => [
+                {
+                    root: "/repo",
+                    uri: { fsPath: "/repo", path: "/repo" },
+                    info: testRepository,
+                    gitOps,
+                    executor: { run: vi.fn(async () => "") },
+                } as unknown as never,
+            ],
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "profiles/cpu.sample" });
+
+        expect(readFile).toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.any(Object),
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                path: expect.stringMatching(/\.txt$/),
+            }),
+            expect.stringContaining("profiles/cpu.sample"),
         );
         provider.dispose();
     });

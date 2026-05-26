@@ -33,6 +33,7 @@ const BINARY_FILE_EXTENSIONS = new Set([
     ".jpg",
     ".pdf",
     ".png",
+    ".pprof",
     ".so",
     ".tar",
     ".webp",
@@ -46,11 +47,16 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
 
     readonly onDidChange = this.changeEmitter.event;
 
-    createUri(filePath: string, ref: string, content: string): vscode.Uri {
+    createUri(
+        filePath: string,
+        ref: string,
+        content: string,
+        options: { forcePlainTextUri?: boolean } = {},
+    ): vscode.Uri {
         const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
-            path: makeTextDiffUriPath(id, filePath),
+            path: makeTextDiffUriPath(id, filePath, options.forcePlainTextUri),
             query: new URLSearchParams({
                 ref,
                 id,
@@ -85,11 +91,16 @@ class IntelliGitEditableDiffFileSystemProvider
 
     readonly onDidChangeFile = this.changeEmitter.event;
 
-    createUri(filePath: string, ref: string, content: string): vscode.Uri {
+    createUri(
+        filePath: string,
+        ref: string,
+        content: string,
+        options: { forcePlainTextUri?: boolean } = {},
+    ): vscode.Uri {
         const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_EDITABLE_SCHEME,
-            path: makeTextDiffUriPath(id, filePath),
+            path: makeTextDiffUriPath(id, filePath, options.forcePlainTextUri),
             query: new URLSearchParams({
                 ref,
                 id,
@@ -239,9 +250,13 @@ export function normalizeGitPath(fsPathValue: string): string {
     return fsPathValue.split(path.sep).join("/");
 }
 
-function makeTextDiffUriPath(id: string, filePath: string): string {
+function makeTextDiffUriPath(
+    id: string,
+    filePath: string,
+    forcePlainTextUri = false,
+): string {
     const normalized = normalizeGitPath(filePath);
-    if (shouldUsePlainTextDiffUri(normalized)) {
+    if (forcePlainTextUri || shouldUsePlainTextDiffUri(normalized)) {
         return `/__intelligit_text_diff__/${id}.txt`;
     }
     const fileName = path.posix.basename(normalized) || "file.txt";
@@ -355,9 +370,18 @@ export async function openDiffAgainstGitRef(
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
 
-    const refContent = await gitOps.getFileContentAtRef(repoRelativeFilePath, trimmedRef);
+    const refSnapshot = makeTextDiffSnapshot(
+        repoRelativeFilePath,
+        await gitOps.getFileContentAtRef(repoRelativeFilePath, trimmedRef),
+        trimmedRef,
+    );
     const leftDoc = await vscode.workspace.openTextDocument(
-        getDiffContentProvider().createUri(repoRelativeFilePath, trimmedRef, refContent),
+        getDiffContentProvider().createUri(
+            repoRelativeFilePath,
+            trimmedRef,
+            refSnapshot.content,
+            { forcePlainTextUri: refSnapshot.forcePlainTextUri },
+        ),
     );
     const title = `${repoRelativeFilePath} (${sourceLabel}: ${trimmedRef}) <-> Working Tree`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, fileUri, title);
@@ -416,12 +440,18 @@ export async function openCommitFileDiff(
         rightContent = "";
     }
 
+    const leftSnapshot = makeTextDiffSnapshot(safePath, leftContent, parentDisplayHash);
+    const rightSnapshot = makeTextDiffSnapshot(safePath, rightContent, commitHash);
     const diffProvider = getDiffContentProvider();
     const leftDoc = await vscode.workspace.openTextDocument(
-        diffProvider.createUri(safePath, parentRef, leftContent),
+        diffProvider.createUri(safePath, parentRef, leftSnapshot.content, {
+            forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+        }),
     );
     const rightDoc = await vscode.workspace.openTextDocument(
-        getEditableDiffProvider().createUri(safePath, commitHash, rightContent),
+        getEditableDiffProvider().createUri(safePath, commitHash, rightSnapshot.content, {
+            forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+        }),
     );
     const shortParent = parentDisplayHash.slice(0, 8);
     const shortCommit = commitHash.slice(0, 8);
@@ -441,19 +471,34 @@ export async function openBranchComparisonFileDiff(
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
 
-    const leftContent = await gitOps.getFileContentAtRef(leftPath, trimmedRef).catch(() => "");
+    const leftSnapshot = makeTextDiffSnapshot(
+        leftPath,
+        await gitOps.getFileContentAtRef(leftPath, trimmedRef).catch(() => ""),
+        trimmedRef,
+    );
 
     const leftDoc = await vscode.workspace.openTextDocument(
-        getDiffContentProvider().createUri(leftPath, trimmedRef, leftContent),
+        getDiffContentProvider().createUri(leftPath, trimmedRef, leftSnapshot.content, {
+            forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+        }),
     );
 
     let rightUri: vscode.Uri;
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
-    if (file.status !== "D" && (await fileExists(workingTreeUri))) {
+    if (file.status !== "D" && (await fileExists(workingTreeUri)) && !isBinaryFilePath(safePath)) {
         rightUri = workingTreeUri;
     } else {
+        const rightContent =
+            file.status !== "D" && isBinaryFilePath(safePath)
+                ? await readWorkingTreeTextSnapshot(workingTreeUri)
+                : "";
         const rightDoc = await vscode.workspace.openTextDocument(
-            getDiffContentProvider().createUri(safePath, "current", ""),
+            getDiffContentProvider().createUri(
+                safePath,
+                "current",
+                rightContent,
+                { forcePlainTextUri: rightContent.length > 0 },
+            ),
         );
         rightUri = rightDoc.uri;
     }
@@ -469,27 +514,33 @@ export async function openWorkingTreeFileDiff(
 ): Promise<void> {
     const safePath = assertRepoRelativePath(file.path);
     const leftPath = safePath;
-    const isBinary = isBinaryFilePath(safePath);
+    const isKnownBinary = isBinaryFilePath(safePath);
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
     const leftContent =
         file.status === "?" || file.status === "A"
             ? ""
-            : isBinary
+            : isKnownBinary
               ? binaryPlaceholder(leftPath, "HEAD")
               : await gitOps.getFileContentAtRef(leftPath, "HEAD").catch(() => "");
+    const leftSnapshot = makeTextDiffSnapshot(leftPath, leftContent, "HEAD");
 
     const diffProvider = getDiffContentProvider();
     const leftDoc = await vscode.workspace.openTextDocument(
-        diffProvider.createUri(leftPath, "HEAD", leftContent),
+        diffProvider.createUri(leftPath, "HEAD", leftSnapshot.content, {
+            forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+        }),
     );
     let rightUri: vscode.Uri;
-    if (file.status === "D" || isBinary) {
+    if (file.status === "D" || isKnownBinary) {
         const rightContent =
             file.status === "D"
                 ? ""
                 : await readWorkingTreeTextSnapshot(workingTreeUri);
+        const rightSnapshot = makeTextDiffSnapshot(safePath, rightContent, "working tree");
         const rightDoc = await vscode.workspace.openTextDocument(
-            diffProvider.createUri(safePath, "working-tree", rightContent),
+            diffProvider.createUri(safePath, "working-tree", rightSnapshot.content, {
+                forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+            }),
         );
         rightUri = rightDoc.uri;
     } else {
@@ -499,11 +550,23 @@ export async function openWorkingTreeFileDiff(
         } catch {
             workingTreeContent = new Uint8Array();
         }
-        rightUri = getEditableDiffProvider().createWorkingTreeUri(
-            safePath,
-            workingTreeContent,
-            workingTreeUri,
-        );
+        if (isProbablyBinary(workingTreeContent)) {
+            const rightDoc = await vscode.workspace.openTextDocument(
+                diffProvider.createUri(
+                    safePath,
+                    "working-tree",
+                    binaryPlaceholder(path.basename(safePath), "working tree"),
+                    { forcePlainTextUri: true },
+                ),
+            );
+            rightUri = rightDoc.uri;
+        } else {
+            rightUri = getEditableDiffProvider().createWorkingTreeUri(
+                safePath,
+                workingTreeContent,
+                workingTreeUri,
+            );
+        }
     }
     const title = `${safePath} (HEAD ↔ Working Tree)`;
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
@@ -540,6 +603,23 @@ function isBinaryFilePath(filePath: string): boolean {
     return BINARY_FILE_EXTENSIONS.has(path.extname(lower));
 }
 
+function makeTextDiffSnapshot(
+    filePath: string,
+    content: string,
+    side: string,
+): { content: string; forcePlainTextUri: boolean } {
+    if (content.length === 0) {
+        return { content, forcePlainTextUri: false };
+    }
+    if (isBinaryFilePath(filePath) || isProbablyBinaryText(content)) {
+        return {
+            content: binaryPlaceholder(path.posix.basename(normalizeGitPath(filePath)), side),
+            forcePlainTextUri: true,
+        };
+    }
+    return { content, forcePlainTextUri: false };
+}
+
 function isProbablyBinary(bytes: Uint8Array): boolean {
     const sample = bytes.subarray(0, Math.min(bytes.length, 8192));
     if (sample.length === 0) return false;
@@ -547,6 +627,19 @@ function isProbablyBinary(bytes: Uint8Array): boolean {
     for (const byte of sample) {
         if (byte === 0) return true;
         if (byte < 7 || (byte > 14 && byte < 32)) suspicious++;
+    }
+    return suspicious / sample.length > 0.08;
+}
+
+function isProbablyBinaryText(content: string): boolean {
+    const sample = content.slice(0, 8192);
+    if (sample.length === 0) return false;
+    let suspicious = 0;
+    for (let index = 0; index < sample.length; index++) {
+        const code = sample.charCodeAt(index);
+        if (code === 0) return true;
+        if (code === 0xfffd) suspicious++;
+        if (code < 7 || (code > 14 && code < 32)) suspicious++;
     }
     return suspicious / sample.length > 0.08;
 }
