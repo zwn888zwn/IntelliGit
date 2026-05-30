@@ -601,9 +601,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         commitGraph.onBranchAction(async ({ action, branchName, repoRoot, allRepositories }) => {
             if (allRepositories) {
-                if (action === "checkout") {
-                    await checkoutBranchInAllRepositories(branchName);
-                }
+                await runBranchActionInAllRepositories(action, branchName);
                 return;
             }
             const targetRepository =
@@ -797,6 +795,99 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         } catch (error) {
             const message = getErrorMessage(error);
             vscode.window.showErrorMessage(`Checkout failed: ${message}`);
+        }
+    };
+
+    const runBranchActionInAllRepositories = async (
+        action: string,
+        branchName: string,
+    ): Promise<void> => {
+        if (action === "checkout") {
+            await checkoutBranchInAllRepositories(branchName);
+            return;
+        }
+
+        const supportedActions = new Set([
+            "checkoutAndRebase",
+            "rebaseCurrentOnto",
+            "mergeIntoCurrent",
+        ]);
+        if (!supportedActions.has(action)) return;
+
+        const repositories = repositoryService.listRepositories();
+        const targets: Array<{
+            repository: (typeof repositories)[number];
+            branch: Branch;
+            branches: Branch[];
+            currentBranchName?: string;
+        }> = [];
+
+        for (const repository of repositories) {
+            const branches =
+                repository.root === getCurrentRepository()?.root
+                    ? currentBranches
+                    : await repository.gitOps.getBranches();
+            const branch = branches.find((item) => item.name === branchName);
+            if (!branch) {
+                vscode.window.showErrorMessage(
+                    `Action failed: '${branchName}' does not exist in ${repository.info.name}.`,
+                );
+                return;
+            }
+            targets.push({
+                repository,
+                branch,
+                branches,
+                currentBranchName: branches.find((item) => item.isCurrent)?.name,
+            });
+        }
+
+        const actionLabel =
+            action === "mergeIntoCurrent"
+                ? "Merging"
+                : action === "rebaseCurrentOnto"
+                  ? "Rebasing"
+                  : "Checking out and rebasing";
+        try {
+            await runWithNotificationProgress(
+                `${actionLabel} ${branchName} in all repositories...`,
+                async () => {
+                    for (const target of targets) {
+                        switch (action) {
+                            case "mergeIntoCurrent":
+                                await target.repository.executor.run(["merge", target.branch.name]);
+                                break;
+                            case "rebaseCurrentOnto":
+                                await target.repository.executor.run(["rebase", target.branch.name]);
+                                break;
+                            case "checkoutAndRebase": {
+                                const onto = target.currentBranchName;
+                                if (!onto) {
+                                    throw new Error(
+                                        `No current branch found in ${target.repository.info.name}.`,
+                                    );
+                                }
+                                const checkedOut = await checkoutBranch(
+                                    target.branch,
+                                    target.branches,
+                                    target.repository.executor,
+                                );
+                                if (checkedOut !== onto) {
+                                    await target.repository.executor.run(["rebase", onto]);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                },
+            );
+            vscode.window.showInformationMessage(
+                `${actionLabel} ${branchName} in ${targets.length} repositories.`,
+            );
+            await vscode.commands.executeCommand("intelligit.refresh");
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Action failed: ${message}`);
         }
     };
 

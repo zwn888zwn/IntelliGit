@@ -63,6 +63,12 @@ interface CommitGraphViewState {
 
 const DEFAULT_EXPANDED_SECTIONS = ["local", "remote"];
 const CURRENT_BRANCH_ICON_TEAL = "#7fd4cf";
+const ALL_REPOSITORIES_BRANCH_ACTIONS = new Set<string>([
+    "checkout",
+    "checkoutAndRebase",
+    "rebaseCurrentOnto",
+    "mergeIntoCurrent",
+]);
 
 function readPersistedBranchColumnState(): BranchColumnPersistState | null {
     try {
@@ -112,6 +118,18 @@ function computeAnchorPosition(
     const anchorX = Math.max(getIconAnchorX(row), minimumX);
     const anchorY = rowRect.top + 1;
     return { anchorX, anchorY };
+}
+
+function getAllRepositoriesBranchMenuItems(branch: Branch, currentBranchName: string) {
+    const items = getBranchMenuItems(branch, currentBranchName).filter(
+        (item) => item.separator || ALL_REPOSITORIES_BRANCH_ACTIONS.has(item.action),
+    );
+    return items.filter((item, index) => {
+        if (!item.separator) return true;
+        const previous = items[index - 1];
+        const next = items[index + 1];
+        return !!previous && !!next && !previous.separator && !next.separator;
+    });
 }
 
 export function BranchColumn({
@@ -350,7 +368,10 @@ export function BranchColumn({
                     y={contextMenu.y}
                     items={
                         contextMenu.allRepositories
-                            ? [{ label: "Checkout", action: "checkout" }]
+                            ? getAllRepositoriesBranchMenuItems(
+                                  contextMenu.branch,
+                                  actualCurrent?.name ?? "HEAD",
+                              )
                             : getBranchMenuItems(contextMenu.branch, actualCurrent?.name ?? "HEAD")
                     }
                     minWidth={310}
