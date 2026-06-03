@@ -1,4 +1,4 @@
-import { buildPermanentGraph } from "./commit-list/graphModel";
+import { buildPermanentGraph, orderCommitsForGraph } from "./commit-list/graphModel";
 import { buildRenderRows, type CommitGraphLayoutResult } from "./commit-list/graphRouter";
 
 export const LANE_WIDTH = 16;
@@ -17,15 +17,23 @@ export type {
 } from "./commit-list/graphRouter";
 
 export function computeGraph(
-    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[]; repoRoot?: string }>,
+    commits: Array<{
+        hash: string;
+        parentHashes: string[];
+        refs?: string[];
+        repoRoot?: string;
+        date?: string;
+    }>,
 ): CommitGraphLayoutResult {
-    const permanentGraph = buildPermanentGraph(commits);
+    const { commits: orderedCommits, layoutIndexByHash } = orderCommitsForGraph(commits);
+    const permanentGraph = buildPermanentGraph(orderedCommits, layoutIndexByHash);
     const result = buildRenderRows(permanentGraph);
     return {
         ...result,
+        orderedHashes: orderedCommits.map((commit) => commit.hash),
         rows: result.rows.map((row, index) => ({
             ...row,
-            repoRoot: commits[index]?.repoRoot,
+            repoRoot: orderedCommits[index]?.repoRoot,
         })),
     };
 }

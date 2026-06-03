@@ -60,6 +60,7 @@ export interface CommitGraphLayoutResult {
     rows: RenderRowModel[];
     recommendedWidth: number;
     arrowMarkers: ArrowMarker[];
+    orderedHashes?: string[];
 }
 
 interface RowRenderPositions {
@@ -254,6 +255,9 @@ function edgeSegmentForRow(
 function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions[] {
     const visibleRowsByEdge = new Map<string, number[]>();
     const edgeByTargetRow = new Map<number, PermanentEdge[]>();
+    const layoutIndexByHash = new Map(
+        graph.rows.map((row) => [row.node.commitHash, row.node.layoutIndex]),
+    );
 
     for (const edge of graph.edges) {
         if (edge.downRowIndex <= edge.upRowIndex) continue;
@@ -265,54 +269,57 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
 
     const activeLanes: ActiveLane[] = [];
     return graph.rows.map((row, rowIndex) => {
-        let nodePosition = activeLanes.findIndex((lane) => lane.hash === row.node.commitHash);
-        if (nodePosition < 0) {
-            nodePosition = activeLanes.length;
+        let activeNodeIndex = activeLanes.findIndex((lane) => lane.hash === row.node.commitHash);
+        if (activeNodeIndex < 0) {
+            activeNodeIndex = activeLanes.length;
             activeLanes.push({ hash: row.node.commitHash });
         }
 
-        const rawEdgePositions = new Map<string, number>();
-        const visiblePositions = new Set<number>([nodePosition]);
+        const rawEdgeLayouts = new Map<string, number>();
+        const visibleLayouts = new Set<number>([row.node.layoutIndex]);
 
         for (const edge of graph.edges) {
             if (edge.downRowIndex <= edge.upRowIndex) continue;
             const visibleRows = visibleRowsByEdge.get(edge.edgeId);
             if (!visibleRows?.includes(rowIndex)) continue;
-            const edgePosition = activeLanes.findIndex((lane) => lane.hash === edge.targetHash);
-            if (edgePosition >= 0) {
-                rawEdgePositions.set(edge.edgeId, edgePosition);
-                visiblePositions.add(edgePosition);
+            const edgeActiveIndex = activeLanes.findIndex((lane) => lane.hash === edge.targetHash);
+            if (edgeActiveIndex >= 0) {
+                const edgeLayoutIndex =
+                    layoutIndexByHash.get(edge.targetHash) ?? edge.downLayoutIndex;
+                rawEdgeLayouts.set(edge.edgeId, edgeLayoutIndex);
+                visibleLayouts.add(edgeLayoutIndex);
             }
         }
 
         const densePositions = new Map(
-            [...visiblePositions]
+            [...visibleLayouts]
                 .sort((left, right) => left - right)
-                .map((position, index) => [position, index]),
+                .map((layoutIndex, index) => [layoutIndex, index]),
         );
-        const denseNodePosition = densePositions.get(nodePosition) ?? 0;
+        const denseNodePosition = densePositions.get(row.node.layoutIndex) ?? 0;
         const rowEdgePositions = new Map<string, number>();
-        for (const [edgeId, edgePosition] of rawEdgePositions) {
-            rowEdgePositions.set(edgeId, densePositions.get(edgePosition) ?? denseNodePosition);
+        for (const [edgeId, edgeLayoutIndex] of rawEdgeLayouts) {
+            rowEdgePositions.set(edgeId, densePositions.get(edgeLayoutIndex) ?? denseNodePosition);
         }
 
         const rowEdges = edgeByTargetRow.get(rowIndex) ?? [];
         const firstParentEdge = rowEdges.find((edge) => edge.isPrimary);
         if (firstParentEdge) {
             const existingFirstParentIndex = activeLanes.findIndex(
-                (lane, index) => index !== nodePosition && lane.hash === firstParentEdge.targetHash,
+                (lane, index) =>
+                    index !== activeNodeIndex && lane.hash === firstParentEdge.targetHash,
             );
             if (existingFirstParentIndex >= 0) {
-                activeLanes.splice(nodePosition, 1);
+                activeLanes.splice(activeNodeIndex, 1);
             } else {
-                activeLanes[nodePosition] = { hash: firstParentEdge.targetHash };
+                activeLanes[activeNodeIndex] = { hash: firstParentEdge.targetHash };
             }
         } else {
-            activeLanes.splice(nodePosition, 1);
+            activeLanes.splice(activeNodeIndex, 1);
         }
 
         let insertPosition = Math.min(
-            firstParentEdge ? nodePosition + 1 : nodePosition,
+            firstParentEdge ? activeNodeIndex + 1 : activeNodeIndex,
             activeLanes.length,
         );
         for (const edge of rowEdges.filter((item) => !item.isPrimary)) {
@@ -324,7 +331,7 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
         return {
             nodePosition: denseNodePosition,
             edgePositions: rowEdgePositions,
-            maxPosition: Math.max(0, visiblePositions.size - 1),
+            maxPosition: Math.max(0, visibleLayouts.size - 1),
         };
     });
 }

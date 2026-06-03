@@ -84,6 +84,13 @@ export function CommitList({
 
     const graph = useMemo(() => computeGraph(commits), [commits]);
     const graphRows = graph.rows;
+    const orderedCommits = useMemo(() => {
+        if (!graph.orderedHashes?.length) return commits;
+        const lookup = new Map(commits.map((commit) => [commit.hash, commit]));
+        return graph.orderedHashes
+            .map((hash) => lookup.get(hash))
+            .filter((commit): commit is Commit => Boolean(commit));
+    }, [commits, graph.orderedHashes]);
     const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
     const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
     const repoRailWidth = repoRailExpanded ? 168 : 10;
@@ -184,10 +191,10 @@ export function CommitList({
     const maybeLoadMore = useCallback(
         (visibleEnd: number) => {
             if (!hasMore) return;
-            if (visibleEnd < Math.max(0, commits.length - PRELOAD_ROWS)) return;
+            if (visibleEnd < Math.max(0, orderedCommits.length - PRELOAD_ROWS)) return;
             void onLoadMore();
         },
-        [commits.length, hasMore, onLoadMore],
+        [hasMore, onLoadMore, orderedCommits.length],
     );
 
     const handleScroll = useCallback(
@@ -200,39 +207,39 @@ export function CommitList({
             if (viewport.clientHeight <= 0) return;
             const overscan = 8;
             const nextVisibleEnd = Math.min(
-                commits.length,
+                orderedCommits.length,
                 Math.ceil((nextScrollTop + viewport.clientHeight) / ROW_HEIGHT) + overscan,
             );
             maybeLoadMore(nextVisibleEnd);
         },
-        [commits.length, maybeLoadMore],
+        [maybeLoadMore, orderedCommits.length],
     );
 
     const visibleRange = useMemo(() => {
-        if (commits.length === 0) {
+        if (orderedCommits.length === 0) {
             return { start: 0, end: 0 };
         }
         if (viewportHeight <= 0) {
-            return { start: 0, end: Math.min(commits.length, 40) };
+            return { start: 0, end: Math.min(orderedCommits.length, 40) };
         }
         const overscan = 8;
         const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - overscan);
         const end = Math.min(
-            commits.length,
+            orderedCommits.length,
             Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + overscan,
         );
         if (end <= start) {
             return {
-                start: Math.max(0, Math.min(commits.length - 1, start)),
-                end: Math.min(commits.length, Math.max(1, start + 1)),
+                start: Math.max(0, Math.min(orderedCommits.length - 1, start)),
+                end: Math.min(orderedCommits.length, Math.max(1, start + 1)),
             };
         }
         return { start, end };
-    }, [commits.length, scrollTop, viewportHeight]);
+    }, [orderedCommits.length, scrollTop, viewportHeight]);
 
     const visibleCommits = useMemo(
-        () => commits.slice(visibleRange.start, visibleRange.end),
-        [commits, visibleRange.end, visibleRange.start],
+        () => orderedCommits.slice(visibleRange.start, visibleRange.end),
+        [orderedCommits, visibleRange.end, visibleRange.start],
     );
 
     useEffect(() => {
@@ -243,13 +250,13 @@ export function CommitList({
         if (!revealHash) return;
         const viewport = viewportRef.current;
         if (!viewport) return;
-        const index = commits.findIndex((commit) => commit.hash === revealHash);
+        const index = orderedCommits.findIndex((commit) => commit.hash === revealHash);
         if (index < 0) return;
 
         const centeredTop = Math.max(0, index * ROW_HEIGHT - (viewport.clientHeight - ROW_HEIGHT) / 2);
         viewport.scrollTop = centeredTop;
         setScrollTop(centeredTop);
-    }, [commits, revealHash]);
+    }, [orderedCommits, revealHash]);
 
     return (
         <div style={ROOT_STYLE}>
@@ -308,7 +315,7 @@ export function CommitList({
                     style={SCROLL_VIEWPORT_STYLE}
                     onScroll={handleScroll}
                 >
-                    <div style={contentContainerStyle(commits.length + (hasMore ? 1 : 0))}>
+                    <div style={contentContainerStyle(orderedCommits.length + (hasMore ? 1 : 0))}>
                         <canvas ref={canvasRef} style={CANVAS_STYLE} />
 
                         <div
@@ -371,7 +378,7 @@ export function CommitList({
                             })}
                         </div>
 
-                        {!repository && commits.length === 0 && (
+                        {!repository && orderedCommits.length === 0 && (
                             <div
                                 style={{
                                     ...LOADING_MORE_STYLE,
@@ -419,7 +426,7 @@ export function CommitList({
                                 left: repoRailWidth,
                                 top: 0,
                                 width: graphWidth,
-                                height: commits.length * ROW_HEIGHT,
+                                height: orderedCommits.length * ROW_HEIGHT,
                                 zIndex: 5,
                                 pointerEvents: "none",
                             }}
@@ -512,7 +519,7 @@ export function CommitList({
                                     position: "absolute",
                                     left: 0,
                                     right: 0,
-                                    top: commits.length * ROW_HEIGHT,
+                                    top: orderedCommits.length * ROW_HEIGHT,
                                 }}
                             >
                                 Loading more...

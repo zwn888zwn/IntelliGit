@@ -43,12 +43,59 @@ export interface PermanentGraphModel {
     maxLayoutIndex: number;
 }
 
+interface GraphCommitLike {
+    hash: string;
+    parentHashes: string[];
+    refs?: string[];
+    date?: string;
+}
+
+interface InternalGraphNode {
+    commit: GraphCommitLike;
+    upNodes: number[];
+    downNodes: number[];
+}
+
+interface GraphAssignments {
+    layoutIndexByHash: Map<string, number>;
+    colorIndexByHash: Map<string, number>;
+}
+
 const COLORS = GRAPH_LANE_COLORS;
+
+export function orderCommitsForGraph<T extends GraphCommitLike>(commits: T[]): {
+    commits: T[];
+    layoutIndexByHash: Map<string, number>;
+} {
+    if (commits.length <= 1) {
+        return {
+            commits,
+            layoutIndexByHash: new Map(commits.map((commit) => [commit.hash, 0])),
+        };
+    }
+
+    const graphNodes = buildInternalGraph(commits);
+    const layout = buildGraphAssignments(commits, graphNodes);
+
+    return {
+        commits,
+        layoutIndexByHash: layout.layoutIndexByHash,
+    };
+}
 
 export function buildPermanentGraph(
     commits: Array<{ hash: string; parentHashes: string[]; refs?: string[] }>,
+    layoutIndexOverride?: Map<string, number>,
 ): PermanentGraphModel {
-    const { layoutIndexByHash, colorIndexByHash } = buildGraphAssignments(commits);
+    const graphNodes = buildInternalGraph(commits);
+    const { layoutIndexByHash, colorIndexByHash } = layoutIndexOverride
+        ? {
+              layoutIndexByHash: layoutIndexOverride,
+              colorIndexByHash: new Map(
+                  commits.map((commit) => [commit.hash, layoutIndexOverride.get(commit.hash) ?? 0]),
+              ),
+          }
+        : buildGraphAssignments(commits, graphNodes);
     const laneColors = new Map<string, string>();
     const rows: PermanentRow[] = commits.map((commit, rowIndex) => {
         const layoutIndex = layoutIndexByHash.get(commit.hash) ?? 0;
@@ -116,72 +163,47 @@ export function buildPermanentGraph(
 }
 
 function buildGraphAssignments(
-    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[] }>,
-): { layoutIndexByHash: Map<string, number>; colorIndexByHash: Map<string, number> } {
+    commits: GraphCommitLike[],
+    graphNodes: InternalGraphNode[],
+): GraphAssignments {
     const layoutIndexByHash = new Map<string, number>();
     const colorIndexByHash = new Map<string, number>();
-    const visibleHashes = new Set(commits.map((commit) => commit.hash));
-    const rowIndexByHash = new Map(commits.map((commit, rowIndex) => [commit.hash, rowIndex]));
-    const referencedAsParent = new Set<string>();
-
-    for (const commit of commits) {
-        for (const parentHash of commit.parentHashes) {
-            if (visibleHashes.has(parentHash)) {
-                referencedAsParent.add(parentHash);
-            }
-        }
-    }
-
-    const heads = commits
-        .map((commit, rowIndex) => ({ commit, rowIndex }))
-        .filter(({ commit }) => !referencedAsParent.has(commit.hash));
-    const branchSeeds = commits
-        .map((commit, rowIndex) => ({ commit, rowIndex }))
-        .filter(({ commit }) => (commit.refs?.length ?? 0) > 0);
-    const sortedHeads = [...branchSeeds, ...heads]
-        .filter(
-            ({ commit }, index, all) =>
-                all.findIndex((item) => item.commit.hash === commit.hash) === index,
-        )
-        .sort((left, right) => left.rowIndex - right.rowIndex);
-
+    const sortedHeads = collectLayoutSeedIndexes(commits, graphNodes);
     let nextLayoutIndex = 0;
-    const assignLayoutFrom = (startHash: string): void => {
-        let currentHash: string | undefined = startHash;
+    const assignLayoutFrom = (startIndex: number): void => {
+        let currentIndex: number | undefined = startIndex;
         let firstVisitInWalk = false;
 
-        while (currentHash) {
-            const firstVisit = !layoutIndexByHash.has(currentHash);
+        while (typeof currentIndex === "number") {
+            const currentCommit = commits[currentIndex];
+            const firstVisit = !layoutIndexByHash.has(currentCommit.hash);
             if (firstVisit) {
-                layoutIndexByHash.set(currentHash, nextLayoutIndex);
+                layoutIndexByHash.set(currentCommit.hash, nextLayoutIndex);
                 firstVisitInWalk = true;
             }
 
-            const rowIndex = rowIndexByHash.get(currentHash);
-            if (typeof rowIndex !== "number") break;
-            const currentCommit = commits[rowIndex];
-            const nextHash = currentCommit.parentHashes.find(
-                (parentHash) => visibleHashes.has(parentHash) && !layoutIndexByHash.has(parentHash),
+            const nextIndex: number | undefined = graphNodes[currentIndex].downNodes.find(
+                (downIndex) => !layoutIndexByHash.has(commits[downIndex].hash),
             );
-            if (!nextHash) {
+            if (typeof nextIndex !== "number") {
                 if (firstVisitInWalk) {
                     nextLayoutIndex += 1;
                 }
                 break;
             }
-            currentHash = nextHash;
+            currentIndex = nextIndex;
         }
     };
 
-    for (const { commit } of sortedHeads) {
-        if (layoutIndexByHash.has(commit.hash)) continue;
-        assignLayoutFrom(commit.hash);
+    for (const rowIndex of sortedHeads) {
+        if (layoutIndexByHash.has(commits[rowIndex].hash)) continue;
+        assignLayoutFrom(rowIndex);
     }
 
-    for (const commit of commits) {
-        if (layoutIndexByHash.has(commit.hash)) continue;
-        assignLayoutFrom(commit.hash);
-    }
+    commits.forEach((commit, rowIndex) => {
+        if (layoutIndexByHash.has(commit.hash)) return;
+        assignLayoutFrom(rowIndex);
+    });
 
     for (const commit of commits) {
         colorIndexByHash.set(commit.hash, layoutIndexByHash.get(commit.hash) ?? 0);
@@ -190,6 +212,144 @@ function buildGraphAssignments(
     return { layoutIndexByHash, colorIndexByHash };
 }
 
+function buildInternalGraph(commits: GraphCommitLike[]): InternalGraphNode[] {
+    const hashToIndex = new Map(commits.map((commit, rowIndex) => [commit.hash, rowIndex]));
+    const graphNodes: InternalGraphNode[] = commits.map((commit) => ({
+        commit,
+        upNodes: [],
+        downNodes: [],
+    }));
+
+    commits.forEach((commit, rowIndex) => {
+        for (const parentHash of commit.parentHashes) {
+            const parentIndex = hashToIndex.get(parentHash);
+            if (typeof parentIndex !== "number") continue;
+            graphNodes[rowIndex].downNodes.push(parentIndex);
+            graphNodes[parentIndex].upNodes.push(rowIndex);
+        }
+    });
+
+    return graphNodes;
+}
+
 function colorForLayoutIndex(layoutIndex: number): string {
     return COLORS[((layoutIndex % COLORS.length) + COLORS.length) % COLORS.length];
+}
+
+function collectLayoutSeedIndexes(
+    commits: GraphCommitLike[],
+    graphNodes: InternalGraphNode[],
+): number[] {
+    const branchSeedIndexes = commits
+        .map((commit, rowIndex) => ({ commit, rowIndex }))
+        .filter(({ commit }) => hasBranchRef(commit))
+        .sort(
+            (left, right) =>
+                compareHeadImportance(left.commit, right.commit) || left.rowIndex - right.rowIndex,
+        )
+        .map(({ rowIndex }) => rowIndex);
+    const headIndexes = graphNodes
+        .map((node, rowIndex) => ({ node, rowIndex }))
+        .filter(({ node }) => node.upNodes.length === 0)
+        .sort(
+            (left, right) =>
+                compareHeadImportance(left.node.commit, right.node.commit) || left.rowIndex - right.rowIndex,
+        )
+        .map(({ rowIndex }) => rowIndex);
+
+    return [...new Set([...branchSeedIndexes, ...headIndexes])];
+}
+
+function compareHeadImportance(left: GraphCommitLike, right: GraphCommitLike): number {
+    const leftKey = getHeadImportanceKey(left);
+    const rightKey = getHeadImportanceKey(right);
+    return (
+        leftKey.priority - rightKey.priority ||
+        leftKey.name.localeCompare(rightKey.name) ||
+        leftKey.kind - rightKey.kind
+    );
+}
+
+function getHeadImportanceKey(commit: GraphCommitLike): {
+    priority: number;
+    name: string;
+    kind: number;
+} {
+    const branchRefs = (commit.refs ?? [])
+        .map(parseBranchRef)
+        .filter((ref): ref is NonNullable<typeof ref> => Boolean(ref))
+        .sort(
+            (left, right) =>
+                getStableBranchPriority(left.name) - getStableBranchPriority(right.name) ||
+                left.name.localeCompare(right.name) ||
+                left.kind - right.kind,
+        );
+
+    if (branchRefs.length > 0) {
+        const selected = branchRefs[0];
+        return {
+            priority: getStableBranchPriority(selected.name),
+            name: selected.name,
+            kind: selected.kind,
+        };
+    }
+
+    if ((commit.refs?.length ?? 0) > 0) {
+        return { priority: 90, name: commit.refs![0] ?? "", kind: 9 };
+    }
+
+    return { priority: 99, name: commit.hash, kind: 9 };
+}
+
+function isLocalBranchRef(ref: string): boolean {
+    if (ref === "HEAD" || ref.startsWith("HEAD -> ")) return false;
+    if (ref.startsWith("origin/")) return false;
+    if (ref.startsWith("tag:")) return false;
+    return true;
+}
+
+function hasBranchRef(commit: GraphCommitLike): boolean {
+    return (commit.refs ?? []).some(
+        (ref) => ref === "HEAD" || ref.startsWith("HEAD -> ") || isLocalBranchRef(ref) || ref.startsWith("origin/"),
+    );
+}
+
+function parseBranchRef(ref: string): { name: string; kind: number } | null {
+    if (ref.startsWith("HEAD -> ")) {
+        return { name: ref.slice("HEAD -> ".length).trim(), kind: 1 };
+    }
+    if (isLocalBranchRef(ref)) {
+        return { name: ref.trim(), kind: 1 };
+    }
+    if (ref.startsWith("origin/")) {
+        return { name: ref.slice("origin/".length).trim(), kind: 2 };
+    }
+    if (ref === "HEAD") {
+        return { name: "HEAD", kind: 8 };
+    }
+    return null;
+}
+
+function getStableBranchPriority(name: string): number {
+    const normalized = name.toLowerCase();
+    if (
+        normalized === "master" ||
+        normalized === "main" ||
+        normalized === "trunk" ||
+        normalized === "default"
+    ) {
+        return 0;
+    }
+    if (
+        normalized === "develop" ||
+        normalized === "development" ||
+        normalized === "dev" ||
+        normalized === "release" ||
+        normalized === "staging" ||
+        normalized === "prod" ||
+        normalized === "production"
+    ) {
+        return 1;
+    }
+    return 10;
 }

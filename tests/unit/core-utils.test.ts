@@ -236,7 +236,7 @@ describe("core utilities", () => {
         ).toHaveLength(2);
     });
 
-    it("graph layout can continue the walked head chain through the merge base", () => {
+    it("graph layout can keep the first-parent mainline on one layout through the merge base", () => {
         const permanent = buildPermanentGraph([
             { hash: "top", parentHashes: ["main"] },
             { hash: "merge", parentHashes: ["main", "side"] },
@@ -245,12 +245,12 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(0);
-        expect(permanent.rows[1].node.layoutIndex).toBe(1);
-        expect(permanent.rows[2].node.layoutIndex).toBe(0);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[2].node.layoutIndex);
+        expect(permanent.rows[2].node.layoutIndex).toBe(permanent.rows[4].node.layoutIndex);
+        expect(permanent.rows[0].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
     });
 
-    it("graph layout follows visible topological heads instead of mid-graph refs", () => {
+    it("graph layout can prioritize the alpha mainline over the incoming feature branch", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -263,13 +263,12 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(0);
-        expect(permanent.rows[1].node.layoutIndex).toBe(0);
-        expect(permanent.rows[3].node.layoutIndex).toBe(0);
-        expect(permanent.rows[2].node.layoutIndex).toBe(1);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
+        expect(permanent.rows[0].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
+        expect(permanent.rows[2].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
     });
 
-    it("graph compute keeps a head row and its merge below in one rendered column", () => {
+    it("graph compute can pin the merge row node to the mainline column", () => {
         const graph = computeGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -286,7 +285,7 @@ describe("core utilities", () => {
         expect(graph.rows[1].nodePosition).toBe(0);
     });
 
-    it("graph colors can stay unified along the walked head chain", () => {
+    it("graph colors can stay unified along the alpha mainline", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
@@ -295,11 +294,11 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(permanent.rows[1].node.layoutIndex);
-        expect(permanent.rows[0].node.color).toBe(permanent.rows[1].node.color);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
+        expect(permanent.rows[1].node.color).toBe(permanent.rows[3].node.color);
     });
 
-    it("graph can keep adjacent rendered rows in one column", () => {
+    it("graph keeps the incoming branch to the right of the alpha mainline", () => {
         const graph = computeGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
@@ -308,7 +307,9 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(graph.rows[0].nodePosition).toBe(graph.rows[1].nodePosition);
+        expect(graph.rows[0].nodePosition).toBe(0);
+        expect(graph.rows[1].nodePosition).toBe(0);
+        expect(graph.rows[2].nodePosition).toBeGreaterThan(graph.rows[1].nodePosition);
     });
 
     it("graph compute can render merge rows with an extra edge column", () => {
@@ -326,6 +327,21 @@ describe("core utilities", () => {
         ]);
 
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("graph compute places a newly encountered mainline merge row by layout priority", () => {
+        const graph = computeGraph([
+            { hash: "top-merge", parentHashes: ["alpha-bridge", "side-1"], refs: ["feature/top"] },
+            { hash: "merge-2", parentHashes: ["alpha-next", "side-2"], refs: ["alpha"] },
+            { hash: "side-1", parentHashes: ["side-2"] },
+            { hash: "side-2", parentHashes: ["base"] },
+            { hash: "alpha-bridge", parentHashes: ["alpha-next"] },
+            { hash: "alpha-next", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[1].nodePosition).toBe(0);
+        expect(graph.rows[2].nodePosition).toBeGreaterThan(graph.rows[1].nodePosition);
     });
 
     it("graph compute keeps cross-lane edge transitions local between adjacent rows", () => {
