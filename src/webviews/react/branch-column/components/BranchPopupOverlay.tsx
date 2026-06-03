@@ -546,11 +546,15 @@ function RepositoryRow({
     onHover: () => void;
     onActivate: (event: React.MouseEvent<HTMLElement>) => void;
 }): React.ReactElement {
+    const rowTitle = currentBranchName
+        ? `${repository.name}\n${currentBranchName}`
+        : repository.name;
     return (
         <button
             type="button"
             className="intelligit-branch-popup-row"
             data-selected={selected ? "true" : "false"}
+            title={rowTitle}
             onMouseEnter={onHover}
             onClick={(event) => {
                 event.preventDefault();
@@ -568,8 +572,30 @@ function RepositoryRow({
                     marginRight: 8,
                 }}
             />
-            <span style={{ flex: 1, textAlign: "left", fontWeight: selected ? 600 : 400 }}>{repository.name}</span>
-            <span style={{ opacity: 0.58 }}>{currentBranchName}</span>
+            <span
+                style={{
+                    flex: "0 0 auto",
+                    textAlign: "left",
+                    fontWeight: selected ? 600 : 400,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                }}
+            >
+                {repository.name}
+            </span>
+            <span
+                style={{
+                    flex: "0 1 auto",
+                    minWidth: 0,
+                    maxWidth: "42%",
+                    textAlign: "right",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    opacity: 0.58,
+                }}
+            >
+                {currentBranchName}
+            </span>
             <LuChevronRight size={14} style={{ opacity: 0.65, marginLeft: 8 }} />
         </button>
     );
@@ -590,11 +616,13 @@ function BranchPopupRow({
 }): React.ReactElement {
     const shortName = branch.name.replace(/^.*\//, "");
     const mainLike = shortName === "main" || shortName === "master";
+    const rowTitle = branch.upstream ? `${branch.name}\n${branch.upstream}` : branch.name;
     return (
         <button
             type="button"
             className="intelligit-branch-popup-row"
             data-selected={selected ? "true" : "false"}
+            title={rowTitle}
             onMouseEnter={onHover}
             onClick={(event) => onClick(event, branch)}
             style={rowButtonStyle(paddingLeft)}
@@ -606,10 +634,27 @@ function BranchPopupRow({
             ) : (
                 <GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />
             )}
-            <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <span
+                style={{
+                    flex: "0 0 auto",
+                    textAlign: "left",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                }}
+            >
                 {branch.name}
             </span>
-            <span style={{ opacity: 0.58, overflow: "hidden", textOverflow: "ellipsis" }}>
+            <span
+                style={{
+                    flex: "1 1 0",
+                    minWidth: 0,
+                    maxWidth: "100%",
+                    textAlign: "right",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    opacity: 0.58,
+                }}
+            >
                 {branch.upstream ?? ""}
             </span>
             <TrackingText branch={branch} />
