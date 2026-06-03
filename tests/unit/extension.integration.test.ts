@@ -1025,7 +1025,7 @@ describe("extension integration", () => {
         );
     });
 
-    it("updates current local branch by fetching and merging FETCH_HEAD", async () => {
+    it("updates current local branch by fetching and fast-forwarding FETCH_HEAD", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -1045,11 +1045,12 @@ describe("extension integration", () => {
             "--progress",
             "--prune",
         ]);
-        expect(executorRun).toHaveBeenCalledWith(["merge", "--no-stat", "-v", "--no-edit", "FETCH_HEAD"]);
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "FETCH_HEAD"]);
+        expect(executorRun).not.toHaveBeenCalledWith(["rebase", "--autostash", "FETCH_HEAD"]);
         expect(executorRun).not.toHaveBeenCalledWith(["pull", "--ff-only"]);
     });
 
-    it("opens conflict session when current branch update merge has conflicts", async () => {
+    it("falls back to rebase when current branch update cannot fast-forward", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -1058,14 +1059,35 @@ describe("extension integration", () => {
         await activate(context);
 
         executorRun.mockImplementation(async (args: string[]) => {
-            if (
-                args[0] === "merge" &&
-                args[1] === "--no-stat" &&
-                args[2] === "-v" &&
-                args[3] === "--no-edit" &&
-                args[4] === "FETCH_HEAD"
-            ) {
-                throw new Error("merge conflict");
+            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD") {
+                throw new Error("not possible to fast-forward");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+
+        await registeredCommands.get("intelligit.updateBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true },
+        });
+
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "FETCH_HEAD"]);
+        expect(executorRun).toHaveBeenCalledWith(["rebase", "--autostash", "FETCH_HEAD"]);
+        expect(showInformationMessage).toHaveBeenCalledWith("Updated main");
+    });
+
+    it("opens conflict session when current branch update rebase has conflicts", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD") {
+                throw new Error("not possible to fast-forward");
+            }
+            if (args[0] === "rebase" && args[1] === "--autostash" && args[2] === "FETCH_HEAD") {
+                throw new Error("rebase conflict");
             }
             return defaultExecutorRunImpl(args);
         });

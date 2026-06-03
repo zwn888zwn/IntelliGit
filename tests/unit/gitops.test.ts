@@ -77,6 +77,17 @@ describe("GitOps", () => {
             expect(branches[0].behind).toBe(3);
             expect(branches[0].ahead).toBe(0);
         });
+
+        it("requests branches sorted by latest committer date", async () => {
+            const executor = createMockExecutor({ branch: "" });
+            const ops = new GitOps(executor);
+
+            await ops.getBranches();
+
+            expect(executor.run).toHaveBeenCalledWith(
+                expect.arrayContaining(["branch", "-a", "--sort=-committerdate"]),
+            );
+        });
     });
 
     describe("getBranchComparisonFiles", () => {

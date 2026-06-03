@@ -120,7 +120,12 @@ export class GitOps {
     async getBranches(): Promise<Branch[]> {
         const format =
             "%(refname)\t%(refname:short)\t%(objectname:short)\t%(upstream:short)\t%(upstream:track,nobracket)\t%(HEAD)";
-        const result = await this.executor.run(["branch", "-a", `--format=${format}`]);
+        const result = await this.executor.run([
+            "branch",
+            "-a",
+            "--sort=-committerdate",
+            `--format=${format}`,
+        ]);
 
         const branches: Branch[] = [];
         for (const line of result.trim().split("\n")) {

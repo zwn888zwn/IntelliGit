@@ -77,6 +77,10 @@ describe("low coverage components", () => {
                     [repositories[0].root]: currentBranches,
                     [repositories[1].root]: iosBranches,
                 }}
+                repositoryTags={{
+                    [repositories[0].root]: [],
+                    [repositories[1].root]: [],
+                }}
                 onTopAction={vi.fn()}
                 onOpenBranchMenu={onOpenBranchMenu}
                 onClose={vi.fn()}
@@ -131,6 +135,67 @@ describe("low coverage components", () => {
             "/repos/IosLatex",
             expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
         );
+
+        unmount(root, container);
+    });
+
+    it("BranchPopupOverlay recent branches prefer local branches before remote branches", async () => {
+        const repository: RepositoryContextInfo = {
+            repoId: "repo",
+            name: "Repo",
+            root: "/repos/Repo",
+            color: "#ff5722",
+        };
+        const branches: Branch[] = [
+            {
+                name: "origin/recent-remote",
+                hash: "r1",
+                isRemote: true,
+                isCurrent: false,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "recent-local",
+                hash: "l1",
+                isRemote: false,
+                isCurrent: false,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "older-local",
+                hash: "l2",
+                isRemote: false,
+                isCurrent: false,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+
+        const { root, container } = mount(
+            <BranchPopupOverlay
+                branches={branches}
+                repositories={[repository]}
+                repository={repository}
+                repositoryBranches={{ [repository.root]: branches }}
+                repositoryTags={{ [repository.root]: [] }}
+                onTopAction={vi.fn()}
+                onOpenBranchMenu={vi.fn()}
+                onClose={vi.fn()}
+            />,
+        );
+
+        const text = document.body.textContent ?? "";
+        const recentLocalIndex = text.indexOf("recent-local");
+        const olderLocalIndex = text.indexOf("older-local");
+        const remoteIndex = text.indexOf("origin/recent-remote");
+
+        expect(recentLocalIndex).toBeGreaterThan(-1);
+        expect(olderLocalIndex).toBeGreaterThan(-1);
+        expect(remoteIndex).toBeGreaterThan(-1);
+        expect(recentLocalIndex).toBeLessThan(remoteIndex);
+        expect(olderLocalIndex).toBeLessThan(remoteIndex);
 
         unmount(root, container);
     });
@@ -365,7 +430,7 @@ describe("low coverage components", () => {
         act(() => {
             rename.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main", undefined);
+        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main", undefined, undefined);
 
         const searchInput = container.querySelector(
             'input[placeholder="Search branches"]',

@@ -201,26 +201,30 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                                 "--prune",
                             ]);
                             try {
-                                await executor.run(["merge", "--no-stat", "-v", "--no-edit", "FETCH_HEAD"]);
-                            } catch (err) {
+                                await executor.run(["merge", "--ff-only", "FETCH_HEAD"]);
+                            } catch {
                                 try {
-                                    const conflicts = await gitOps.getConflictFilesDetailed();
-                                    if (conflicts.length > 0) {
-                                        await openConflictSession({
-                                            sourceBranch: `${tracked.remote}/${tracked.remoteBranch}`,
-                                            targetBranch: getCurrentBranchName() || undefined,
-                                        });
-                                        await refreshConflictUi();
-                                        vscode.window.showWarningMessage(
-                                            `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
-                                        );
-                                        openedConflictSession = true;
-                                        return;
+                                    await executor.run(["rebase", "--autostash", "FETCH_HEAD"]);
+                                } catch (err) {
+                                    try {
+                                        const conflicts = await gitOps.getConflictFilesDetailed();
+                                        if (conflicts.length > 0) {
+                                            await openConflictSession({
+                                                sourceBranch: `${tracked.remote}/${tracked.remoteBranch}`,
+                                                targetBranch: getCurrentBranchName() || undefined,
+                                            });
+                                            await refreshConflictUi();
+                                            vscode.window.showWarningMessage(
+                                                `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
+                                            );
+                                            openedConflictSession = true;
+                                            return;
+                                        }
+                                    } catch {
+                                        // Fall back to the update error if conflict inspection/session launch fails.
                                     }
-                                } catch {
-                                    // Fall back to the update error if conflict inspection/session launch fails.
+                                    throw err;
                                 }
-                                throw err;
                             }
                             return;
                         }
