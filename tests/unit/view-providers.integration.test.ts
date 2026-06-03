@@ -530,6 +530,76 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("CommitGraphViewProvider preserves single-repo git log order for all-branches graphs", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getLog.mockResolvedValueOnce([
+            {
+                hash: "head",
+                shortHash: "head",
+                message: "head",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-06-03T15:31:17+08:00",
+                parentHashes: ["mid"],
+                refs: ["HEAD -> feature/test"],
+            },
+            {
+                hash: "mid",
+                shortHash: "mid",
+                message: "mid",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-06-03T13:20:27+08:00",
+                parentHashes: ["base"],
+                refs: [],
+            },
+            {
+                hash: "base",
+                shortHash: "base",
+                message: "base",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-06-03T14:40:33+08:00",
+                parentHashes: [],
+                refs: [],
+            },
+        ]);
+
+        const repositoryEntry = {
+            root: "/repo",
+            name: "repo",
+            gitOps,
+        };
+        const provider = new CommitGraphViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => [repositoryEntry] as never,
+            (root: string) => (root === "/repo" ? (repositoryEntry as never) : null),
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        const loadCommitsMessage = postMessageSpy.mock.calls
+            .map((call) => call[0])
+            .find((message) => message?.type === "loadCommits");
+        expect(loadCommitsMessage).toBeTruthy();
+        expect(loadCommitsMessage.commits.map((commit: { hash: string }) => commit.hash)).toEqual([
+            "head",
+            "mid",
+            "base",
+        ]);
+
+        provider.dispose();
+    });
+
     it("CommitPanelViewProvider handles staging and unstaging", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         expect(gitOps.getStatus).toHaveBeenCalled();

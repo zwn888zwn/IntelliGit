@@ -593,7 +593,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             ),
         );
 
-        const merged = pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+        const merged =
+            pages.length === 1
+                ? pages[0]
+                : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
         return {
             commits: merged.slice(0, limit),
             hasMore: merged.length > limit,
@@ -622,10 +625,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             ),
         );
 
-        return pages
-            .flat()
-            .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-            .slice(skip, skip + this.PAGE_SIZE);
+        return (pages.length === 1
+            ? pages[0]
+            : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        ).slice(skip, skip + this.PAGE_SIZE);
     }
 
     private async getUnpushedHashes(): Promise<string[]> {
