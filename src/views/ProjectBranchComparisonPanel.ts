@@ -152,6 +152,7 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             this.branchName,
             this.repository.root,
             this.repository.gitOps,
+            this.repository.executor,
         );
         const changeRanges = await this.getFileChangeRanges(file);
         const targetHunkIndex =

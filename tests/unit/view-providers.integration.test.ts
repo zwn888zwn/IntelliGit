@@ -63,6 +63,7 @@ const openTextDocument = vi.fn(async (arg) => {
     };
 });
 const readFile = vi.fn(async () => Buffer.from("working tree content", "utf8"));
+const fsStat = vi.fn(async () => ({ type: 1, ctime: 0, mtime: 0, size: 1 }));
 const writeFile = vi.fn(async () => undefined);
 let registeredEditableDiffProvider:
     | {
@@ -158,7 +159,7 @@ const vscodeMock = {
             workspaceState.workspaceFolders = value;
         },
         openTextDocument,
-        fs: { readFile, writeFile },
+        fs: { readFile, writeFile, stat: fsStat },
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn((_scheme, provider) => {
             registeredEditableDiffProvider = provider as typeof registeredEditableDiffProvider;
@@ -684,20 +685,15 @@ describe("view providers integration", () => {
             "vscode.diff",
             expect.any(Object),
             expect.objectContaining({
-                scheme: "intelligit-diff-editable",
-                path: expect.stringMatching(/\/a\.ts$/),
-                query: expect.stringContaining("working-tree"),
+                scheme: "file",
+                fsPath: "/repo/src/a.ts",
+                path: "/repo/src/a.ts",
             }),
             expect.stringContaining("src/a.ts"),
         ]);
         expect(diffCall?.[1]).toEqual(
             expect.objectContaining({
                 path: expect.stringMatching(/\/a\.ts$/),
-                query: expect.stringContaining("path=src%2Fa.ts"),
-            }),
-        );
-        expect(diffCall?.[2]).toEqual(
-            expect.objectContaining({
                 query: expect.stringContaining("path=src%2Fa.ts"),
             }),
         );
@@ -711,17 +707,6 @@ describe("view providers integration", () => {
             expect.objectContaining({
                 content: expect.any(String),
             }),
-        );
-        await registeredEditableDiffProvider?.writeFile?.(
-            diffCall?.[2],
-            Buffer.from("updated working tree content", "utf8"),
-        );
-        expect(writeFile).toHaveBeenCalledWith(
-            expect.objectContaining({
-                scheme: "file",
-                fsPath: "/repo/src/a.ts",
-            }),
-            Buffer.from("updated working tree content", "utf8"),
         );
         await webview.send({ type: "openFile", path: "src/a.ts" });
         await webview.send({ type: "showHistory", path: "src/a.ts" });
@@ -815,6 +800,44 @@ describe("view providers integration", () => {
         );
     });
 
+    it("openCommitFileDiff uses native git diff resources for previewable images", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async () => {
+                throw new Error("text fallback should not run for previewable images");
+            }),
+        };
+        const executor = {
+            run: vi.fn(async () => "a1b2c3d4 parent1234"),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "assets/logo.png",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result).not.toBeNull();
+        expect(gitOps.getFileContentAtRef).not.toHaveBeenCalled();
+        expect(openTextDocument).not.toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/logo.png",
+                query: expect.stringContaining("\"ref\":\"parent1234\""),
+            }),
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/logo.png",
+                query: expect.stringContaining("\"ref\":\"a1b2c3d4\""),
+            }),
+            "assets/logo.png (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
     it("CommitPanelViewProvider opens binary working files as placeholder diffs", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();
@@ -866,6 +889,62 @@ describe("view providers integration", () => {
             expect.any(Object),
             expect.stringContaining("profiles/cpu.pb.gz"),
         );
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider opens previewable images with native git/file diff", async () => {
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getStatus.mockResolvedValueOnce([
+            {
+                repoRoot: "/repo",
+                path: "assets/logo.png",
+                status: "M",
+                staged: false,
+                additions: 0,
+                deletions: 0,
+            },
+        ]);
+        const provider = new CommitPanelViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => ({ fsPath: "/repo", path: "/repo" }) as unknown as { fsPath: string; path: string },
+            () => [
+                {
+                    root: "/repo",
+                    uri: { fsPath: "/repo", path: "/repo" },
+                    info: testRepository,
+                    gitOps,
+                    executor: { run: vi.fn(async () => "") },
+                } as unknown as never,
+            ],
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "assets/logo.png" });
+
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/logo.png",
+                query: expect.stringContaining("\"ref\":\"HEAD\""),
+            }),
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: "/repo/assets/logo.png",
+                path: "/repo/assets/logo.png",
+            }),
+            expect.stringContaining("assets/logo.png"),
+        );
+        expect(openTextDocument).not.toHaveBeenCalled();
         provider.dispose();
     });
 

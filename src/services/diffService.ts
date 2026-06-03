@@ -39,6 +39,15 @@ const BINARY_FILE_EXTENSIONS = new Set([
     ".webp",
     ".zip",
 ]);
+const PREVIEWABLE_IMAGE_EXTENSIONS = new Set([
+    ".bmp",
+    ".gif",
+    ".ico",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".webp",
+]);
 
 class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
     private readonly contents = new Map<string, string>();
@@ -111,11 +120,16 @@ class IntelliGitEditableDiffFileSystemProvider
         return uri;
     }
 
-    createWorkingTreeUri(filePath: string, content: Uint8Array, targetUri: vscode.Uri): vscode.Uri {
+    createWorkingTreeUri(
+        filePath: string,
+        content: Uint8Array,
+        targetUri: vscode.Uri,
+        options: { forcePlainTextUri?: boolean } = {},
+    ): vscode.Uri {
         const id = String(this.nextId++);
         const uri = vscode.Uri.from({
             scheme: DIFF_EDITABLE_SCHEME,
-            path: makeTextDiffUriPath(id, filePath),
+            path: makeTextDiffUriPath(id, filePath, options.forcePlainTextUri),
             query: new URLSearchParams({
                 ref: "working-tree",
                 id,
@@ -268,6 +282,34 @@ function shouldUsePlainTextDiffUri(filePath: string): boolean {
     return extension === ".md" || isBinaryFilePath(filePath);
 }
 
+function isPreviewableImageFilePath(filePath: string): boolean {
+    return PREVIEWABLE_IMAGE_EXTENSIONS.has(path.posix.extname(filePath).toLowerCase());
+}
+
+function createGitResourceUri(fileUri: vscode.Uri, ref: string): vscode.Uri {
+    return vscode.Uri.from({
+        scheme: "git",
+        path: fileUri.path,
+        query: JSON.stringify({
+            path: fileUri.fsPath,
+            ref,
+        }),
+    });
+}
+
+async function gitFileExistsAtRef(
+    filePath: string,
+    ref: string,
+    executor: GitExecutor,
+): Promise<boolean> {
+    try {
+        await executor.run(["cat-file", "-e", `${ref}:${filePath}`]);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export function getRepoRelativeFilePathFromUri(uri: vscode.Uri, repoRoot: string): string | null {
     if (uri.scheme !== "file") return null;
     const relative = path.relative(repoRoot, uri.fsPath);
@@ -366,9 +408,25 @@ export async function openDiffAgainstGitRef(
     ref: string,
     sourceLabel: "revision" | "branch",
     gitOps: GitOps,
+    executor?: GitExecutor,
 ): Promise<void> {
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
+
+    if (
+        executor &&
+        isPreviewableImageFilePath(repoRelativeFilePath) &&
+        (await gitFileExistsAtRef(repoRelativeFilePath, trimmedRef, executor))
+    ) {
+        const title = `${repoRelativeFilePath} (${sourceLabel}: ${trimmedRef}) <-> Working Tree`;
+        await vscode.commands.executeCommand(
+            "vscode.diff",
+            createGitResourceUri(fileUri, trimmedRef),
+            fileUri,
+            title,
+        );
+        return;
+    }
 
     const refSnapshot = makeTextDiffSnapshot(
         repoRelativeFilePath,
@@ -426,6 +484,23 @@ export async function openCommitFileDiff(
         }
     }
 
+    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+    if (isPreviewableImageFilePath(safePath)) {
+        const [leftExists, rightExists] = await Promise.all([
+            gitFileExistsAtRef(safePath, parentRef, executor),
+            gitFileExistsAtRef(safePath, commitHash, executor),
+        ]);
+        if (leftExists && rightExists) {
+            const shortParent = parentDisplayHash.slice(0, 8);
+            const shortCommit = commitHash.slice(0, 8);
+            const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
+            const leftUri = createGitResourceUri(workingTreeUri, parentRef);
+            const rightUri = createGitResourceUri(workingTreeUri, commitHash);
+            await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
+            return { parentRef, parentDisplayHash, leftUri, rightUri };
+        }
+    }
+
     let leftContent: string;
     try {
         leftContent = await gitOps.getFileContentAtRef(safePath, parentRef);
@@ -465,11 +540,30 @@ export async function openBranchComparisonFileDiff(
     ref: string,
     repoRoot: string,
     gitOps: GitOps,
+    executor?: GitExecutor,
 ): Promise<void> {
     const safePath = assertRepoRelativePath(file.path);
     const leftPath = file.oldPath ? assertRepoRelativePath(file.oldPath) : safePath;
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
+    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+
+    if (
+        executor &&
+        isPreviewableImageFilePath(safePath) &&
+        file.status !== "D" &&
+        (await fileExists(workingTreeUri)) &&
+        (await gitFileExistsAtRef(leftPath, trimmedRef, executor))
+    ) {
+        const title = `${safePath} (${trimmedRef} ↔ Current)`;
+        await vscode.commands.executeCommand(
+            "vscode.diff",
+            createGitResourceUri(vscode.Uri.file(path.join(repoRoot, leftPath)), trimmedRef),
+            workingTreeUri,
+            title,
+        );
+        return;
+    }
 
     const leftSnapshot = makeTextDiffSnapshot(
         leftPath,
@@ -482,9 +576,7 @@ export async function openBranchComparisonFileDiff(
             forcePlainTextUri: leftSnapshot.forcePlainTextUri,
         }),
     );
-
     let rightUri: vscode.Uri;
-    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
     if (file.status !== "D" && (await fileExists(workingTreeUri)) && !isBinaryFilePath(safePath)) {
         rightUri = workingTreeUri;
     } else {
@@ -516,6 +608,22 @@ export async function openWorkingTreeFileDiff(
     const leftPath = safePath;
     const isKnownBinary = isBinaryFilePath(safePath);
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+    if (
+        isPreviewableImageFilePath(safePath) &&
+        file.status !== "?" &&
+        file.status !== "A" &&
+        file.status !== "D" &&
+        (await fileExists(workingTreeUri))
+    ) {
+        const title = `${safePath} (HEAD ↔ Working Tree)`;
+        await vscode.commands.executeCommand(
+            "vscode.diff",
+            createGitResourceUri(workingTreeUri, "HEAD"),
+            workingTreeUri,
+            title,
+        );
+        return;
+    }
     const leftContent =
         file.status === "?" || file.status === "A"
             ? ""
@@ -561,11 +669,14 @@ export async function openWorkingTreeFileDiff(
             );
             rightUri = rightDoc.uri;
         } else {
-            rightUri = getEditableDiffProvider().createWorkingTreeUri(
-                safePath,
-                workingTreeContent,
-                workingTreeUri,
-            );
+            rightUri = shouldUsePlainTextDiffUri(safePath)
+                ? getEditableDiffProvider().createWorkingTreeUri(
+                      safePath,
+                      workingTreeContent,
+                      workingTreeUri,
+                      { forcePlainTextUri: true },
+                  )
+                : workingTreeUri;
         }
     }
     const title = `${safePath} (HEAD ↔ Working Tree)`;
@@ -706,6 +817,7 @@ export async function compareEditorFileWithBranch(
     ctx: unknown,
     repoRoot: string,
     gitOps: GitOps,
+    executor?: GitExecutor,
 ): Promise<void> {
     const fileUri = getEditorContextFileUri(ctx);
     if (!fileUri) {
@@ -752,6 +864,7 @@ export async function compareEditorFileWithBranch(
             picked.refName,
             "branch",
             gitOps,
+            executor,
         );
     } catch (error) {
         const message = getErrorMessage(error);
@@ -763,6 +876,7 @@ export async function compareEditorFileWithRevision(
     ctx: unknown,
     repoRoot: string,
     gitOps: GitOps,
+    executor?: GitExecutor,
 ): Promise<void> {
     const fileUri = getEditorContextFileUri(ctx);
     if (!fileUri) {
@@ -821,7 +935,14 @@ export async function compareEditorFileWithRevision(
             refName = input.trim();
         }
 
-        await openDiffAgainstGitRef(fileUri, repoRelativeFilePath, refName, "revision", gitOps);
+        await openDiffAgainstGitRef(
+            fileUri,
+            repoRelativeFilePath,
+            refName,
+            "revision",
+            gitOps,
+            executor,
+        );
     } catch (error) {
         const message = getErrorMessage(error);
         vscode.window.showErrorMessage(`Compare with revision failed: ${message}`);
@@ -832,13 +953,21 @@ export async function compareCommitInfoFileWithLocal(
     ctx: unknown,
     repoRoot: string,
     gitOps: GitOps,
+    executor?: GitExecutor,
 ): Promise<void> {
     const fileCtx = getCommitInfoFileContext(ctx);
     if (!fileCtx) return;
     try {
         const safePath = assertRepoRelativePath(fileCtx.filePath);
         const fileUri = vscode.Uri.file(path.join(repoRoot, safePath));
-        await openDiffAgainstGitRef(fileUri, safePath, fileCtx.commitHash, "revision", gitOps);
+        await openDiffAgainstGitRef(
+            fileUri,
+            safePath,
+            fileCtx.commitHash,
+            "revision",
+            gitOps,
+            executor,
+        );
     } catch (error) {
         const message = getErrorMessage(error);
         vscode.window.showErrorMessage(`Compare with local failed: ${message}`);
