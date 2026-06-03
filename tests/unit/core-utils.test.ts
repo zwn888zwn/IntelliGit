@@ -427,6 +427,29 @@ describe("core utilities", () => {
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
     });
 
+    it("graph compute bends short cross-column edges at row centers", () => {
+        const graph = computeGraph([
+            { hash: "head", parentHashes: ["merge"] },
+            { hash: "merge", parentHashes: ["main-2", "side-2"], refs: ["alpha"] },
+            { hash: "main-2", parentHashes: ["main-1"] },
+            { hash: "side-2", parentHashes: ["side-1"] },
+            { hash: "main-1", parentHashes: ["base"] },
+            { hash: "side-1", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        const turningSegment = graph.rows[2].elements.find(
+            (element) => element.type === "edge" && element.edgeId === "merge:side-2:1",
+        );
+
+        expect(turningSegment && turningSegment.type === "edge" && turningSegment.fromAnchor).toBe(
+            "center",
+        );
+        expect(turningSegment && turningSegment.type === "edge" && turningSegment.toAnchor).toBe(
+            "nextCenter",
+        );
+    });
+
     it("graph compute uses dynamic recommended width for wide histories", () => {
         const wide = computeGraph([
             { hash: "merge", parentHashes: ["a", "b", "c", "d", "e", "f", "g"] },

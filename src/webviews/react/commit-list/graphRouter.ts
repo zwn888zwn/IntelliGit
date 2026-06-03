@@ -198,11 +198,11 @@ function edgeSegmentForRow(
         return null;
     }
 
-    if (!isLongEdge(edge) && rowIndex === edge.downRowIndex) {
+    if (!isLongEdge(edge) && rowIndex >= edge.downRowIndex) {
         return null;
     }
 
-    if (!isLongEdge(edge) && rowIndex === edge.downRowIndex - 1) {
+    if (!isLongEdge(edge)) {
         return {
             type: "edge",
             edgeId: edge.edgeId,
@@ -211,8 +211,11 @@ function edgeSegmentForRow(
                 rowIndex === edge.upRowIndex
                     ? getNodePosition(rowRenderPositions, rowIndex)
                     : getEdgePosition(rowRenderPositions, rowIndex, edge.edgeId),
-            toPosition: getNodePosition(rowRenderPositions, edge.downRowIndex),
-            fromAnchor: rowIndex === edge.upRowIndex ? "center" : "top",
+            toPosition:
+                rowIndex + 1 === edge.downRowIndex
+                    ? getNodePosition(rowRenderPositions, edge.downRowIndex)
+                    : getEdgePosition(rowRenderPositions, rowIndex + 1, edge.edgeId),
+            fromAnchor: "center",
             toAnchor: "nextCenter",
         };
     }
