@@ -392,8 +392,60 @@ export class GitOps {
                       .map((r) => r.trim())
                       .filter(Boolean)
                 : [],
+            containingBranches: await this.getContainingBranches(hash),
             files: Array.from(filesByPath.values()),
         };
+    }
+
+    private async getContainingBranches(hash: string): Promise<string[] | undefined> {
+        try {
+            const output = await this.executor.run([
+                "for-each-ref",
+                `--contains=${hash}`,
+                "--format=%(HEAD)\t%(refname:short)\t%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ]);
+
+            const currentLocals: string[] = [];
+            const localBranches: string[] = [];
+            const remoteBranches: string[] = [];
+            let includeHead = false;
+
+            for (const line of output.trim().split("\n")) {
+                if (!line.trim()) continue;
+                const [headMarker = "", shortName = "", refName = ""] = line.split("\t");
+                if (!shortName || refName.endsWith("/HEAD")) continue;
+                const isRemote = refName.startsWith("refs/remotes/");
+
+                if (!isRemote && headMarker === "*") {
+                    includeHead = true;
+                    currentLocals.push(shortName);
+                    continue;
+                }
+
+                if (isRemote) {
+                    remoteBranches.push(shortName);
+                } else {
+                    localBranches.push(shortName);
+                }
+            }
+
+            currentLocals.sort((a, b) => a.localeCompare(b));
+            localBranches.sort((a, b) => a.localeCompare(b));
+            remoteBranches.sort((a, b) => a.localeCompare(b));
+
+            const branches = [
+                ...(includeHead ? ["HEAD"] : []),
+                ...currentLocals,
+                ...localBranches,
+                ...remoteBranches,
+            ];
+            return branches.length > 0 ? branches : undefined;
+        } catch (err) {
+            logGitOpsWarning("Failed to get containing branches", err);
+            return undefined;
+        }
     }
 
     // --- Working tree operations ---

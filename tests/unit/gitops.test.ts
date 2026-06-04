@@ -344,12 +344,19 @@ describe("GitOps", () => {
 
             const nameStatusOutput = "M\tsrc/foo.ts\nA\tsrc/bar.ts\n";
             const numstatOutput = "10\t2\tsrc/foo.ts\n5\t0\tsrc/bar.ts\n";
+            const containingBranchesOutput = [
+                "*\tmain\trefs/heads/main",
+                " \tfeature/demo\trefs/heads/feature/demo",
+                " \torigin/feature/demo\trefs/remotes/origin/feature/demo",
+                " \torigin/main\trefs/remotes/origin/main",
+            ].join("\n");
 
             const executor = {
                 run: vi.fn(async (args: string[]) => {
                     if (args[0] === "show") return showOutput;
                     if (args.includes("--name-status")) return nameStatusOutput;
                     if (args.includes("--numstat")) return numstatOutput;
+                    if (args[0] === "for-each-ref") return containingBranchesOutput;
                     return "";
                 }),
             } as unknown as GitExecutor;
@@ -368,6 +375,13 @@ describe("GitOps", () => {
             expect(detail.files[1].path).toBe("src/bar.ts");
             expect(detail.files[1].status).toBe("A");
             expect(detail.files[1].additions).toBe(5);
+            expect(detail.containingBranches).toEqual([
+                "HEAD",
+                "main",
+                "feature/demo",
+                "origin/feature/demo",
+                "origin/main",
+            ]);
         });
 
         it("decodes git quoted non-ASCII commit file paths and stats", async () => {
@@ -389,6 +403,7 @@ describe("GitOps", () => {
                     if (args[0] === "show") return showOutput;
                     if (args.includes("--name-status")) return `A\t${quotedPath}\n`;
                     if (args.includes("--numstat")) return `12\t0\t${quotedPath}\n`;
+                    if (args[0] === "for-each-ref") return "";
                     return "";
                 }),
             } as unknown as GitExecutor;

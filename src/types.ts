@@ -85,6 +85,7 @@ export interface CommitDetail {
     date: string;
     parentHashes: string[];
     refs: string[];
+    containingBranches?: string[];
     files: CommitFile[];
 }
 
