@@ -181,7 +181,7 @@
                 "title": "Open in Editor",
                 "category": "IntelliGit",
                 "icon": "$(go-to-file)",
-                "enablement": "resourceScheme == intelligit-diff-editable && intelligit.commitDiffSourceExists"
+                "enablement": "(resourceScheme == intelligit-diff || resourceScheme == intelligit-diff-editable || resourceScheme == git) && intelligit.commitDiffSourceExists"
             },
             {
                 "command": "intelligit.previousDiffChange",
@@ -436,7 +436,7 @@
                 },
                 {
                     "command": "intelligit.openCommitDiffSource",
-                    "when": "resourceScheme == intelligit-diff-editable",
+                    "when": "(resourceScheme == intelligit-diff || resourceScheme == intelligit-diff-editable || resourceScheme == git) && intelligit.commitDiffSourceExists",
                     "group": "navigation@8"
                 }
             ],

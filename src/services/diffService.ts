@@ -17,6 +17,9 @@ import { EMPTY_TREE_HASH } from "../utils/constants";
 
 const DIFF_DOCUMENT_SCHEME = "intelligit-diff";
 const DIFF_EDITABLE_SCHEME = "intelligit-diff-editable";
+const GIT_SCHEME = "git";
+const COMMIT_DIFF_GIT_QUERY_KEY = "intelligitCommitDiff";
+const COMMIT_DIFF_TEXT_QUERY_KEY = "intelligitCommitDiff";
 
 const BINARY_FILE_EXTENSIONS = new Set([
     ".7z",
@@ -60,17 +63,32 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
         filePath: string,
         ref: string,
         content: string,
-        options: { forcePlainTextUri?: boolean } = {},
+        options: {
+            forcePlainTextUri?: boolean;
+            markAsCommitDiff?: boolean;
+            originalPath?: string;
+            sourceFsPath?: string;
+        } = {},
     ): vscode.Uri {
         const id = String(this.nextId++);
+        const query = new URLSearchParams({
+            ref,
+            id,
+            path: normalizeGitPath(filePath),
+        });
+        if (options.markAsCommitDiff) {
+            query.set(COMMIT_DIFF_TEXT_QUERY_KEY, "1");
+        }
+        if (options.originalPath) {
+            query.set("originalPath", normalizeGitPath(options.originalPath));
+        }
+        if (options.sourceFsPath) {
+            query.set("sourceFsPath", options.sourceFsPath);
+        }
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
             path: makeTextDiffUriPath(id, filePath, options.forcePlainTextUri),
-            query: new URLSearchParams({
-                ref,
-                id,
-                path: normalizeGitPath(filePath),
-            }).toString(),
+            query: query.toString(),
         });
         this.contents.set(uri.toString(), content);
         return uri;
@@ -232,6 +250,10 @@ export function registerDiffContentProvider(subscriptions: vscode.Disposable[]):
             editableDiffProvider,
             { isCaseSensitive: true },
         ),
+        vscode.languages.registerDefinitionProvider(
+            [{ scheme: GIT_SCHEME }, { scheme: DIFF_DOCUMENT_SCHEME }],
+            createCommitDiffDefinitionProvider(),
+        ),
         vscode.workspace.onDidCloseTextDocument((document) => {
             if (document.uri.scheme === DIFF_DOCUMENT_SCHEME) {
                 diffContentProvider?.release(document.uri);
@@ -286,15 +308,234 @@ function isPreviewableImageFilePath(filePath: string): boolean {
     return PREVIEWABLE_IMAGE_EXTENSIONS.has(path.posix.extname(filePath).toLowerCase());
 }
 
-function createGitResourceUri(fileUri: vscode.Uri, ref: string): vscode.Uri {
+function createGitResourceUri(
+    fileUri: vscode.Uri,
+    ref: string,
+    options: { markAsCommitDiff?: boolean; originalPath?: string } = {},
+): vscode.Uri {
     return vscode.Uri.from({
-        scheme: "git",
+        scheme: GIT_SCHEME,
         path: fileUri.path,
         query: JSON.stringify({
             path: fileUri.fsPath,
             ref,
+            ...(options.originalPath ? { originalPath: options.originalPath } : {}),
+            ...(options.markAsCommitDiff ? { [COMMIT_DIFF_GIT_QUERY_KEY]: true } : {}),
         }),
     });
+}
+
+function parseGitResourceQuery(
+    uri: vscode.Uri,
+): { path?: string; ref?: string; originalPath?: string; intelligitCommitDiff?: boolean } | null {
+    if (uri.scheme !== GIT_SCHEME || !uri.query) return null;
+    try {
+        const parsed = JSON.parse(uri.query) as {
+            path?: unknown;
+            ref?: unknown;
+            originalPath?: unknown;
+            intelligitCommitDiff?: unknown;
+        };
+        return {
+            path: typeof parsed.path === "string" ? parsed.path : undefined,
+            ref: typeof parsed.ref === "string" ? parsed.ref : undefined,
+            originalPath: typeof parsed.originalPath === "string" ? parsed.originalPath : undefined,
+            intelligitCommitDiff:
+                typeof parsed.intelligitCommitDiff === "boolean"
+                    ? parsed.intelligitCommitDiff
+                    : undefined,
+        };
+    } catch {
+        return null;
+    }
+}
+
+function parseDiffDocumentQuery(uri: vscode.Uri): URLSearchParams | null {
+    if (uri.scheme !== DIFF_DOCUMENT_SCHEME && uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
+    return new URLSearchParams(uri.query);
+}
+
+function isIntelliGitCommitDiffTextUri(uri: vscode.Uri): boolean {
+    return parseDiffDocumentQuery(uri)?.get(COMMIT_DIFF_TEXT_QUERY_KEY) === "1";
+}
+
+function isIntelliGitCommitDiffUri(uri: vscode.Uri): boolean {
+    return isIntelliGitCommitDiffGitUri(uri) || isIntelliGitCommitDiffTextUri(uri);
+}
+
+function isIntelliGitCommitDiffGitUri(uri: vscode.Uri): boolean {
+    return parseGitResourceQuery(uri)?.intelligitCommitDiff === true;
+}
+
+function getCommitDiffSourceUriFromGitUri(uri: vscode.Uri): vscode.Uri | null {
+    const filePath = parseGitResourceQuery(uri)?.path?.trim();
+    if (!filePath) return null;
+    return vscode.Uri.file(filePath);
+}
+
+function getCommitDiffSourceUri(uri: vscode.Uri): vscode.Uri | null {
+    if (uri.scheme === GIT_SCHEME) {
+        return getCommitDiffSourceUriFromGitUri(uri);
+    }
+    const sourceFsPath = parseDiffDocumentQuery(uri)?.get("sourceFsPath")?.trim();
+    if (!sourceFsPath) return null;
+    return vscode.Uri.file(sourceFsPath);
+}
+
+function isWordBoundaryCharacter(value: string | undefined): boolean {
+    return !value || !/[A-Za-z0-9_]/.test(value);
+}
+
+function findWordPositionInLine(lineText: string, symbol: string): number | null {
+    if (!symbol) return null;
+    for (let index = lineText.indexOf(symbol); index >= 0; index = lineText.indexOf(symbol, index + 1)) {
+        const before = lineText[index - 1];
+        const after = lineText[index + symbol.length];
+        if (isWordBoundaryCharacter(before) && isWordBoundaryCharacter(after)) {
+            return index;
+        }
+    }
+    return null;
+}
+
+function findDefinitionAnchorPosition(
+    diffDocument: vscode.TextDocument,
+    sourceDocument: vscode.TextDocument,
+    position: vscode.Position,
+): vscode.Position {
+    const wordRange = diffDocument.getWordRangeAtPosition(position);
+    const symbol = wordRange ? diffDocument.getText(wordRange) : "";
+    if (!symbol) return position;
+
+    const sameLine = Math.min(position.line, Math.max(0, sourceDocument.lineCount - 1));
+    const sameLineIndex = findWordPositionInLine(sourceDocument.lineAt(sameLine).text, symbol);
+    if (sameLineIndex !== null) {
+        return new vscode.Position(sameLine, sameLineIndex);
+    }
+
+    for (let offset = 1; offset < sourceDocument.lineCount; offset++) {
+        const upwardLine = sameLine - offset;
+        if (upwardLine >= 0) {
+            const match = findWordPositionInLine(sourceDocument.lineAt(upwardLine).text, symbol);
+            if (match !== null) return new vscode.Position(upwardLine, match);
+        }
+        const downwardLine = sameLine + offset;
+        if (downwardLine < sourceDocument.lineCount) {
+            const match = findWordPositionInLine(sourceDocument.lineAt(downwardLine).text, symbol);
+            if (match !== null) return new vscode.Position(downwardLine, match);
+        }
+    }
+
+    return position;
+}
+
+function createCommitDiffDefinitionProvider(): vscode.DefinitionProvider {
+    return {
+        async provideDefinition(document, position) {
+            if (!isIntelliGitCommitDiffUri(document.uri)) return null;
+            return executeCommitDiffDefinition(document, position, { openResult: false });
+        },
+    };
+}
+
+type NavigableSymbol = {
+    start: number;
+    end: number;
+    symbol: string;
+};
+
+function collectNavigableSymbols(lineText: string): NavigableSymbol[] {
+    const symbols = new Map<string, NavigableSymbol>();
+    const add = (symbol: string, start: number) => {
+        if (!symbol) return;
+        const end = start + symbol.length;
+        symbols.set(`${start}:${end}:${symbol}`, { start, end, symbol });
+    };
+
+    const declarationPattern = /\bfunc(?:\s*\([^)]*\))?\s+([A-Za-z_][A-Za-z0-9_]*)\b/g;
+    let declarationMatch: RegExpExecArray | null;
+    while ((declarationMatch = declarationPattern.exec(lineText)) !== null) {
+        const symbol = declarationMatch[1] ?? "";
+        const fullMatch = declarationMatch[0] ?? "";
+        const symbolOffset = fullMatch.lastIndexOf(symbol);
+        if (symbolOffset < 0) continue;
+        add(symbol, declarationMatch.index + symbolOffset);
+    }
+
+    return [...symbols.values()];
+}
+
+function findDeclarationSymbol(
+    lineText: string,
+    symbol: string,
+): NavigableSymbol | undefined {
+    return collectNavigableSymbols(lineText).find(
+        (candidate) => candidate.symbol === symbol,
+    );
+}
+
+async function executeCommitDiffDefinition(
+    document: Pick<vscode.TextDocument, "uri" | "getWordRangeAtPosition" | "getText">,
+    position: vscode.Position,
+    options: { openResult: boolean },
+): Promise<vscode.Location[] | vscode.LocationLink[] | null> {
+    if (!isIntelliGitCommitDiffUri(document.uri)) return null;
+    const sourceUri = getCommitDiffSourceUri(document.uri);
+    if (!sourceUri) return null;
+
+    let sourceDocument: vscode.TextDocument;
+    try {
+        sourceDocument = await vscode.workspace.openTextDocument(sourceUri);
+    } catch {
+        return null;
+    }
+
+    const wordRange = document.getWordRangeAtPosition(position);
+    const symbol = wordRange ? document.getText(wordRange) : "";
+    const sourcePosition = findDefinitionAnchorPosition(
+        document as vscode.TextDocument,
+        sourceDocument,
+        position,
+    );
+    const declarationSymbol = symbol
+        ? findDeclarationSymbol(sourceDocument.lineAt(sourcePosition.line).text, symbol)
+        : undefined;
+    if (declarationSymbol) {
+        const declarationRange = new vscode.Range(
+            new vscode.Position(sourcePosition.line, declarationSymbol.start),
+            new vscode.Position(sourcePosition.line, declarationSymbol.end),
+        );
+        const declarationLocation = [{ uri: sourceUri, range: declarationRange }];
+        if (options.openResult) {
+            await vscode.window.showTextDocument(sourceUri, { selection: declarationRange });
+        }
+        return declarationLocation;
+    }
+
+    const result = await vscode.commands.executeCommand<
+        vscode.Location[] | vscode.LocationLink[] | undefined
+    >("vscode.executeDefinitionProvider", sourceUri, sourcePosition);
+
+    if (!options.openResult) {
+        return result ?? null;
+    }
+
+    const first = Array.isArray(result) ? result[0] : undefined;
+    if (first && "targetUri" in first) {
+        await vscode.window.showTextDocument(first.targetUri, {
+            selection: first.targetSelectionRange ?? first.targetRange,
+        });
+        return result ?? null;
+    }
+    if (first && "uri" in first) {
+        await vscode.window.showTextDocument(first.uri, { selection: first.range });
+        return result ?? null;
+    }
+
+    await vscode.window.showTextDocument(sourceUri, {
+        selection: new vscode.Range(sourcePosition, sourcePosition),
+    });
+    return result ?? null;
 }
 
 async function gitFileExistsAtRef(
@@ -331,20 +572,39 @@ function isUriLike(value: unknown): value is vscode.Uri {
 
 export function getCommitDiffEditorUri(ctx?: unknown): vscode.Uri | null {
     if (isUriLike(ctx) && ctx.scheme === DIFF_EDITABLE_SCHEME) return ctx;
+    if (isUriLike(ctx) && isIntelliGitCommitDiffTextUri(ctx)) return ctx;
+    if (isUriLike(ctx) && isIntelliGitCommitDiffGitUri(ctx)) return ctx;
     const activeUri = vscode.window.activeTextEditor?.document.uri;
+    if (activeUri && isIntelliGitCommitDiffTextUri(activeUri)) return activeUri;
+    if (activeUri && isIntelliGitCommitDiffGitUri(activeUri)) return activeUri;
     return activeUri?.scheme === DIFF_EDITABLE_SCHEME ? activeUri : null;
 }
 
 export function getCommitDiffFilePathFromUri(uri: vscode.Uri): string | null {
+    if (uri.scheme === GIT_SCHEME) {
+        const originalPath = parseGitResourceQuery(uri)?.originalPath?.trim();
+        if (!originalPath) return null;
+        return assertRepoRelativePath(originalPath);
+    }
+    if (uri.scheme === DIFF_DOCUMENT_SCHEME) {
+        const originalPath = parseDiffDocumentQuery(uri)?.get("originalPath")?.trim();
+        if (!originalPath) return null;
+        return assertRepoRelativePath(originalPath);
+    }
     if (uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
     const rawPath =
-        new URLSearchParams(uri.query).get("path")?.trim() ??
+        parseDiffDocumentQuery(uri)?.get("path")?.trim() ??
         uri.path.replace(/^\/+/, "").trim();
     if (!rawPath) return null;
     return assertRepoRelativePath(rawPath);
 }
 
 export function getDiffOriginalFilePathFromUri(uri: vscode.Uri): string | null {
+    if (uri.scheme === GIT_SCHEME) {
+        const originalPath = parseGitResourceQuery(uri)?.originalPath?.trim();
+        if (!originalPath) return null;
+        return assertRepoRelativePath(originalPath);
+    }
     if (uri.scheme !== DIFF_DOCUMENT_SCHEME && uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
     const rawPath =
         new URLSearchParams(uri.query).get("path")?.trim() ??
@@ -494,13 +754,23 @@ export async function openCommitFileDiff(
             const shortParent = parentDisplayHash.slice(0, 8);
             const shortCommit = commitHash.slice(0, 8);
             const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
-            const leftUri = createGitResourceUri(workingTreeUri, parentRef);
-            const rightUri = createGitResourceUri(workingTreeUri, commitHash);
+            const leftUri = createGitResourceUri(workingTreeUri, parentRef, {
+                markAsCommitDiff: true,
+                originalPath: safePath,
+            });
+            const rightUri = createGitResourceUri(workingTreeUri, commitHash, {
+                markAsCommitDiff: true,
+                originalPath: safePath,
+            });
             await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
             return { parentRef, parentDisplayHash, leftUri, rightUri };
         }
     }
 
+    const [leftExists, rightExists] = await Promise.all([
+        gitFileExistsAtRef(safePath, parentRef, executor),
+        gitFileExistsAtRef(safePath, commitHash, executor),
+    ]);
     let leftContent: string;
     try {
         leftContent = await gitOps.getFileContentAtRef(safePath, parentRef);
@@ -521,11 +791,17 @@ export async function openCommitFileDiff(
     const leftDoc = await vscode.workspace.openTextDocument(
         diffProvider.createUri(safePath, parentRef, leftSnapshot.content, {
             forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+            markAsCommitDiff: !isBinaryFilePath(safePath) && leftExists && rightExists,
+            originalPath: safePath,
+            sourceFsPath: workingTreeUri.fsPath,
         }),
     );
     const rightDoc = await vscode.workspace.openTextDocument(
-        getEditableDiffProvider().createUri(safePath, commitHash, rightSnapshot.content, {
+        diffProvider.createUri(safePath, commitHash, rightSnapshot.content, {
             forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+            markAsCommitDiff: !isBinaryFilePath(safePath) && leftExists && rightExists,
+            originalPath: safePath,
+            sourceFsPath: workingTreeUri.fsPath,
         }),
     );
     const shortParent = parentDisplayHash.slice(0, 8);

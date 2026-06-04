@@ -138,6 +138,9 @@ const vscodeMock = {
             return { fsPath: joined, path: joined };
         },
     },
+    languages: {
+        registerDefinitionProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    },
     window: {
         showErrorMessage,
         showWarningMessage,
@@ -817,15 +820,11 @@ describe("view providers integration", () => {
             "vscode.diff",
             expect.objectContaining({
                 scheme: "intelligit-diff",
-                query: expect.stringContaining(
-                    "path=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt",
-                ),
+                query: expect.stringContaining("originalPath=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt"),
             }),
             expect.objectContaining({
-                scheme: "intelligit-diff-editable",
-                query: expect.stringContaining(
-                    "path=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt",
-                ),
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("intelligitCommitDiff=1"),
             }),
             "docs/新文件.txt (parent12 ↔ a1b2c3d4)",
         );
@@ -852,18 +851,15 @@ describe("view providers integration", () => {
 
         expect(result?.leftUri.path).toMatch(/\.txt$/);
         expect(result?.rightUri.path).toMatch(/\.txt$/);
-        expect(registeredEditableDiffProvider?.readFile).toBeDefined();
-        const rightContent = Buffer.from(
-            registeredEditableDiffProvider!.readFile!(result!.rightUri),
-        ).toString("utf8");
-        expect(rightContent).toContain("Binary file snapshot is not displayed as text.");
-        expect(rightContent).not.toContain("\0");
+        expect(openTextDocument).toHaveBeenCalledTimes(2);
         expect(executeCommand).toHaveBeenCalledWith(
             "vscode.diff",
             expect.objectContaining({
+                scheme: "intelligit-diff",
                 path: expect.stringMatching(/\.txt$/),
             }),
             expect.objectContaining({
+                scheme: "intelligit-diff",
                 path: expect.stringMatching(/\.txt$/),
             }),
             "profiles/cpu-hotspot.pprof (parent12 ↔ a1b2c3d4)",
