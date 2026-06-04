@@ -241,6 +241,18 @@ function makeGitOpsMock() {
                 refs: [],
             },
         ]),
+        findCommitsByHashPrefix: vi.fn(async (hashPrefix: string) => [
+            {
+                hash: `${hashPrefix}full`,
+                shortHash: hashPrefix.slice(0, 7),
+                message: "hash match",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-02-19T00:00:00Z",
+                parentHashes: [],
+                refs: [],
+            },
+        ]),
         getUnpushedCommitHashes: vi.fn(async () => ["abc1234"]),
         getCommitDetail: vi.fn(async (hash: string) => ({
             hash,
@@ -526,6 +538,11 @@ describe("view providers integration", () => {
         await webview.send({ type: "loadMore" });
         expect(gitOps.getLog.mock.calls.length - logCallsBeforePagedFetch).toBe(2);
 
+        const hashSearchCallsBefore = gitOps.findCommitsByHashPrefix.mock.calls.length;
+        await webview.send({ type: "filterText", text: "55d744b" });
+        expect(gitOps.findCommitsByHashPrefix.mock.calls.length - hashSearchCallsBefore).toBe(1);
+
+        await webview.send({ type: "filterText", text: "feat" });
         gitOps.getLog.mockRejectedValueOnce(new Error("git failed"));
         await provider.refresh();
         expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Git log error"));

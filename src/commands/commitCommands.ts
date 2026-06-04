@@ -49,8 +49,11 @@ export async function handleCommitContextAction(params: {
 
     switch (action) {
         case "copyRevision": {
-            await vscode.env.clipboard.writeText(validatedHash);
-            vscode.window.showInformationMessage(`Copied revision ${short}.`);
+            const copiedRevision = (
+                await executor.run(["rev-parse", "--short", validatedHash])
+            ).trim() || short;
+            await vscode.env.clipboard.writeText(copiedRevision);
+            vscode.window.showInformationMessage(`Copied revision ${copiedRevision}.`);
             return;
         }
         case "createPatch": {

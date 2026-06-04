@@ -210,7 +210,43 @@ export class GitOps {
             args.push(`--grep=${filterText}`, "-i", "--fixed-strings");
         }
 
-        const result = await this.executor.run(args);
+        return this.parseCommitLog(await this.executor.run(args));
+    }
+
+    async findCommitsByHashPrefix(
+        hashPrefix: string,
+        maxCount: number = 500,
+        branch?: string,
+    ): Promise<Commit[]> {
+        const normalizedPrefix = hashPrefix.trim().toLowerCase();
+        if (!normalizedPrefix) return [];
+
+        const pageSize = Math.max(100, Math.min(maxCount, 500));
+        const matches: Commit[] = [];
+        let skip = 0;
+
+        while (matches.length < maxCount) {
+            const page = await this.getLog(pageSize, branch, undefined, skip);
+            if (page.length === 0) break;
+
+            for (const commit of page) {
+                if (
+                    commit.hash.toLowerCase().startsWith(normalizedPrefix) ||
+                    commit.shortHash.toLowerCase().startsWith(normalizedPrefix)
+                ) {
+                    matches.push(commit);
+                    if (matches.length >= maxCount) break;
+                }
+            }
+
+            if (page.length < pageSize) break;
+            skip += page.length;
+        }
+
+        return matches.slice(0, maxCount);
+    }
+
+    private parseCommitLog(result: string): Commit[] {
         const commits: Commit[] = [];
 
         for (const record of result.split(RECORD_SEP)) {

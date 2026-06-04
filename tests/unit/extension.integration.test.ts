@@ -141,6 +141,7 @@ class MockEventEmitter<T> {
 
 const defaultExecutorRunImpl = async (args: string[]) => {
     if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
+    if (args[0] === "rev-parse" && args[1] === "--short") return args[2]?.slice(0, 7) ?? "feed123";
     if (args[0] === "rev-parse" && args[1] === "HEAD") return "feed1234";
     if (args[0] === "format-patch") return "patch-content";
     if (args[0] === "log" && args.includes("--format=%B")) return "current commit body";
@@ -1330,7 +1331,7 @@ describe("extension integration", () => {
         latestCommitGraphProvider!.emitBranchFilterChanged("main");
         await waitForAsync();
 
-        expect(clipboardWriteText).toHaveBeenCalledWith("a1b2c3d4");
+        expect(clipboardWriteText).toHaveBeenCalledWith("a1b2c3d");
         expect(showSaveDialog).toHaveBeenCalled();
         expect(executorRun).toHaveBeenCalledWith(
             expect.arrayContaining(["format-patch", "-1", "--stdout", "a1b2c3d4"]),

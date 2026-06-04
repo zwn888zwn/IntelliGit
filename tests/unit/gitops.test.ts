@@ -284,6 +284,46 @@ describe("GitOps", () => {
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
             expect(call).toContain("--skip=200");
         });
+
+        it("finds commits by full or short hash prefix without grep", async () => {
+            const pageOne = [
+                makeCommitRecord(
+                    "1111111111111111111111111111111111111111",
+                    "1111111",
+                    "first",
+                    "John",
+                    "john@test.com",
+                    "2024-01-03T00:00:00Z",
+                    "",
+                    "",
+                ),
+                makeCommitRecord(
+                    "55d744b97d4feabbdd775a90f168b8770d9714e6",
+                    "55d744b",
+                    "target",
+                    "John",
+                    "john@test.com",
+                    "2024-01-02T00:00:00Z",
+                    "",
+                    "",
+                ),
+            ];
+            const run = vi.fn().mockResolvedValue(pageOne.join(""));
+            const executor = { run } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+
+            const fullMatches = await ops.findCommitsByHashPrefix("55d744b97d4f", 10);
+            const shortMatches = await ops.findCommitsByHashPrefix("55d744b", 10);
+
+            expect(fullMatches.map((commit) => commit.hash)).toEqual(["55d744b97d4feabbdd775a90f168b8770d9714e6"]);
+            expect(shortMatches.map((commit) => commit.hash)).toEqual([
+                "55d744b97d4feabbdd775a90f168b8770d9714e6",
+            ]);
+
+            const firstCallArgs = run.mock.calls[0][0] as string[];
+            expect(firstCallArgs).not.toContain("--fixed-strings");
+            expect(firstCallArgs.some((arg: string) => arg.startsWith("--grep="))).toBe(false);
+        });
     });
 
     describe("getCommitDetail", () => {

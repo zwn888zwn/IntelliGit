@@ -573,6 +573,14 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     private async loadWindow(count: number): Promise<{ commits: Commit[]; hasMore: boolean }> {
         const limit = Math.max(count, 1);
+        if (this.isHashFilterQuery(this.filterText)) {
+            const commits = await this.loadHashSearchResults(this.filterText, limit);
+            return {
+                commits: commits.slice(0, limit),
+                hasMore: commits.length > limit,
+            };
+        }
+
         if (this.currentBranch) {
             if (!this.repository) return { commits: [], hasMore: false };
             const commits = await this.gitOps.getLog(
@@ -604,6 +612,14 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async loadPage(skip: number): Promise<Commit[]> {
+        if (this.isHashFilterQuery(this.filterText)) {
+            const commits = await this.loadHashSearchResults(
+                this.filterText,
+                skip + this.PAGE_SIZE,
+            );
+            return commits.slice(skip, skip + this.PAGE_SIZE);
+        }
+
         if (this.currentBranch) {
             if (!this.repository) return [];
             return this.gitOps.getLog(
@@ -639,6 +655,29 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             this.getRepositories().map((entry) => entry.gitOps.getUnpushedCommitHashes()),
         );
         return Array.from(new Set(hashes.flat()));
+    }
+
+    private isHashFilterQuery(text: string): boolean {
+        const normalized = text.trim();
+        return normalized.length >= 4 && /^[0-9a-f]+$/i.test(normalized);
+    }
+
+    private async loadHashSearchResults(hashPrefix: string, limit: number): Promise<Commit[]> {
+        if (this.currentBranch) {
+            if (!this.repository) return [];
+            return this.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1, this.currentBranch);
+        }
+
+        const pages = await Promise.all(
+            this.getRepositories().map((entry) =>
+                entry.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1),
+            ),
+        );
+
+        return (pages.length === 1
+            ? pages[0]
+            : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        ).slice(0, limit + 1);
     }
 
     private getRepositoryEntry(root: string): RepositoryEntry {
