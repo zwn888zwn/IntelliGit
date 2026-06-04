@@ -1,5 +1,5 @@
 // Renders the commit graph canvas alongside a scrollable commit list.
-// Layout: [Graph lanes] [Commit message + inline ref badges] [Author] [Date].
+// Layout: [Graph lanes] [Commit message + inline ref badges] [Author] [Date] [Hash].
 // Includes a text search filter bar. Branch filtering is handled by the sidebar.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -22,8 +22,10 @@ import {
     FILTER_ICON_STYLE,
     FILTER_INPUT_STYLE,
     FILTER_INPUT_WRAP_STYLE,
+    HASH_COL_WIDTH,
     headerRowStyle,
     LOADING_MORE_STYLE,
+    META_COL_GAP,
     ROOT_STYLE,
     SCROLL_VIEWPORT_STYLE,
 } from "./commit-list/styles";
@@ -303,8 +305,18 @@ export function CommitList({
             <div style={headerRowStyle(headerGraphWidth)}>
                 <span style={{ flex: 1 }}>Commit</span>
                 <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
-                <span style={{ width: DATE_COL_WIDTH, textAlign: "right", marginLeft: 4 }}>
+                <span style={{ width: DATE_COL_WIDTH, textAlign: "right", marginLeft: META_COL_GAP }}>
                     Date
+                </span>
+                <span
+                    style={{
+                        width: HASH_COL_WIDTH,
+                        textAlign: "right",
+                        marginLeft: META_COL_GAP,
+                        fontFamily: "var(--vscode-editor-font-family, monospace)",
+                    }}
+                >
+                    Hash
                 </span>
             </div>
 
