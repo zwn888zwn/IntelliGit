@@ -484,7 +484,7 @@ describe("core utilities", () => {
         expect(Math.abs((sideRow?.nodePosition ?? -1) - (alphaRow?.nodePosition ?? -1))).toBeLessThanOrEqual(1);
     });
 
-    it("graph keeps a date-ordered merge side branch in the second visible column", () => {
+    it("graph orders date-ordered merge lanes with the IDEA layout comparator", () => {
         const graph = computeGraph([
             {
                 hash: "alpha-top",
@@ -538,7 +538,8 @@ describe("core utilities", () => {
         ]);
 
         expect(graph.rows.find((row) => row.commitHash === "alpha-merge")?.nodePosition).toBe(0);
-        expect(graph.rows.find((row) => row.commitHash === "ios-135-head")?.nodePosition).toBe(1);
+        expect(graph.rows.find((row) => row.commitHash === "ios-135-head")?.nodePosition).toBe(2);
+        expect(graph.rows.find((row) => row.commitHash === "master")?.nodePosition).toBe(0);
     });
 
     it("graph compute can render merge rows with an extra edge column", () => {
