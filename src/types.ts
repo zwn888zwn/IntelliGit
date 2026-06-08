@@ -14,6 +14,12 @@ export interface GitTag {
     hash: string;
 }
 
+export interface GraphRefInfo {
+    name: string;
+    type: "head" | "local" | "remote" | "tag" | "other";
+    tracked?: boolean;
+}
+
 export interface RepositoryContextInfo {
     repoId: string;
     name: string;
@@ -63,6 +69,7 @@ export interface Commit {
     date: string;
     parentHashes: string[];
     refs: string[];
+    graphRefs?: GraphRefInfo[];
 }
 
 export interface CommitFile {

@@ -1,5 +1,6 @@
 import { buildPermanentGraph, orderCommitsForGraph } from "./commit-list/graphModel";
 import { buildRenderRows, type CommitGraphLayoutResult } from "./commit-list/graphRouter";
+import type { GraphRefInfo } from "../../types";
 
 export const LANE_WIDTH = 16;
 export const DOT_RADIUS = 3.25;
@@ -21,6 +22,7 @@ export function computeGraph(
         hash: string;
         parentHashes: string[];
         refs?: string[];
+        graphRefs?: GraphRefInfo[];
         repoRoot?: string;
         date?: string;
     }>,
