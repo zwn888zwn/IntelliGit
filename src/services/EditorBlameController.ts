@@ -85,7 +85,14 @@ export class EditorBlameController implements vscode.Disposable {
             };
             this.applySessionToEditor(editor);
         } catch (err) {
-            vscode.window.showErrorMessage(`Git blame failed: ${getErrorMessage(err)}`);
+            const message = getErrorMessage(err);
+            if (isPathMissingInHeadError(message)) {
+                vscode.window.showWarningMessage(
+                    "Git blame is unavailable because this file has not been committed yet.",
+                );
+            } else {
+                vscode.window.showErrorMessage(`Git blame failed: ${message}`);
+            }
             this.disposeSession();
         }
 
@@ -170,6 +177,11 @@ export class EditorBlameController implements vscode.Disposable {
             vscode.commands.executeCommand("setContext", BLAME_ACTIVE_CONTEXT, active),
         ]);
     }
+}
+
+function isPathMissingInHeadError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes("no such path") && normalized.includes(" in head");
 }
 
 function buildBlameDecorations(lines: GitBlameLine[]): vscode.DecorationOptions[] {
