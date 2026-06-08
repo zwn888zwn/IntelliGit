@@ -78,7 +78,6 @@ export function BranchPopupOverlay({
     );
     const filter = query.trim().toLowerCase();
     const hasMultipleRepositories = repositories.length > 1;
-    const current = branches.find((branch) => branch.isCurrent);
     const commonLocalBranches = useMemo(
         () =>
             buildCommonLocalBranches(repositories, repositoryBranches)
@@ -126,20 +125,10 @@ export function BranchPopupOverlay({
                 .sort(sortBranches),
         [branches, filter],
     );
-    const recent = useMemo(() => {
-        const candidates =
-            locals.length > 0 ? locals : branches.filter((branch) => !branch.isRemote);
-        const result: Branch[] = [];
-        if (current && (!filter || current.name.toLowerCase().includes(filter))) {
-            result.push(current);
-        }
-        for (const branch of candidates) {
-            if (result.some((item) => item.name === branch.name)) continue;
-            result.push(branch);
-            if (result.length >= 6) break;
-        }
-        return result;
-    }, [branches, current, filter, locals]);
+    const recent = useMemo(
+        () => buildRecentBranches(branches, filter, 6),
+        [branches, filter],
+    );
 
     useEffect(() => {
         const onMouseDown = (event: MouseEvent): void => {
@@ -557,11 +546,15 @@ function RepositoryRow({
     onHover: () => void;
     onActivate: (event: React.MouseEvent<HTMLElement>) => void;
 }): React.ReactElement {
+    const rowTitle = currentBranchName
+        ? `${repository.name}\n${currentBranchName}`
+        : repository.name;
     return (
         <button
             type="button"
             className="intelligit-branch-popup-row"
             data-selected={selected ? "true" : "false"}
+            title={rowTitle}
             onMouseEnter={onHover}
             onClick={(event) => {
                 event.preventDefault();
@@ -579,8 +572,30 @@ function RepositoryRow({
                     marginRight: 8,
                 }}
             />
-            <span style={{ flex: 1, textAlign: "left", fontWeight: selected ? 600 : 400 }}>{repository.name}</span>
-            <span style={{ opacity: 0.58 }}>{currentBranchName}</span>
+            <span
+                style={{
+                    flex: "0 0 auto",
+                    textAlign: "left",
+                    fontWeight: selected ? 600 : 400,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                }}
+            >
+                {repository.name}
+            </span>
+            <span
+                style={{
+                    flex: "0 1 auto",
+                    minWidth: 0,
+                    maxWidth: "42%",
+                    textAlign: "right",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    opacity: 0.58,
+                }}
+            >
+                {currentBranchName}
+            </span>
             <LuChevronRight size={14} style={{ opacity: 0.65, marginLeft: 8 }} />
         </button>
     );
@@ -601,11 +616,13 @@ function BranchPopupRow({
 }): React.ReactElement {
     const shortName = branch.name.replace(/^.*\//, "");
     const mainLike = shortName === "main" || shortName === "master";
+    const rowTitle = branch.upstream ? `${branch.name}\n${branch.upstream}` : branch.name;
     return (
         <button
             type="button"
             className="intelligit-branch-popup-row"
             data-selected={selected ? "true" : "false"}
+            title={rowTitle}
             onMouseEnter={onHover}
             onClick={(event) => onClick(event, branch)}
             style={rowButtonStyle(paddingLeft)}
@@ -617,10 +634,27 @@ function BranchPopupRow({
             ) : (
                 <GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />
             )}
-            <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <span
+                style={{
+                    flex: "0 0 auto",
+                    textAlign: "left",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                }}
+            >
                 {branch.name}
             </span>
-            <span style={{ opacity: 0.58, overflow: "hidden", textOverflow: "ellipsis" }}>
+            <span
+                style={{
+                    flex: "1 1 0",
+                    minWidth: 0,
+                    maxWidth: "100%",
+                    textAlign: "right",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    opacity: 0.58,
+                }}
+            >
                 {branch.upstream ?? ""}
             </span>
             <TrackingText branch={branch} />
@@ -652,7 +686,6 @@ const RepositorySubmenu = React.forwardRef<
     const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
     const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set());
     const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
-    const current = branches.find((branch) => branch.isCurrent);
     const locals = useMemo(
         () => branches.filter((branch) => !branch.isRemote).sort(sortBranches),
         [branches],
@@ -664,16 +697,7 @@ const RepositorySubmenu = React.forwardRef<
     const localTree = useMemo(() => buildPrefixTree(locals), [locals]);
     const remoteGroups = useMemo(() => buildRemoteGroups(remotes), [remotes]);
     const tagTree = useMemo(() => buildTagTree(tags), [tags]);
-    const recent = useMemo(() => {
-        const result: Branch[] = [];
-        if (current) result.push(current);
-        for (const branch of locals) {
-            if (result.some((item) => item.name === branch.name)) continue;
-            result.push(branch);
-            if (result.length >= 5) break;
-        }
-        return result;
-    }, [current, locals]);
+    const recent = useMemo(() => buildRecentBranches(branches, "", 5), [branches]);
 
     const openBranchMenu = (event: React.MouseEvent<HTMLElement>, branch: Branch): void => {
         const rect = event.currentTarget.getBoundingClientRect();
@@ -1064,6 +1088,15 @@ function rowButtonStyle(paddingLeft: number): React.CSSProperties {
 function sortBranches(a: Branch, b: Branch): number {
     if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
     return a.name.localeCompare(b.name);
+}
+
+function buildRecentBranches(branches: Branch[], filter: string, limit: number): Branch[] {
+    const normalizedFilter = filter.trim().toLowerCase();
+    const matchesFilter = (branch: Branch) =>
+        !normalizedFilter || branch.name.toLowerCase().includes(normalizedFilter);
+    const locals = branches.filter((branch) => !branch.isRemote && matchesFilter(branch));
+    const remotes = branches.filter((branch) => branch.isRemote && matchesFilter(branch));
+    return [...locals, ...remotes].slice(0, limit);
 }
 
 function buildCommonLocalBranches(

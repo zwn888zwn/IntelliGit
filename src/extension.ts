@@ -1082,7 +1082,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showWarningMessage("No git repository found for the selected file.");
                 return;
             }
-            await compareEditorFileWithRevision(ctx, repository.root, repository.gitOps);
+            await compareEditorFileWithRevision(
+                ctx,
+                repository.root,
+                repository.gitOps,
+                repository.executor,
+            );
         }),
         vscode.commands.registerCommand("intelligit.compareWithBranch", async (ctx?: unknown) => {
             const repository = resolveRepositoryForEditorContext(ctx);
@@ -1090,7 +1095,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 vscode.window.showWarningMessage("No git repository found for the selected file.");
                 return;
             }
-            await compareEditorFileWithBranch(ctx, repository.root, repository.gitOps);
+            await compareEditorFileWithBranch(
+                ctx,
+                repository.root,
+                repository.gitOps,
+                repository.executor,
+            );
         }),
         vscode.commands.registerCommand(
             "intelligit.compareProjectWithBranch",
@@ -1239,6 +1249,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     ctx,
                     repository.root,
                     repository.gitOps,
+                    repository.executor,
                 );
             },
         ),

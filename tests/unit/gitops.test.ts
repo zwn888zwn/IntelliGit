@@ -77,6 +77,17 @@ describe("GitOps", () => {
             expect(branches[0].behind).toBe(3);
             expect(branches[0].ahead).toBe(0);
         });
+
+        it("requests branches sorted by latest committer date", async () => {
+            const executor = createMockExecutor({ branch: "" });
+            const ops = new GitOps(executor);
+
+            await ops.getBranches();
+
+            expect(executor.run).toHaveBeenCalledWith(
+                expect.arrayContaining(["branch", "-a", "--sort=-committerdate"]),
+            );
+        });
     });
 
     describe("getBranchComparisonFiles", () => {
@@ -241,8 +252,18 @@ describe("GitOps", () => {
             await ops.getLog(100, "feature");
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
+            expect(call).toContain("--date-order");
             expect(call).toContain("feature");
             expect(call).not.toContain("--all");
+        });
+
+        it("requests date order for graphable commit history", async () => {
+            const executor = createMockExecutor({ log: "" });
+            const ops = new GitOps(executor);
+            await ops.getLog();
+
+            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
+            expect(call).toContain("--date-order");
         });
 
         it("passes filter text argument", async () => {
@@ -262,6 +283,46 @@ describe("GitOps", () => {
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
             expect(call).toContain("--skip=200");
+        });
+
+        it("finds commits by full or short hash prefix without grep", async () => {
+            const pageOne = [
+                makeCommitRecord(
+                    "1111111111111111111111111111111111111111",
+                    "1111111",
+                    "first",
+                    "John",
+                    "john@test.com",
+                    "2024-01-03T00:00:00Z",
+                    "",
+                    "",
+                ),
+                makeCommitRecord(
+                    "55d744b97d4feabbdd775a90f168b8770d9714e6",
+                    "55d744b",
+                    "target",
+                    "John",
+                    "john@test.com",
+                    "2024-01-02T00:00:00Z",
+                    "",
+                    "",
+                ),
+            ];
+            const run = vi.fn().mockResolvedValue(pageOne.join(""));
+            const executor = { run } as unknown as GitExecutor;
+            const ops = new GitOps(executor);
+
+            const fullMatches = await ops.findCommitsByHashPrefix("55d744b97d4f", 10);
+            const shortMatches = await ops.findCommitsByHashPrefix("55d744b", 10);
+
+            expect(fullMatches.map((commit) => commit.hash)).toEqual(["55d744b97d4feabbdd775a90f168b8770d9714e6"]);
+            expect(shortMatches.map((commit) => commit.hash)).toEqual([
+                "55d744b97d4feabbdd775a90f168b8770d9714e6",
+            ]);
+
+            const firstCallArgs = run.mock.calls[0][0] as string[];
+            expect(firstCallArgs).not.toContain("--fixed-strings");
+            expect(firstCallArgs.some((arg: string) => arg.startsWith("--grep="))).toBe(false);
         });
     });
 
@@ -283,12 +344,19 @@ describe("GitOps", () => {
 
             const nameStatusOutput = "M\tsrc/foo.ts\nA\tsrc/bar.ts\n";
             const numstatOutput = "10\t2\tsrc/foo.ts\n5\t0\tsrc/bar.ts\n";
+            const containingBranchesOutput = [
+                "*\tmain\trefs/heads/main",
+                " \tfeature/demo\trefs/heads/feature/demo",
+                " \torigin/feature/demo\trefs/remotes/origin/feature/demo",
+                " \torigin/main\trefs/remotes/origin/main",
+            ].join("\n");
 
             const executor = {
                 run: vi.fn(async (args: string[]) => {
                     if (args[0] === "show") return showOutput;
                     if (args.includes("--name-status")) return nameStatusOutput;
                     if (args.includes("--numstat")) return numstatOutput;
+                    if (args[0] === "for-each-ref") return containingBranchesOutput;
                     return "";
                 }),
             } as unknown as GitExecutor;
@@ -307,6 +375,13 @@ describe("GitOps", () => {
             expect(detail.files[1].path).toBe("src/bar.ts");
             expect(detail.files[1].status).toBe("A");
             expect(detail.files[1].additions).toBe(5);
+            expect(detail.containingBranches).toEqual([
+                "HEAD",
+                "main",
+                "feature/demo",
+                "origin/feature/demo",
+                "origin/main",
+            ]);
         });
 
         it("decodes git quoted non-ASCII commit file paths and stats", async () => {
@@ -328,6 +403,7 @@ describe("GitOps", () => {
                     if (args[0] === "show") return showOutput;
                     if (args.includes("--name-status")) return `A\t${quotedPath}\n`;
                     if (args.includes("--numstat")) return `12\t0\t${quotedPath}\n`;
+                    if (args[0] === "for-each-ref") return "";
                     return "";
                 }),
             } as unknown as GitExecutor;

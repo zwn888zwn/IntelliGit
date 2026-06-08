@@ -120,7 +120,12 @@ export class GitOps {
     async getBranches(): Promise<Branch[]> {
         const format =
             "%(refname)\t%(refname:short)\t%(objectname:short)\t%(upstream:short)\t%(upstream:track,nobracket)\t%(HEAD)";
-        const result = await this.executor.run(["branch", "-a", `--format=${format}`]);
+        const result = await this.executor.run([
+            "branch",
+            "-a",
+            "--sort=-committerdate",
+            `--format=${format}`,
+        ]);
 
         const branches: Branch[] = [];
         for (const line of result.trim().split("\n")) {
@@ -188,7 +193,7 @@ export class GitOps {
         const format =
             ["%H", "%h", "%s", "%an", "%ae", "%aI", "%P", "%D"].join(FIELD_SEP) + RECORD_SEP;
 
-        const args = ["log", `--max-count=${maxCount}`, `--pretty=format:${format}`];
+        const args = ["log", "--date-order", `--max-count=${maxCount}`, `--pretty=format:${format}`];
         if (skip > 0) {
             args.push(`--skip=${skip}`);
         }
@@ -205,7 +210,43 @@ export class GitOps {
             args.push(`--grep=${filterText}`, "-i", "--fixed-strings");
         }
 
-        const result = await this.executor.run(args);
+        return this.parseCommitLog(await this.executor.run(args));
+    }
+
+    async findCommitsByHashPrefix(
+        hashPrefix: string,
+        maxCount: number = 500,
+        branch?: string,
+    ): Promise<Commit[]> {
+        const normalizedPrefix = hashPrefix.trim().toLowerCase();
+        if (!normalizedPrefix) return [];
+
+        const pageSize = Math.max(100, Math.min(maxCount, 500));
+        const matches: Commit[] = [];
+        let skip = 0;
+
+        while (matches.length < maxCount) {
+            const page = await this.getLog(pageSize, branch, undefined, skip);
+            if (page.length === 0) break;
+
+            for (const commit of page) {
+                if (
+                    commit.hash.toLowerCase().startsWith(normalizedPrefix) ||
+                    commit.shortHash.toLowerCase().startsWith(normalizedPrefix)
+                ) {
+                    matches.push(commit);
+                    if (matches.length >= maxCount) break;
+                }
+            }
+
+            if (page.length < pageSize) break;
+            skip += page.length;
+        }
+
+        return matches.slice(0, maxCount);
+    }
+
+    private parseCommitLog(result: string): Commit[] {
         const commits: Commit[] = [];
 
         for (const record of result.split(RECORD_SEP)) {
@@ -351,8 +392,60 @@ export class GitOps {
                       .map((r) => r.trim())
                       .filter(Boolean)
                 : [],
+            containingBranches: await this.getContainingBranches(hash),
             files: Array.from(filesByPath.values()),
         };
+    }
+
+    private async getContainingBranches(hash: string): Promise<string[] | undefined> {
+        try {
+            const output = await this.executor.run([
+                "for-each-ref",
+                `--contains=${hash}`,
+                "--format=%(HEAD)\t%(refname:short)\t%(refname)",
+                "refs/heads",
+                "refs/remotes",
+            ]);
+
+            const currentLocals: string[] = [];
+            const localBranches: string[] = [];
+            const remoteBranches: string[] = [];
+            let includeHead = false;
+
+            for (const line of output.trim().split("\n")) {
+                if (!line.trim()) continue;
+                const [headMarker = "", shortName = "", refName = ""] = line.split("\t");
+                if (!shortName || refName.endsWith("/HEAD")) continue;
+                const isRemote = refName.startsWith("refs/remotes/");
+
+                if (!isRemote && headMarker === "*") {
+                    includeHead = true;
+                    currentLocals.push(shortName);
+                    continue;
+                }
+
+                if (isRemote) {
+                    remoteBranches.push(shortName);
+                } else {
+                    localBranches.push(shortName);
+                }
+            }
+
+            currentLocals.sort((a, b) => a.localeCompare(b));
+            localBranches.sort((a, b) => a.localeCompare(b));
+            remoteBranches.sort((a, b) => a.localeCompare(b));
+
+            const branches = [
+                ...(includeHead ? ["HEAD"] : []),
+                ...currentLocals,
+                ...localBranches,
+                ...remoteBranches,
+            ];
+            return branches.length > 0 ? branches : undefined;
+        } catch (err) {
+            logGitOpsWarning("Failed to get containing branches", err);
+            return undefined;
+        }
     }
 
     // --- Working tree operations ---

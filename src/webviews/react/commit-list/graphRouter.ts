@@ -60,16 +60,13 @@ export interface CommitGraphLayoutResult {
     rows: RenderRowModel[];
     recommendedWidth: number;
     arrowMarkers: ArrowMarker[];
+    orderedHashes?: string[];
 }
 
 interface RowRenderPositions {
     nodePosition: number;
     edgePositions: Map<string, number>;
     maxPosition: number;
-}
-
-interface ActiveLane {
-    hash: string;
 }
 
 export function buildRenderRows(graph: PermanentGraphModel): CommitGraphLayoutResult {
@@ -197,11 +194,11 @@ function edgeSegmentForRow(
         return null;
     }
 
-    if (!isLongEdge(edge) && rowIndex === edge.downRowIndex) {
+    if (!isLongEdge(edge) && rowIndex >= edge.downRowIndex) {
         return null;
     }
 
-    if (!isLongEdge(edge) && rowIndex === edge.downRowIndex - 1) {
+    if (!isLongEdge(edge)) {
         return {
             type: "edge",
             edgeId: edge.edgeId,
@@ -210,8 +207,11 @@ function edgeSegmentForRow(
                 rowIndex === edge.upRowIndex
                     ? getNodePosition(rowRenderPositions, rowIndex)
                     : getEdgePosition(rowRenderPositions, rowIndex, edge.edgeId),
-            toPosition: getNodePosition(rowRenderPositions, edge.downRowIndex),
-            fromAnchor: rowIndex === edge.upRowIndex ? "center" : "top",
+            toPosition:
+                rowIndex + 1 === edge.downRowIndex
+                    ? getNodePosition(rowRenderPositions, edge.downRowIndex)
+                    : getEdgePosition(rowRenderPositions, rowIndex + 1, edge.edgeId),
+            fromAnchor: "center",
             toAnchor: "nextCenter",
         };
     }
@@ -253,90 +253,103 @@ function edgeSegmentForRow(
 
 function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions[] {
     const visibleRowsByEdge = new Map<string, number[]>();
-    const edgeByTargetRow = new Map<number, PermanentEdge[]>();
-
     for (const edge of graph.edges) {
         if (edge.downRowIndex <= edge.upRowIndex) continue;
         visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge));
-        const rowEdges = edgeByTargetRow.get(edge.upRowIndex) ?? [];
-        rowEdges.push(edge);
-        edgeByTargetRow.set(edge.upRowIndex, rowEdges);
     }
 
-    const activeLanes: ActiveLane[] = [];
     return graph.rows.map((row, rowIndex) => {
-        let nodePosition = activeLanes.findIndex((lane) => lane.hash === row.node.commitHash);
-        if (nodePosition < 0) {
-            nodePosition = activeLanes.length;
-            activeLanes.push({ hash: row.node.commitHash });
-        }
-
-        const rawEdgePositions = new Map<string, number>();
-        const visiblePositions = new Set<number>([nodePosition]);
-
-        for (const edge of graph.edges) {
-            if (edge.downRowIndex <= edge.upRowIndex) continue;
-            const visibleRows = visibleRowsByEdge.get(edge.edgeId);
-            if (!visibleRows?.includes(rowIndex)) continue;
-            const edgePosition = activeLanes.findIndex((lane) => lane.hash === edge.targetHash);
-            if (edgePosition >= 0) {
-                rawEdgePositions.set(edge.edgeId, edgePosition);
-                visiblePositions.add(edgePosition);
-            }
-        }
-
-        const densePositions = new Map(
-            [...visiblePositions]
-                .sort((left, right) => left - right)
-                .map((position, index) => [position, index]),
+        const rowElements = getSortedVisibleElementsInRow(graph, visibleRowsByEdge, rowIndex);
+        const nodePosition = rowElements.findIndex((element) => element.type === "node");
+        const rowEdgePositions = new Map<string, number>(
+            rowElements.flatMap((element, position) =>
+                element.type === "edge" ? [[element.edge.edgeId, position]] : [],
+            ),
         );
-        const denseNodePosition = densePositions.get(nodePosition) ?? 0;
-        const rowEdgePositions = new Map<string, number>();
-        for (const [edgeId, edgePosition] of rawEdgePositions) {
-            rowEdgePositions.set(edgeId, densePositions.get(edgePosition) ?? denseNodePosition);
-        }
-
-        const rowEdges = edgeByTargetRow.get(rowIndex) ?? [];
-        const firstParentEdge = rowEdges.find((edge) => edge.isPrimary);
-        if (firstParentEdge) {
-            const existingFirstParentIndex = activeLanes.findIndex(
-                (lane, index) => index !== nodePosition && lane.hash === firstParentEdge.targetHash,
-            );
-            if (existingFirstParentIndex >= 0) {
-                activeLanes.splice(nodePosition, 1);
-            } else {
-                activeLanes[nodePosition] = { hash: firstParentEdge.targetHash };
-            }
-        } else {
-            activeLanes.splice(nodePosition, 1);
-        }
-
-        let insertPosition = Math.min(
-            firstParentEdge ? nodePosition + 1 : nodePosition,
-            activeLanes.length,
-        );
-        for (const edge of rowEdges.filter((item) => !item.isPrimary)) {
-            if (activeLanes.some((lane) => lane.hash === edge.targetHash)) continue;
-            activeLanes.splice(insertPosition, 0, { hash: edge.targetHash });
-            insertPosition += 1;
-        }
 
         return {
-            nodePosition: denseNodePosition,
+            nodePosition: nodePosition >= 0 ? nodePosition : 0,
             edgePositions: rowEdgePositions,
-            maxPosition: Math.max(0, visiblePositions.size - 1),
+            maxPosition: Math.max(0, rowElements.length - 1),
         };
     });
 }
 
+type RowGraphElement =
+    | { type: "node"; rowIndex: number }
+    | { type: "edge"; edge: PermanentEdge };
+
+function getSortedVisibleElementsInRow(
+    graph: PermanentGraphModel,
+    visibleRowsByEdge: Map<string, number[]>,
+    rowIndex: number,
+): RowGraphElement[] {
+    const elements: RowGraphElement[] = [
+        {
+            type: "node",
+            rowIndex,
+        },
+    ];
+    for (const edge of graph.edges) {
+        if (visibleRowsByEdge.get(edge.edgeId)?.includes(rowIndex)) {
+            elements.push({ type: "edge", edge });
+        }
+    }
+    return elements.sort((left, right) => compareGraphElementsByLayoutIndex(left, right, graph));
+}
+
+function compareGraphElementsByLayoutIndex(
+    left: RowGraphElement,
+    right: RowGraphElement,
+    graph: PermanentGraphModel,
+): number {
+    if (left.type === "edge" && right.type === "edge") {
+        return compareEdgesByLayoutIndex(left.edge, right.edge, graph);
+    }
+    if (left.type === "edge" && right.type === "node") {
+        return compareEdgeToNodeByLayoutIndex(left.edge, right.rowIndex, graph);
+    }
+    if (left.type === "node" && right.type === "edge") {
+        return -compareEdgeToNodeByLayoutIndex(right.edge, left.rowIndex, graph);
+    }
+    return 0;
+}
+
+function compareEdgesByLayoutIndex(
+    left: PermanentEdge,
+    right: PermanentEdge,
+    graph: PermanentGraphModel,
+): number {
+    if (left.upRowIndex === right.upRowIndex) {
+        if (left.downRowIndex < right.downRowIndex) {
+            return -compareEdgeToNodeByLayoutIndex(right, left.downRowIndex, graph);
+        }
+        return compareEdgeToNodeByLayoutIndex(left, right.downRowIndex, graph);
+    }
+    if (left.upRowIndex < right.upRowIndex) {
+        return compareEdgeToNodeByLayoutIndex(left, right.upRowIndex, graph);
+    }
+    return -compareEdgeToNodeByLayoutIndex(right, left.upRowIndex, graph);
+}
+
+function compareEdgeToNodeByLayoutIndex(
+    edge: PermanentEdge,
+    rowIndex: number,
+    graph: PermanentGraphModel,
+): number {
+    const edgeLayoutIndex = Math.max(edge.upLayoutIndex, edge.downLayoutIndex);
+    const nodeLayoutIndex = graph.rows[rowIndex]?.node.layoutIndex ?? 0;
+    if (edgeLayoutIndex !== nodeLayoutIndex) {
+        return edgeLayoutIndex - nodeLayoutIndex;
+    }
+    return edge.upRowIndex - rowIndex;
+}
+
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
-    const rows = new Set<number>([edge.upRowIndex, edge.downRowIndex]);
+    const rows = new Set<number>();
 
     if (!isLongEdge(edge)) {
-        for (const rowIndex of Array.from(
-            { length: Math.max(0, edge.downRowIndex - edge.upRowIndex - 1) },
-            (_, index) => edge.upRowIndex + index + 1,
-        )) {
+        for (let rowIndex = edge.upRowIndex + 1; rowIndex < edge.downRowIndex; rowIndex += 1) {
             rows.add(rowIndex);
         }
         return [...rows].sort((left, right) => left - right);

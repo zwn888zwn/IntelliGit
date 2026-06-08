@@ -63,10 +63,12 @@ const openTextDocument = vi.fn(async (arg) => {
     };
 });
 const readFile = vi.fn(async () => Buffer.from("working tree content", "utf8"));
+const fsStat = vi.fn(async () => ({ type: 1, ctime: 0, mtime: 0, size: 1 }));
 const writeFile = vi.fn(async () => undefined);
 let registeredEditableDiffProvider:
     | {
           writeFile?: (uri: unknown, content: Uint8Array) => Promise<void> | void;
+          readFile?: (uri: unknown) => Uint8Array;
       }
     | undefined;
 const postMessageSpy = vi.fn();
@@ -136,6 +138,9 @@ const vscodeMock = {
             return { fsPath: joined, path: joined };
         },
     },
+    languages: {
+        registerDefinitionProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    },
     window: {
         showErrorMessage,
         showWarningMessage,
@@ -157,7 +162,7 @@ const vscodeMock = {
             workspaceState.workspaceFolders = value;
         },
         openTextDocument,
-        fs: { readFile, writeFile },
+        fs: { readFile, writeFile, stat: fsStat },
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn((_scheme, provider) => {
             registeredEditableDiffProvider = provider as typeof registeredEditableDiffProvider;
@@ -229,6 +234,18 @@ function makeGitOpsMock() {
                 hash: "abc1234",
                 shortHash: "abc1234",
                 message: "feat: test",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-02-19T00:00:00Z",
+                parentHashes: [],
+                refs: [],
+            },
+        ]),
+        findCommitsByHashPrefix: vi.fn(async (hashPrefix: string) => [
+            {
+                hash: `${hashPrefix}full`,
+                shortHash: hashPrefix.slice(0, 7),
+                message: "hash match",
                 author: "Mahesh",
                 email: "m@example.com",
                 date: "2026-02-19T00:00:00Z",
@@ -521,9 +538,84 @@ describe("view providers integration", () => {
         await webview.send({ type: "loadMore" });
         expect(gitOps.getLog.mock.calls.length - logCallsBeforePagedFetch).toBe(2);
 
+        const hashSearchCallsBefore = gitOps.findCommitsByHashPrefix.mock.calls.length;
+        await webview.send({ type: "filterText", text: "55d744b" });
+        expect(gitOps.findCommitsByHashPrefix.mock.calls.length - hashSearchCallsBefore).toBe(1);
+
+        await webview.send({ type: "filterText", text: "feat" });
         gitOps.getLog.mockRejectedValueOnce(new Error("git failed"));
         await provider.refresh();
         expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Git log error"));
+
+        provider.dispose();
+    });
+
+    it("CommitGraphViewProvider preserves single-repo git log order for all-branches graphs", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getLog.mockResolvedValueOnce([
+            {
+                hash: "head",
+                shortHash: "head",
+                message: "head",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-06-03T15:31:17+08:00",
+                parentHashes: ["mid"],
+                refs: ["HEAD -> feature/test"],
+            },
+            {
+                hash: "mid",
+                shortHash: "mid",
+                message: "mid",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-06-03T13:20:27+08:00",
+                parentHashes: ["base"],
+                refs: [],
+            },
+            {
+                hash: "base",
+                shortHash: "base",
+                message: "base",
+                author: "Mahesh",
+                email: "m@example.com",
+                date: "2026-06-03T14:40:33+08:00",
+                parentHashes: [],
+                refs: [],
+            },
+        ]);
+
+        const repositoryEntry = {
+            root: "/repo",
+            name: "repo",
+            gitOps,
+        };
+        const provider = new CommitGraphViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => [repositoryEntry] as never,
+            (root: string) => (root === "/repo" ? (repositoryEntry as never) : null),
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        const loadCommitsMessage = postMessageSpy.mock.calls
+            .map((call) => call[0])
+            .find((message) => message?.type === "loadCommits");
+        expect(loadCommitsMessage).toBeTruthy();
+        expect(loadCommitsMessage.commits.map((commit: { hash: string }) => commit.hash)).toEqual([
+            "head",
+            "mid",
+            "base",
+        ]);
 
         provider.dispose();
     });
@@ -683,20 +775,15 @@ describe("view providers integration", () => {
             "vscode.diff",
             expect.any(Object),
             expect.objectContaining({
-                scheme: "intelligit-diff-editable",
-                path: expect.stringMatching(/\/a\.ts$/),
-                query: expect.stringContaining("working-tree"),
+                scheme: "file",
+                fsPath: "/repo/src/a.ts",
+                path: "/repo/src/a.ts",
             }),
             expect.stringContaining("src/a.ts"),
         ]);
         expect(diffCall?.[1]).toEqual(
             expect.objectContaining({
                 path: expect.stringMatching(/\/a\.ts$/),
-                query: expect.stringContaining("path=src%2Fa.ts"),
-            }),
-        );
-        expect(diffCall?.[2]).toEqual(
-            expect.objectContaining({
                 query: expect.stringContaining("path=src%2Fa.ts"),
             }),
         );
@@ -710,17 +797,6 @@ describe("view providers integration", () => {
             expect.objectContaining({
                 content: expect.any(String),
             }),
-        );
-        await registeredEditableDiffProvider?.writeFile?.(
-            diffCall?.[2],
-            Buffer.from("updated working tree content", "utf8"),
-        );
-        expect(writeFile).toHaveBeenCalledWith(
-            expect.objectContaining({
-                scheme: "file",
-                fsPath: "/repo/src/a.ts",
-            }),
-            Buffer.from("updated working tree content", "utf8"),
         );
         await webview.send({ type: "openFile", path: "src/a.ts" });
         await webview.send({ type: "showHistory", path: "src/a.ts" });
@@ -761,17 +837,87 @@ describe("view providers integration", () => {
             "vscode.diff",
             expect.objectContaining({
                 scheme: "intelligit-diff",
-                query: expect.stringContaining(
-                    "path=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt",
-                ),
+                query: expect.stringContaining("originalPath=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt"),
             }),
             expect.objectContaining({
-                scheme: "intelligit-diff-editable",
-                query: expect.stringContaining(
-                    "path=docs%2F%E6%96%B0%E6%96%87%E4%BB%B6.txt",
-                ),
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("intelligitCommitDiff=1"),
             }),
             "docs/新文件.txt (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
+    it("openCommitFileDiff replaces binary commit content with text placeholders", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async (_filePath: string, ref: string) =>
+                ref === "parent1234" ? "parent\0binary" : "\u0001\u0002commit-binary",
+            ),
+        };
+        const executor = {
+            run: vi.fn(async () => "a1b2c3d4 parent1234"),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "profiles/cpu-hotspot.pprof",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result?.leftUri.path).toMatch(/\.txt$/);
+        expect(result?.rightUri.path).toMatch(/\.txt$/);
+        expect(openTextDocument).toHaveBeenCalledTimes(2);
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                path: expect.stringMatching(/\.txt$/),
+            }),
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                path: expect.stringMatching(/\.txt$/),
+            }),
+            "profiles/cpu-hotspot.pprof (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
+    it("openCommitFileDiff uses native git diff resources for previewable images", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async () => {
+                throw new Error("text fallback should not run for previewable images");
+            }),
+        };
+        const executor = {
+            run: vi.fn(async () => "a1b2c3d4 parent1234"),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "assets/logo.png",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result).not.toBeNull();
+        expect(gitOps.getFileContentAtRef).not.toHaveBeenCalled();
+        expect(openTextDocument).not.toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/logo.png",
+                query: expect.stringContaining("\"ref\":\"parent1234\""),
+            }),
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/logo.png",
+                query: expect.stringContaining("\"ref\":\"a1b2c3d4\""),
+            }),
+            "assets/logo.png (parent12 ↔ a1b2c3d4)",
         );
     });
 
@@ -825,6 +971,114 @@ describe("view providers integration", () => {
             expect.any(Object),
             expect.any(Object),
             expect.stringContaining("profiles/cpu.pb.gz"),
+        );
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider opens previewable images with native git/file diff", async () => {
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getStatus.mockResolvedValueOnce([
+            {
+                repoRoot: "/repo",
+                path: "assets/logo.png",
+                status: "M",
+                staged: false,
+                additions: 0,
+                deletions: 0,
+            },
+        ]);
+        const provider = new CommitPanelViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => ({ fsPath: "/repo", path: "/repo" }) as unknown as { fsPath: string; path: string },
+            () => [
+                {
+                    root: "/repo",
+                    uri: { fsPath: "/repo", path: "/repo" },
+                    info: testRepository,
+                    gitOps,
+                    executor: { run: vi.fn(async () => "") },
+                } as unknown as never,
+            ],
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "assets/logo.png" });
+
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/logo.png",
+                query: expect.stringContaining("\"ref\":\"HEAD\""),
+            }),
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: "/repo/assets/logo.png",
+                path: "/repo/assets/logo.png",
+            }),
+            expect.stringContaining("assets/logo.png"),
+        );
+        expect(openTextDocument).not.toHaveBeenCalled();
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider avoids editable diffs for binary working tree content", async () => {
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const gitOps = makeGitOpsMock();
+        gitOps.getStatus.mockResolvedValueOnce([
+            {
+                repoRoot: "/repo",
+                path: "profiles/cpu.sample",
+                status: "M",
+                staged: false,
+                additions: 1,
+                deletions: 1,
+            },
+        ]);
+        readFile.mockResolvedValue(Buffer.from([0, 1, 2, 3, 4]));
+        const provider = new CommitPanelViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+            () => ({ fsPath: "/repo", path: "/repo" }) as unknown as { fsPath: string; path: string },
+            () => [
+                {
+                    root: "/repo",
+                    uri: { fsPath: "/repo", path: "/repo" },
+                    info: testRepository,
+                    gitOps,
+                    executor: { run: vi.fn(async () => "") },
+                } as unknown as never,
+            ],
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(
+            webview.view as unknown as object,
+            {} as unknown as object,
+            {} as unknown as object,
+        );
+        await webview.send({ type: "ready" });
+
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "profiles/cpu.sample" });
+
+        expect(readFile).toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.any(Object),
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                path: expect.stringMatching(/\.txt$/),
+            }),
+            expect.stringContaining("profiles/cpu.sample"),
         );
         provider.dispose();
     });

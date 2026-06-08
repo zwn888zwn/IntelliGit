@@ -8,6 +8,7 @@ import type {
     Branch,
     Commit,
     CommitDetail,
+    GraphRefInfo,
     GitTag,
     RepositoryContextInfo,
     ThemeFolderIconMap,
@@ -45,6 +46,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private repository: RepositoryContextInfo | null = null;
 
     private branches: Branch[] = [];
+    private branchSnapshotsByRoot: Record<string, Branch[]> = {};
     private selectedCommitDetail: CommitDetail | null = null;
     private loadedCommits: Commit[] = [];
     private folderIconsByName: ThemeFolderIconMap = {};
@@ -389,6 +391,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         : [];
             }),
         );
+        this.branchSnapshotsByRoot = branchesByRoot;
         this.branchFolderIconsByName = await this.iconTheme.getFolderIconsByBranches(this.branches);
         const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
         this.postToWebview({
@@ -573,6 +576,14 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     private async loadWindow(count: number): Promise<{ commits: Commit[]; hasMore: boolean }> {
         const limit = Math.max(count, 1);
+        if (this.isHashFilterQuery(this.filterText)) {
+            const commits = await this.loadHashSearchResults(this.filterText, limit);
+            return {
+                commits: this.decorateCommitsWithGraphRefs(commits.slice(0, limit)),
+                hasMore: commits.length > limit,
+            };
+        }
+
         if (this.currentBranch) {
             if (!this.repository) return { commits: [], hasMore: false };
             const commits = await this.gitOps.getLog(
@@ -593,21 +604,34 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             ),
         );
 
-        const merged = pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+        const merged =
+            pages.length === 1
+                ? pages[0]
+                : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
         return {
-            commits: merged.slice(0, limit),
+            commits: this.decorateCommitsWithGraphRefs(merged.slice(0, limit)),
             hasMore: merged.length > limit,
         };
     }
 
     private async loadPage(skip: number): Promise<Commit[]> {
+        if (this.isHashFilterQuery(this.filterText)) {
+            const commits = await this.loadHashSearchResults(
+                this.filterText,
+                skip + this.PAGE_SIZE,
+            );
+            return commits.slice(skip, skip + this.PAGE_SIZE);
+        }
+
         if (this.currentBranch) {
             if (!this.repository) return [];
-            return this.gitOps.getLog(
-                this.PAGE_SIZE,
-                this.currentBranch ?? undefined,
-                this.filterText || undefined,
-                skip,
+            return this.decorateCommitsWithGraphRefs(
+                await this.gitOps.getLog(
+                    this.PAGE_SIZE,
+                    this.currentBranch ?? undefined,
+                    this.filterText || undefined,
+                    skip,
+                ),
             );
         }
 
@@ -622,10 +646,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             ),
         );
 
-        return pages
-            .flat()
-            .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-            .slice(skip, skip + this.PAGE_SIZE);
+        return this.decorateCommitsWithGraphRefs((pages.length === 1
+            ? pages[0]
+            : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        ).slice(skip, skip + this.PAGE_SIZE));
     }
 
     private async getUnpushedHashes(): Promise<string[]> {
@@ -636,6 +660,101 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             this.getRepositories().map((entry) => entry.gitOps.getUnpushedCommitHashes()),
         );
         return Array.from(new Set(hashes.flat()));
+    }
+
+    private isHashFilterQuery(text: string): boolean {
+        const normalized = text.trim();
+        return normalized.length >= 4 && /^[0-9a-f]+$/i.test(normalized);
+    }
+
+    private async loadHashSearchResults(hashPrefix: string, limit: number): Promise<Commit[]> {
+        if (this.currentBranch) {
+            if (!this.repository) return [];
+            return this.decorateCommitsWithGraphRefs(
+                await this.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1, this.currentBranch),
+            );
+        }
+
+        const pages = await Promise.all(
+            this.getRepositories().map((entry) =>
+                entry.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1),
+            ),
+        );
+
+        return this.decorateCommitsWithGraphRefs((pages.length === 1
+            ? pages[0]
+            : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+        ).slice(0, limit + 1));
+    }
+
+    private decorateCommitsWithGraphRefs(commits: Commit[]): Commit[] {
+        return commits.map((commit) => ({
+            ...commit,
+            graphRefs: this.buildGraphRefs(commit),
+        }));
+    }
+
+    private buildGraphRefs(commit: Commit): GraphRefInfo[] {
+        const branches = this.branchSnapshotsByRoot[commit.repoRoot] ?? [];
+        const trackedRemoteNames = new Set(
+            branches
+                .filter((branch) => !branch.isRemote && Boolean(branch.upstream))
+                .map((branch) => branch.upstream as string),
+        );
+
+        const graphRefs: GraphRefInfo[] = [];
+        for (const ref of commit.refs) {
+            if (ref === "HEAD" || ref.startsWith("HEAD -> ")) {
+                if (ref.startsWith("HEAD -> ")) {
+                    const branchName = ref.slice("HEAD -> ".length).trim();
+                    graphRefs.push({ name: branchName, type: "head" });
+                    graphRefs.push({ name: branchName, type: "local" });
+                    continue;
+                }
+                graphRefs.push({ name: "HEAD", type: "head" });
+                continue;
+            }
+            if (ref.startsWith("tag:")) {
+                graphRefs.push({ name: ref.slice("tag:".length).trim(), type: "tag" });
+                continue;
+            }
+
+            const branch = branches.find((item) => item.name === ref);
+            if (branch) {
+                if (branch.isRemote) {
+                    graphRefs.push({
+                        name: branch.name,
+                        type: "remote",
+                        tracked: trackedRemoteNames.has(branch.name),
+                    });
+                    continue;
+                }
+                graphRefs.push({ name: branch.name, type: "local" });
+                continue;
+            }
+
+            if (/^[^/]+\/HEAD$/.test(ref)) {
+                graphRefs.push({ name: ref, type: "other" });
+                continue;
+            }
+            if (/^[^/]+\/.+/.test(ref)) {
+                graphRefs.push({
+                    name: ref,
+                    type: "remote",
+                    tracked: trackedRemoteNames.has(ref),
+                });
+                continue;
+            }
+            graphRefs.push({ name: ref, type: "other" });
+        }
+
+        const seen = new Set<string>();
+        return graphRefs.filter((ref) => {
+            const key = `${ref.type}:${ref.name}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
     }
 
     private getRepositoryEntry(root: string): RepositoryEntry {

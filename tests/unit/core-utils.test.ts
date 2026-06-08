@@ -1,7 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { GitOps } from "../../src/git/operations";
 import { computeGraph } from "../../src/webviews/react/graph";
-import { buildPermanentGraph } from "../../src/webviews/react/commit-list/graphModel";
+import {
+    buildPermanentGraph,
+    orderCommitsForGraph,
+} from "../../src/webviews/react/commit-list/graphModel";
 import { formatDateTime } from "../../src/webviews/react/shared/date";
 import {
     FILE_TYPE_BADGES,
@@ -236,7 +239,7 @@ describe("core utilities", () => {
         ).toHaveLength(2);
     });
 
-    it("graph layout can continue the walked head chain through the merge base", () => {
+    it("graph layout keeps the true head path on one layout through the merge base", () => {
         const permanent = buildPermanentGraph([
             { hash: "top", parentHashes: ["main"] },
             { hash: "merge", parentHashes: ["main", "side"] },
@@ -245,12 +248,13 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(0);
-        expect(permanent.rows[1].node.layoutIndex).toBe(1);
-        expect(permanent.rows[2].node.layoutIndex).toBe(0);
+        expect(permanent.rows[0].node.layoutIndex).toBe(permanent.rows[2].node.layoutIndex);
+        expect(permanent.rows[2].node.layoutIndex).toBe(permanent.rows[4].node.layoutIndex);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
+        expect(permanent.rows[0].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
     });
 
-    it("graph layout follows visible topological heads instead of mid-graph refs", () => {
+    it("graph layout can keep the alpha merge path unified even when refs sit on a non-head commit", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -263,13 +267,11 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(0);
-        expect(permanent.rows[1].node.layoutIndex).toBe(0);
-        expect(permanent.rows[3].node.layoutIndex).toBe(0);
-        expect(permanent.rows[2].node.layoutIndex).toBe(1);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
+        expect(permanent.rows[2].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
     });
 
-    it("graph compute keeps a head row and its merge below in one rendered column", () => {
+    it("graph compute can pin the merge row node to the mainline column", () => {
         const graph = computeGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -286,7 +288,117 @@ describe("core utilities", () => {
         expect(graph.rows[1].nodePosition).toBe(0);
     });
 
-    it("graph colors can stay unified along the walked head chain", () => {
+    it("graph layout can demote integration branches to the left of topic remotes", () => {
+        const graph = computeGraph([
+            {
+                hash: "current-head",
+                parentHashes: ["master-tip"],
+                refs: ["HEAD -> wip_ios_137", "origin/wip_ios_137"],
+                graphRefs: [
+                    { name: "wip_ios_137", type: "head" },
+                    { name: "origin/wip_ios_137", type: "remote", tracked: true },
+                ],
+            },
+            {
+                hash: "topic-head",
+                parentHashes: ["topic-base"],
+                refs: ["origin/wip_jack_doc"],
+                graphRefs: [{ name: "origin/wip_jack_doc", type: "remote" }],
+            },
+            {
+                hash: "alpha-tip",
+                parentHashes: ["alpha-prev", "side-tip"],
+                refs: ["origin/alpha"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "side-tip",
+                parentHashes: ["side-base"],
+                refs: ["origin/wip_ios_135"],
+                graphRefs: [{ name: "origin/wip_ios_135", type: "remote", tracked: true }],
+            },
+            {
+                hash: "master-tip",
+                parentHashes: ["master-prev"],
+                refs: ["origin/master", "master"],
+                graphRefs: [
+                    { name: "origin/master", type: "remote", tracked: true },
+                    { name: "master", type: "local" },
+                ],
+            },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "topic-base", parentHashes: ["base"] },
+            { hash: "side-base", parentHashes: ["base"] },
+            { hash: "master-prev", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[2].commitHash).toBe("alpha-tip");
+        expect(graph.rows[1].commitHash).toBe("topic-head");
+        expect(graph.rows[3].commitHash).toBe("side-tip");
+        expect(graph.rows[3].nodePosition).toBe(graph.rows[2].nodePosition + 1);
+    });
+
+    it("graph layout keeps non-head branch refs in IDEA-style layout order", () => {
+        const commits = [
+            {
+                hash: "current-head",
+                parentHashes: ["master-tip"],
+                refs: ["HEAD -> wip_ios_137", "origin/wip_ios_137"],
+                graphRefs: [
+                    { name: "wip_ios_137", type: "head" },
+                    { name: "origin/wip_ios_137", type: "remote", tracked: true },
+                ],
+            },
+            {
+                hash: "topic-head",
+                parentHashes: ["topic-base"],
+                refs: ["origin/wip_jack_doc"],
+                graphRefs: [{ name: "origin/wip_jack_doc", type: "remote" }],
+            },
+            {
+                hash: "alpha-tip",
+                parentHashes: ["alpha-prev", "side-tip"],
+                refs: ["origin/alpha"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "side-tip",
+                parentHashes: ["side-prev"],
+                refs: ["origin/wip_ios_135_zwn"],
+                graphRefs: [{ name: "origin/wip_ios_135_zwn", type: "remote", tracked: true }],
+            },
+            { hash: "alpha-prev", parentHashes: ["base"] },
+            { hash: "side-prev", parentHashes: ["base"] },
+            {
+                hash: "master-tip",
+                parentHashes: ["master-prev"],
+                refs: ["origin/master", "master"],
+                graphRefs: [
+                    { name: "origin/master", type: "remote", tracked: true },
+                    { name: "master", type: "local" },
+                ],
+            },
+            { hash: "master-prev", parentHashes: ["base"] },
+            { hash: "topic-base", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ];
+
+        const { layoutIndexByHash } = orderCommitsForGraph(commits);
+        const alphaLayout = layoutIndexByHash.get("alpha-tip") ?? -1;
+        const sideLayout = layoutIndexByHash.get("side-tip") ?? -1;
+        const masterLayout = layoutIndexByHash.get("master-tip") ?? -1;
+        const topicLayout = layoutIndexByHash.get("topic-head") ?? -1;
+
+        const currentLayout = layoutIndexByHash.get("current-head") ?? -1;
+
+        expect(masterLayout).toBeLessThan(alphaLayout);
+        expect(alphaLayout).toBeLessThan(sideLayout);
+        expect(sideLayout).toBeLessThan(currentLayout);
+        expect(currentLayout).toBeLessThan(topicLayout);
+    });
+
+    it("graph colors can stay unified along the alpha mainline", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
@@ -295,11 +407,11 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[0].node.layoutIndex).toBe(permanent.rows[1].node.layoutIndex);
-        expect(permanent.rows[0].node.color).toBe(permanent.rows[1].node.color);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
+        expect(permanent.rows[1].node.color).toBe(permanent.rows[3].node.color);
     });
 
-    it("graph can keep adjacent rendered rows in one column", () => {
+    it("graph keeps the incoming branch to the right of the alpha mainline", () => {
         const graph = computeGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             { hash: "merge", parentHashes: ["alpha-prev", "side-prev"], refs: ["alpha"] },
@@ -308,7 +420,126 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(graph.rows[0].nodePosition).toBe(graph.rows[1].nodePosition);
+        expect(graph.rows[0].nodePosition).toBe(0);
+        expect(graph.rows[1].nodePosition).toBe(0);
+        expect(graph.rows[2].nodePosition).toBeGreaterThan(graph.rows[1].nodePosition);
+    });
+
+    it("graph keeps merge side branch nodes adjacent with topo-ordered commits", () => {
+        const longEventTail = Array.from({ length: 31 }, (_, index) => ({
+            hash: `event-tail-${index}`,
+            parentHashes: [index === 30 ? "event-base" : `event-tail-${index + 1}`],
+        }));
+        const graph = computeGraph([
+            {
+                hash: "current-head",
+                parentHashes: ["current-prev"],
+                refs: ["HEAD -> wip_ios_137_zwn", "origin/wip_ios_137_zwn"],
+                graphRefs: [
+                    { name: "wip_ios_137_zwn", type: "head" },
+                    { name: "wip_ios_137_zwn", type: "local" },
+                    { name: "origin/wip_ios_137_zwn", type: "remote", tracked: true },
+                ],
+            },
+            { hash: "current-prev", parentHashes: ["current-base"] },
+            { hash: "current-base", parentHashes: ["master"] },
+            {
+                hash: "event-head",
+                parentHashes: ["event-prev"],
+                refs: ["origin/wip_event_362373"],
+                graphRefs: [{ name: "origin/wip_event_362373", type: "remote" }],
+            },
+            { hash: "event-prev", parentHashes: ["event-merge"] },
+            { hash: "event-merge", parentHashes: ["event-base", "alpha-merge"] },
+            {
+                hash: "alpha-merge",
+                parentHashes: ["alpha-prev", "side-tip"],
+                refs: ["origin/alpha"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "side-tip",
+                parentHashes: ["side-prev"],
+                refs: ["origin/wip_ios_135_zwn"],
+                graphRefs: [{ name: "origin/wip_ios_135_zwn", type: "remote", tracked: true }],
+            },
+            { hash: "alpha-prev", parentHashes: ["side-prev"] },
+            { hash: "side-prev", parentHashes: ["master"] },
+            ...longEventTail,
+            { hash: "event-base", parentHashes: ["master"] },
+            {
+                hash: "master",
+                parentHashes: [],
+                refs: ["origin/master", "master"],
+                graphRefs: [
+                    { name: "origin/master", type: "remote", tracked: true },
+                    { name: "master", type: "local" },
+                ],
+            },
+        ]);
+
+        const alphaRow = graph.rows.find((row) => row.commitHash === "alpha-merge");
+        const sideRow = graph.rows.find((row) => row.commitHash === "side-tip");
+
+        expect(Math.abs((sideRow?.nodePosition ?? -1) - (alphaRow?.nodePosition ?? -1))).toBeLessThanOrEqual(1);
+    });
+
+    it("graph orders date-ordered merge lanes with the IDEA layout comparator", () => {
+        const graph = computeGraph([
+            {
+                hash: "alpha-top",
+                parentHashes: ["alpha-merge", "event-head"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "event-head",
+                parentHashes: ["event-1"],
+                graphRefs: [{ name: "origin/wip_event_362373", type: "remote" }],
+            },
+            {
+                hash: "current-head",
+                parentHashes: ["current-1"],
+                graphRefs: [
+                    { name: "wip_ios_137_zwn", type: "head" },
+                    { name: "wip_ios_137_zwn", type: "local" },
+                    { name: "origin/wip_ios_137_zwn", type: "remote", tracked: true },
+                ],
+            },
+            { hash: "event-1", parentHashes: ["event-2"] },
+            { hash: "event-2", parentHashes: ["event-3"] },
+            { hash: "event-3", parentHashes: ["event-merge"] },
+            { hash: "event-merge", parentHashes: ["event-base", "alpha-merge"] },
+            { hash: "event-base", parentHashes: ["master"] },
+            { hash: "current-1", parentHashes: ["current-base"] },
+            { hash: "current-base", parentHashes: ["master"] },
+            {
+                hash: "doc-head",
+                parentHashes: ["doc-base"],
+                graphRefs: [{ name: "origin/wip_jack_doc", type: "remote" }],
+            },
+            { hash: "alpha-merge", parentHashes: ["alpha-prev", "ios-135-head"] },
+            {
+                hash: "ios-135-head",
+                parentHashes: ["ios-135-prev"],
+                graphRefs: [{ name: "origin/wip_ios_135_zwn", type: "remote", tracked: true }],
+            },
+            { hash: "alpha-prev", parentHashes: ["alpha-base"] },
+            { hash: "ios-135-prev", parentHashes: ["master"] },
+            { hash: "doc-base", parentHashes: ["master"] },
+            {
+                hash: "master",
+                parentHashes: [],
+                graphRefs: [
+                    { name: "origin/master", type: "remote", tracked: true },
+                    { name: "master", type: "local" },
+                ],
+            },
+            { hash: "alpha-base", parentHashes: ["master"] },
+        ]);
+
+        expect(graph.rows.find((row) => row.commitHash === "alpha-merge")?.nodePosition).toBe(0);
+        expect(graph.rows.find((row) => row.commitHash === "ios-135-head")?.nodePosition).toBe(2);
+        expect(graph.rows.find((row) => row.commitHash === "master")?.nodePosition).toBe(0);
     });
 
     it("graph compute can render merge rows with an extra edge column", () => {
@@ -326,6 +557,21 @@ describe("core utilities", () => {
         ]);
 
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("graph compute can bring a newly encountered mainline back to the left edge", () => {
+        const graph = computeGraph([
+            { hash: "top-merge", parentHashes: ["alpha-bridge", "side-1"], refs: ["feature/top"] },
+            { hash: "merge-2", parentHashes: ["alpha-next", "side-2"], refs: ["alpha"] },
+            { hash: "side-1", parentHashes: ["side-2"] },
+            { hash: "side-2", parentHashes: ["base"] },
+            { hash: "alpha-bridge", parentHashes: ["alpha-next"] },
+            { hash: "alpha-next", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        expect(graph.rows[5].nodePosition).toBe(0);
+        expect(graph.rows[2].nodePosition).toBeGreaterThan(graph.rows[5].nodePosition);
     });
 
     it("graph compute keeps cross-lane edge transitions local between adjacent rows", () => {
@@ -373,6 +619,52 @@ describe("core utilities", () => {
         expect(graph.recommendedWidth).toBeGreaterThanOrEqual(graph.rows[0].occupiedWidth);
     });
 
+    it("graph compute keeps each row's visible slots densely packed", () => {
+        const commits = [
+            { hash: "top", parentHashes: ["top-base"] },
+            { hash: "topic-head", parentHashes: ["topic-base"] },
+            { hash: "merge-0", parentHashes: ["main-0", "side-0"] },
+            { hash: "side-0", parentHashes: ["side-1"] },
+            { hash: "main-0", parentHashes: ["main-1"] },
+            { hash: "side-1", parentHashes: ["side-2"] },
+            { hash: "main-1", parentHashes: ["main-2"] },
+            { hash: "side-2", parentHashes: ["base"] },
+            { hash: "main-2", parentHashes: ["base"] },
+            { hash: "top-base", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ];
+
+        for (let index = 0; index < 32; index += 1) {
+            commits.push({
+                hash: `filler-${index}`,
+                parentHashes: [index === 31 ? "topic-base" : `filler-${index + 1}`],
+            });
+        }
+        commits.push({ hash: "topic-base", parentHashes: ["base"] });
+
+        const graph = computeGraph(commits);
+        for (const row of graph.rows.slice(0, 9)) {
+            const uniquePositions = [
+                ...new Set(
+                    row.elements.flatMap((element) => {
+                        switch (element.type) {
+                            case "edge":
+                                return [element.fromPosition, element.toPosition];
+                            case "terminal":
+                                return [element.position];
+                            case "node":
+                                return [element.position];
+                        }
+                    }),
+                ),
+            ].sort((left, right) => left - right);
+
+            expect(uniquePositions).toEqual(
+                Array.from({ length: uniquePositions.length }, (_item, index) => index),
+            );
+        }
+    });
+
     it("graph compute keeps merge rows locally compact instead of preserving global gaps", () => {
         const graph = computeGraph([
             { hash: "top", parentHashes: ["merge-outer"] },
@@ -409,6 +701,29 @@ describe("core utilities", () => {
         expect(directEdge && directEdge.type === "edge").toBe(true);
         expect(directEdge && directEdge.type === "edge" && directEdge.toAnchor).toBe("nextCenter");
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("graph compute bends short cross-column edges at row centers", () => {
+        const graph = computeGraph([
+            { hash: "head", parentHashes: ["merge"] },
+            { hash: "merge", parentHashes: ["main-2", "side-2"], refs: ["alpha"] },
+            { hash: "main-2", parentHashes: ["main-1"] },
+            { hash: "side-2", parentHashes: ["side-1"] },
+            { hash: "main-1", parentHashes: ["base"] },
+            { hash: "side-1", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+
+        const turningSegment = graph.rows[2].elements.find(
+            (element) => element.type === "edge" && element.edgeId === "merge:side-2:1",
+        );
+
+        expect(turningSegment && turningSegment.type === "edge" && turningSegment.fromAnchor).toBe(
+            "center",
+        );
+        expect(turningSegment && turningSegment.type === "edge" && turningSegment.toAnchor).toBe(
+            "nextCenter",
+        );
     });
 
     it("graph compute uses dynamic recommended width for wide histories", () => {
@@ -600,7 +915,7 @@ describe("core utilities", () => {
         expect(getChevronIconStyle(true).transform).toContain("90deg");
         expect(getChevronIconStyle(false).transform).toContain("0deg");
         expect(headerRowStyle(120).paddingLeft).toBe(120);
-        expect(contentContainerStyle(5).height).toBe(140);
+        expect(contentContainerStyle(5).height).toBe(120);
         expect(FILE_TYPE_BADGES.json.label).toBe("JN");
         expect(GIT_STATUS_COLORS.M).toContain("--vscode-gitDecoration");
         expect(GIT_STATUS_LABELS["?"]).toBe("Unversioned");

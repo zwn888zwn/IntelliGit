@@ -1,8 +1,10 @@
 import type { CSSProperties } from "react";
 import { ROW_HEIGHT } from "../graph";
 
-export const AUTHOR_COL_WIDTH = 104;
-export const DATE_COL_WIDTH = 118;
+export const AUTHOR_COL_WIDTH = 96;
+export const DATE_COL_WIDTH = 102;
+export const HASH_COL_WIDTH = 74;
+export const META_COL_GAP = 2;
 export const ROW_SIDE_PADDING = 8;
 
 export const ROOT_STYLE: CSSProperties = {

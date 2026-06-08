@@ -195,6 +195,8 @@ describe("CommitList integration", () => {
             'input[placeholder="Text or hash"]',
         ) as HTMLInputElement;
         expect(filterInput).toBeTruthy();
+        expect(container.textContent).toContain("Hash");
+        expect(container.textContent).toContain("aaa1111");
         const valueSetter = Object.getOwnPropertyDescriptor(
             HTMLInputElement.prototype,
             "value",

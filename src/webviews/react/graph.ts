@@ -1,9 +1,10 @@
-import { buildPermanentGraph } from "./commit-list/graphModel";
+import { buildPermanentGraph, orderCommitsForGraph } from "./commit-list/graphModel";
 import { buildRenderRows, type CommitGraphLayoutResult } from "./commit-list/graphRouter";
+import type { GraphRefInfo } from "../../types";
 
 export const LANE_WIDTH = 16;
 export const DOT_RADIUS = 3.25;
-export const ROW_HEIGHT = 28;
+export const ROW_HEIGHT = 24;
 
 export type {
     ArrowMarker,
@@ -17,15 +18,24 @@ export type {
 } from "./commit-list/graphRouter";
 
 export function computeGraph(
-    commits: Array<{ hash: string; parentHashes: string[]; refs?: string[]; repoRoot?: string }>,
+    commits: Array<{
+        hash: string;
+        parentHashes: string[];
+        refs?: string[];
+        graphRefs?: GraphRefInfo[];
+        repoRoot?: string;
+        date?: string;
+    }>,
 ): CommitGraphLayoutResult {
-    const permanentGraph = buildPermanentGraph(commits);
+    const { commits: orderedCommits, layoutIndexByHash } = orderCommitsForGraph(commits);
+    const permanentGraph = buildPermanentGraph(orderedCommits, layoutIndexByHash);
     const result = buildRenderRows(permanentGraph);
     return {
         ...result,
+        orderedHashes: orderedCommits.map((commit) => commit.hash),
         rows: result.rows.map((row, index) => ({
             ...row,
-            repoRoot: commits[index]?.repoRoot,
+            repoRoot: orderedCommits[index]?.repoRoot,
         })),
     };
 }

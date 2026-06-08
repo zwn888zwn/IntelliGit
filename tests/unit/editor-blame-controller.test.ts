@@ -327,4 +327,26 @@ describe("EditorBlameController", () => {
         expect(showWarningMessage).toHaveBeenCalled();
         expect(createTextEditorDecorationType).not.toHaveBeenCalled();
     });
+
+    it("shows a warning instead of a fatal error for files missing from HEAD", async () => {
+        const { EditorBlameController } = await import("../../src/services/EditorBlameController");
+        const controller = new EditorBlameController(
+            "/repo",
+            {
+                getBlame: vi.fn(async () => {
+                    throw new Error("fatal: no such path 'src/new.ts' in HEAD");
+                }),
+            } as never,
+            vi.fn(async () => undefined),
+        );
+        activeEditor = makeEditor("/repo/src/new.ts");
+
+        await controller.annotateActiveEditor();
+
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Git blame is unavailable because this file has not been committed yet.",
+        );
+        expect(showErrorMessage).not.toHaveBeenCalled();
+        expect(createTextEditorDecorationType).not.toHaveBeenCalled();
+    });
 });

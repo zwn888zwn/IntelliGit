@@ -488,6 +488,12 @@ describe("CommitInfoApp integration", () => {
                             date: "2026-02-19T00:00:00Z",
                             parentHashes: ["p1"],
                             refs: ["HEAD -> main", "tag:v0.3.1"],
+                            containingBranches: [
+                                "HEAD",
+                                "main",
+                                "origin/main",
+                                "origin/release/demo",
+                            ],
                             files: [
                                 { path: "src/a.ts", status: "M", additions: 3, deletions: 1 },
                                 { path: "src/b.ts", status: "A", additions: 4, deletions: 0 },
@@ -503,6 +509,13 @@ describe("CommitInfoApp integration", () => {
         expect(document.body.textContent).toContain("Branches");
         expect(document.body.textContent).toContain("Tags");
         expect(document.body.textContent).toContain("HEAD -> main");
+        expect(document.body.textContent).toContain("In 4 branches:");
+        expect(document.body.textContent).toContain("Show all");
+
+        fireClick(Array.from(document.querySelectorAll("button")).find((el) => el.textContent === "Show all"));
+        await flush();
+        expect(document.body.textContent).toContain("origin/release/demo");
+        expect(document.body.textContent).toContain("Hide");
 
         // Toggle "Commit Details" collapse/expand via its role="button" element
         const detailsToggle = document.querySelector('[role="button"][aria-expanded]');

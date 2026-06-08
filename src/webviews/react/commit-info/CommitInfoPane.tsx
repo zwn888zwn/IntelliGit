@@ -76,6 +76,7 @@ export function CommitInfoPane({
     const [filesCollapsed, setFilesCollapsed] = useState(false);
     const [detailCollapsed, setDetailCollapsed] = useState(false);
     const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+    const [showContainingBranches, setShowContainingBranches] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const { height: bottomHeight, onMouseDown: onResizeStart } = useDragResize(
         COMMIT_DETAILS_DEFAULT_HEIGHT,
@@ -94,15 +95,20 @@ export function CommitInfoPane({
         () => splitCommitRefs(detail?.refs ?? []),
         [detail?.refs],
     );
+    const containingBranches = detail?.containingBranches ?? [];
+    const containingBranchPreview = containingBranches.slice(0, 2);
+    const hasHiddenContainingBranches = containingBranchPreview.length < containingBranches.length;
 
     useEffect(() => {
         if (!detail) {
             setExpandedDirs(new Set());
             setSelectedFilePath(null);
+            setShowContainingBranches(false);
             return;
         }
         setExpandedDirs(new Set(collectDirPaths(tree)));
         setSelectedFilePath(null);
+        setShowContainingBranches(false);
     }, [detail?.hash, tree]);
 
     if (!detail) {
@@ -295,6 +301,53 @@ export function CommitInfoPane({
                                                 />
                                             ))}
                                         </Flex>
+                                    </Box>
+                                )}
+                            </Box>
+                        )}
+                        {containingBranches.length > 0 && (
+                            <Box mt="14px">
+                                <Flex
+                                    align="center"
+                                    gap="4px"
+                                    wrap="wrap"
+                                    color="var(--vscode-descriptionForeground)"
+                                    fontSize="12px"
+                                    lineHeight="1.5"
+                                >
+                                    <Box as="span">
+                                        In {containingBranches.length} branch
+                                        {containingBranches.length !== 1 ? "es" : ""}:
+                                    </Box>
+                                    {!showContainingBranches && (
+                                        <Box as="span" color="var(--vscode-foreground)">
+                                            {containingBranchPreview.join(", ")}
+                                        </Box>
+                                    )}
+                                    {hasHiddenContainingBranches && (
+                                        <Box
+                                            as="button"
+                                            type="button"
+                                            color="var(--vscode-textLink-foreground)"
+                                            _hover={{ textDecoration: "underline" }}
+                                            onClick={() =>
+                                                setShowContainingBranches((value) => !value)
+                                            }
+                                        >
+                                            {showContainingBranches ? "Hide" : "Show all"}
+                                        </Box>
+                                    )}
+                                </Flex>
+                                {showContainingBranches && (
+                                    <Box
+                                        mt="4px"
+                                        color="var(--vscode-foreground)"
+                                        fontSize="12px"
+                                        lineHeight="1.45"
+                                    >
+                                        {containingBranches.map((branch) => (
+                                            <Box key={`contains:${branch}`}>{branch}</Box>
+                                        ))}
                                     </Box>
                                 )}
                             </Box>

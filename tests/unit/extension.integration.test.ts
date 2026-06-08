@@ -79,6 +79,14 @@ const editorSelectionListeners: Array<(event: { textEditor: unknown }) => void> 
 const workspaceFolderListeners: Array<() => void> = [];
 type FsWatchCallback = (...args: unknown[]) => void;
 const fsWatchCallbacks: FsWatchCallback[] = [];
+let registeredDefinitionProvider:
+    | {
+          provideDefinition: (
+              document: unknown,
+              position: unknown,
+          ) => Promise<unknown> | unknown;
+      }
+    | undefined;
 let latestWebviewPanel:
     | {
           webview: { postMessage: ReturnType<typeof vi.fn> };
@@ -105,6 +113,20 @@ class MockDisposable {
     }
 }
 
+class MockPosition {
+    constructor(
+        public readonly line: number,
+        public readonly character: number,
+    ) {}
+}
+
+class MockRange {
+    constructor(
+        public readonly start: { line: number; character: number },
+        public readonly end: { line: number; character: number },
+    ) {}
+}
+
 class MockEventEmitter<T> {
     private listeners: Array<(value: T) => void> = [];
     readonly event = (listener: (value: T) => void) => {
@@ -119,6 +141,7 @@ class MockEventEmitter<T> {
 
 const defaultExecutorRunImpl = async (args: string[]) => {
     if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
+    if (args[0] === "rev-parse" && args[1] === "--short") return args[2]?.slice(0, 7) ?? "feed123";
     if (args[0] === "rev-parse" && args[1] === "HEAD") return "feed1234";
     if (args[0] === "format-patch") return "patch-content";
     if (args[0] === "log" && args.includes("--format=%B")) return "current commit body";
@@ -415,6 +438,14 @@ vi.mock("vscode", () => ({
             const joined = [prefix, ...parts].join("/").replace(/\/+/g, "/");
             return { fsPath: joined, path: joined };
         },
+    },
+    Position: MockPosition,
+    Range: MockRange,
+    languages: {
+        registerDefinitionProvider: vi.fn((_selector, provider) => {
+            registeredDefinitionProvider = provider as typeof registeredDefinitionProvider;
+            return { dispose: vi.fn() };
+        }),
     },
     commands: {
         registerCommand: vi.fn((id: string, handler: CommandHandler) => {
@@ -1025,7 +1056,7 @@ describe("extension integration", () => {
         );
     });
 
-    it("updates current local branch by fetching and merging FETCH_HEAD", async () => {
+    it("updates current local branch by fetching and fast-forwarding FETCH_HEAD", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -1045,11 +1076,12 @@ describe("extension integration", () => {
             "--progress",
             "--prune",
         ]);
-        expect(executorRun).toHaveBeenCalledWith(["merge", "--no-stat", "-v", "--no-edit", "FETCH_HEAD"]);
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "FETCH_HEAD"]);
+        expect(executorRun).not.toHaveBeenCalledWith(["rebase", "--autostash", "FETCH_HEAD"]);
         expect(executorRun).not.toHaveBeenCalledWith(["pull", "--ff-only"]);
     });
 
-    it("opens conflict session when current branch update merge has conflicts", async () => {
+    it("falls back to rebase when current branch update cannot fast-forward", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -1058,14 +1090,35 @@ describe("extension integration", () => {
         await activate(context);
 
         executorRun.mockImplementation(async (args: string[]) => {
-            if (
-                args[0] === "merge" &&
-                args[1] === "--no-stat" &&
-                args[2] === "-v" &&
-                args[3] === "--no-edit" &&
-                args[4] === "FETCH_HEAD"
-            ) {
-                throw new Error("merge conflict");
+            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD") {
+                throw new Error("not possible to fast-forward");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+
+        await registeredCommands.get("intelligit.updateBranch")?.({
+            branch: { name: "main", isRemote: false, isCurrent: true },
+        });
+
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "FETCH_HEAD"]);
+        expect(executorRun).toHaveBeenCalledWith(["rebase", "--autostash", "FETCH_HEAD"]);
+        expect(showInformationMessage).toHaveBeenCalledWith("Updated main");
+    });
+
+    it("opens conflict session when current branch update rebase has conflicts", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD") {
+                throw new Error("not possible to fast-forward");
+            }
+            if (args[0] === "rebase" && args[1] === "--autostash" && args[2] === "FETCH_HEAD") {
+                throw new Error("rebase conflict");
             }
             return defaultExecutorRunImpl(args);
         });
@@ -1278,7 +1331,7 @@ describe("extension integration", () => {
         latestCommitGraphProvider!.emitBranchFilterChanged("main");
         await waitForAsync();
 
-        expect(clipboardWriteText).toHaveBeenCalledWith("a1b2c3d4");
+        expect(clipboardWriteText).toHaveBeenCalledWith("a1b2c3d");
         expect(showSaveDialog).toHaveBeenCalled();
         expect(executorRun).toHaveBeenCalledWith(
             expect.arrayContaining(["format-patch", "-1", "--stdout", "a1b2c3d4"]),
@@ -1571,23 +1624,14 @@ describe("extension integration", () => {
             filePath: "src/feature.ts",
         });
         await waitForAsync();
+        await waitForAsync();
 
-        expect(gitOpsState.getFileContentAtRef).toHaveBeenNthCalledWith(
-            1,
-            "src/feature.ts",
-            "parent1",
-        );
-        expect(gitOpsState.getFileContentAtRef).toHaveBeenNthCalledWith(
-            2,
-            "src/feature.ts",
-            "a1b2c3d4",
-        );
         const diffCall = executeCommandFallback.mock.calls.find(
             (call) => call[0] === "vscode.diff",
         );
         expect(diffCall).toBeDefined();
         expect(diffCall?.[1]).toMatchObject({ scheme: "intelligit-diff" });
-        expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff-editable" });
+        expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff" });
         expect(diffCall?.[3]).toBe("src/feature.ts (parent1 ↔ a1b2c3d4)");
     });
 
@@ -1630,7 +1674,7 @@ describe("extension integration", () => {
         });
         await waitForAsync();
         const firstDiffEditor = activeTextEditor;
-        expect(firstDiffEditor?.document.uri.query).toContain("path=src%2Fa.ts");
+        expect(firstDiffEditor?.document.uri.query).toContain("originalPath=src%2Fa.ts");
 
         latestCommitGraphProvider!.emitCommitSelected("feed1234");
         await waitForAsync();
@@ -1657,7 +1701,7 @@ describe("extension integration", () => {
             repoRoot: "/repo-a",
         });
         await waitForAsync();
-        expect(activeTextEditor?.document.uri.query).toContain("path=src%2Fc.ts");
+        expect(activeTextEditor?.document.uri.query).toContain("originalPath=src%2Fc.ts");
 
         activeTextEditor = firstDiffEditor;
         executeCommandFallback.mockClear();
@@ -1743,10 +1787,10 @@ describe("extension integration", () => {
         activeTextEditor = {
             document: {
                 uri: {
-                    scheme: "intelligit-diff-editable",
-                    path: "/src/feature.ts",
-                    fsPath: "/src/feature.ts",
-                    query: "ref=a1b2c3d4&id=1",
+                    scheme: "intelligit-diff",
+                    path: "/__intelligit_text_diff__/1/feature.ts",
+                    fsPath: "/__intelligit_text_diff__/1/feature.ts",
+                    query: "ref=a1b2c3d4&id=1&path=src%2Ffeature.ts&intelligitCommitDiff=1&originalPath=src%2Ffeature.ts&sourceFsPath=%2Frepo-a%2Fsrc%2Ffeature.ts",
                 },
             },
         };
@@ -1757,10 +1801,12 @@ describe("extension integration", () => {
             fsPath: "/repo-a/src/feature.ts",
             path: "/repo-a/src/feature.ts",
         });
-        expect(showTextDocument).toHaveBeenCalledWith({
-            fsPath: "/repo-a/src/feature.ts",
-            path: "/repo-a/src/feature.ts",
-        });
+        expect(showTextDocument).toHaveBeenCalledWith(
+            {
+                fsPath: "/repo-a/src/feature.ts",
+                path: "/repo-a/src/feature.ts",
+            },
+        );
     });
 
     it("updates commit diff toolbar context when the source file is missing", async () => {
@@ -1776,10 +1822,10 @@ describe("extension integration", () => {
         activeTextEditor = {
             document: {
                 uri: {
-                    scheme: "intelligit-diff-editable",
-                    path: "/src/deleted.ts",
-                    fsPath: "/src/deleted.ts",
-                    query: "ref=a1b2c3d4&id=2",
+                    scheme: "intelligit-diff",
+                    path: "/__intelligit_text_diff__/2/deleted.ts",
+                    fsPath: "/__intelligit_text_diff__/2/deleted.ts",
+                    query: "ref=a1b2c3d4&id=2&path=src%2Fdeleted.ts&intelligitCommitDiff=1&originalPath=src%2Fdeleted.ts&sourceFsPath=%2Frepo-a%2Fsrc%2Fdeleted.ts",
                 },
             },
         };
@@ -1793,6 +1839,51 @@ describe("extension integration", () => {
             "intelligit.commitDiffSourceExists",
             false,
         );
+    });
+
+    it("opens source directly for function declarations in IntelliGit commit git diff editors", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+
+        openTextDocument.mockClear();
+        executeCommandFallback.mockClear();
+
+        const sourceUri = {
+            scheme: "file",
+            path: "/repo-a/src/feature.ts",
+            fsPath: "/repo-a/src/feature.ts",
+        };
+        openTextDocument.mockResolvedValueOnce({
+            uri: sourceUri,
+            lineCount: 1,
+            lineAt: () => ({
+                text: "func productMetricNoAdsTransactionIDs(list []productMetricNoAdsRecord) {",
+            }),
+        });
+
+        await registeredDefinitionProvider?.provideDefinition(
+            {
+                uri: {
+                    scheme: "intelligit-diff",
+                    path: "/__intelligit_text_diff__/1/feature.ts",
+                    fsPath: "/__intelligit_text_diff__/1/feature.ts",
+                    query: "ref=93af1295&id=1&path=src%2Ffeature.ts&intelligitCommitDiff=1&originalPath=src%2Ffeature.ts&sourceFsPath=%2Frepo-a%2Fsrc%2Ffeature.ts",
+                },
+                getWordRangeAtPosition: () => ({
+                    start: { line: 0, character: 5 },
+                    end: { line: 0, character: 38 },
+                }),
+                getText: () => "productMetricNoAdsTransactionIDs",
+            },
+            new MockPosition(0, 5),
+        );
+
+        expect(openTextDocument).toHaveBeenCalledWith(sourceUri);
     });
 
     it("prompts merge parent selection before opening commit file diff", async () => {
@@ -1811,24 +1902,15 @@ describe("extension integration", () => {
             filePath: "src/feature.ts",
         });
         await waitForAsync();
+        await waitForAsync();
 
         expect(showQuickPick).toHaveBeenCalled();
-        expect(gitOpsState.getFileContentAtRef).toHaveBeenNthCalledWith(
-            1,
-            "src/feature.ts",
-            "deadbee^2",
-        );
-        expect(gitOpsState.getFileContentAtRef).toHaveBeenNthCalledWith(
-            2,
-            "src/feature.ts",
-            "deadbee",
-        );
         const diffCall = executeCommandFallback.mock.calls.find(
             (call) => call[0] === "vscode.diff",
         );
         expect(diffCall).toBeDefined();
         expect(diffCall?.[1]).toMatchObject({ scheme: "intelligit-diff" });
-        expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff-editable" });
+        expect(diffCall?.[2]).toMatchObject({ scheme: "intelligit-diff" });
         expect(diffCall?.[3]).toBe("src/feature.ts (parent2 ↔ deadbee)");
     });
 

@@ -5,7 +5,13 @@ import { RefTypeIcon } from "../shared/components";
 import { formatDateTime } from "../shared/date";
 import { REF_BADGE_COLORS } from "../shared/tokens";
 import { splitCommitRefs } from "../shared/utils";
-import { AUTHOR_COL_WIDTH, DATE_COL_WIDTH, ROW_SIDE_PADDING } from "./styles";
+import {
+    AUTHOR_COL_WIDTH,
+    DATE_COL_WIDTH,
+    HASH_COL_WIDTH,
+    META_COL_GAP,
+    ROW_SIDE_PADDING,
+} from "./styles";
 import { ROW_HEIGHT } from "../graph";
 
 interface Props {
@@ -264,7 +270,7 @@ function CommitRowInner({
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     flexShrink: 0,
-                    marginLeft: 4,
+                    marginLeft: META_COL_GAP,
                 }}
             >
                 {commit.author}
@@ -276,11 +282,30 @@ function CommitRowInner({
                     textAlign: "right",
                     opacity: isMergeCommit ? 0.8 : 0.5,
                     flexShrink: 0,
-                    marginLeft: 4,
+                    marginLeft: META_COL_GAP,
                     fontSize: "11px",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                 }}
             >
                 {formatDateTime(commit.date)}
+            </span>
+
+            <span
+                style={{
+                    width: HASH_COL_WIDTH,
+                    textAlign: "right",
+                    opacity: isMergeCommit ? 0.78 : 0.62,
+                    flexShrink: 0,
+                    marginLeft: META_COL_GAP,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    fontFamily: "var(--vscode-editor-font-family, monospace)",
+                    fontSize: "11px",
+                }}
+                title={commit.hash}
+            >
+                {commit.shortHash || commit.hash.slice(0, 8)}
             </span>
         </div>
     );
