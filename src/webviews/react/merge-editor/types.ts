@@ -12,7 +12,7 @@ export type {
 export type OutboundMessage =
     | { type: "ready" }
     | { type: "setIgnoreMode"; mode: "none" | "whitespace" }
-    | { type: "applyResolution"; content: string }
+    | { type: "applyResolution"; content: string; mode?: "apply" | "applyNext" }
     | { type: "acceptYours" }
     | { type: "acceptTheirs" }
     | { type: "close" };
@@ -22,9 +22,10 @@ export type InboundMessage =
     | { type: "loadError"; message: string };
 
 /** Resolution choice for a single conflict hunk. */
-export type HunkResolution = "ours" | "theirs" | "both" | "none";
+export type HunkResolution = "ours" | "theirs" | "both" | "none" | "custom";
 
 export interface MergeEditorState {
     data: MergeEditorData | null;
     resolutions: Record<number, HunkResolution>;
+    resultEdits: Record<string, string[]>;
 }

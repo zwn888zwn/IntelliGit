@@ -4,6 +4,7 @@ export interface MergeConflictSessionData {
     sourceBranch: string;
     targetBranch: string;
     files: MergeConflictFile[];
+    selectedPath?: string | null;
 }
 
 export type OutboundMessage =

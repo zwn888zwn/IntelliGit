@@ -3,6 +3,7 @@ import { GitOps } from "../git/operations";
 import { buildWebviewShellHtml } from "./webviewHtml";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
+import type { MergeConflictFile } from "../types";
 import type { MergeConflictSessionData } from "../webviews/react/merge-conflicts-session/types";
 
 interface MergeConflictSessionLabels {
@@ -22,6 +23,7 @@ export class MergeConflictSessionPanel {
     private disposed = false;
     private sourceBranch = "incoming branch";
     private targetBranch = "current branch";
+    private lastFiles: MergeConflictFile[] = [];
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -96,10 +98,13 @@ export class MergeConflictSessionPanel {
         await instance.postSessionData({ closeWhenResolved: false });
     }
 
-    static async refreshIfOpen(): Promise<void> {
+    static async refreshIfOpen(options: { resolvedPath?: string } = {}): Promise<void> {
         const existing = MergeConflictSessionPanel.currentPanel;
         if (!existing || existing.disposed) return;
-        await existing.postSessionData({ closeWhenResolved: true });
+        await existing.postSessionData({
+            closeWhenResolved: true,
+            resolvedPath: options.resolvedPath,
+        });
     }
 
     static isOpen(): boolean {
@@ -130,7 +135,7 @@ export class MergeConflictSessionPanel {
                 const filePath = this.getFilePath(msg.filePath);
                 if (!filePath) return;
                 await this.callbacks.onOpenMergeConflict(filePath);
-                await this.postSessionData({ closeWhenResolved: true });
+                await this.postSessionData({ closeWhenResolved: true, selectedPath: filePath });
                 return;
             }
 
@@ -144,7 +149,7 @@ export class MergeConflictSessionPanel {
                     },
                 );
                 await this.callbacks.onConflictStateChanged();
-                await this.postSessionData({ closeWhenResolved: true });
+                await this.postSessionData({ closeWhenResolved: true, resolvedPath: filePath });
                 return;
             }
 
@@ -158,7 +163,7 @@ export class MergeConflictSessionPanel {
                     },
                 );
                 await this.callbacks.onConflictStateChanged();
-                await this.postSessionData({ closeWhenResolved: true });
+                await this.postSessionData({ closeWhenResolved: true, resolvedPath: filePath });
                 return;
             }
 
@@ -181,20 +186,32 @@ export class MergeConflictSessionPanel {
         return !this.disposed;
     }
 
-    private async postSessionData(options: { closeWhenResolved: boolean }): Promise<void> {
+    private async postSessionData(options: {
+        closeWhenResolved: boolean;
+        resolvedPath?: string;
+        selectedPath?: string;
+    }): Promise<void> {
         if (!this.isAlive()) return;
+        const previousFiles = this.lastFiles;
         const files = await this.gitOps.getConflictFilesDetailed();
         if (!this.isAlive()) return;
         if (files.length === 0 && options.closeWhenResolved) {
+            this.lastFiles = [];
             vscode.window.showInformationMessage("All merge conflicts are resolved.");
             this.panel.dispose();
             return;
         }
 
+        const selectedPath =
+            options.selectedPath ??
+            this.pickNextSelectedPath(files, previousFiles, options.resolvedPath);
+        this.lastFiles = files;
+
         const data: MergeConflictSessionData = {
             sourceBranch: this.sourceBranch,
             targetBranch: this.targetBranch,
             files,
+            selectedPath,
         };
 
         if (!this.isAlive()) return;
@@ -209,5 +226,28 @@ export class MergeConflictSessionPanel {
             styleFiles: ["webview-mergeconflictsession.css"],
             title: "Conflicts",
         });
+    }
+
+    private pickNextSelectedPath(
+        files: MergeConflictFile[],
+        previousFiles: MergeConflictFile[],
+        resolvedPath?: string,
+    ): string | null {
+        if (!resolvedPath) return null;
+        if (files.some((file) => file.path === resolvedPath)) return resolvedPath;
+
+        const previousIndex = previousFiles.findIndex((file) => file.path === resolvedPath);
+        if (previousIndex < 0) return files[0]?.path ?? null;
+
+        const remaining = new Set(files.map((file) => file.path));
+        for (let i = previousIndex + 1; i < previousFiles.length; i++) {
+            const path = previousFiles[i]?.path;
+            if (path && remaining.has(path)) return path;
+        }
+        for (let i = 0; i < previousIndex; i++) {
+            const path = previousFiles[i]?.path;
+            if (path && remaining.has(path)) return path;
+        }
+        return files[0]?.path ?? null;
     }
 }

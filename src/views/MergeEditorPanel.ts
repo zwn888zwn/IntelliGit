@@ -24,7 +24,7 @@ export class MergeEditorPanel {
         private readonly filePath: string,
         private readonly oursSourceLabel: string,
         private readonly theirsSourceLabel: string,
-        private readonly onResolved: () => void,
+        private readonly onResolved: () => Promise<void> | void,
     ) {
         this.panel = panel;
 
@@ -41,7 +41,7 @@ export class MergeEditorPanel {
 
         panel.onDidDispose(() => {
             this.disposed = true;
-            MergeEditorPanel.panels.delete(filePath);
+            MergeEditorPanel.panels.delete(this.getPanelKey());
         });
     }
 
@@ -51,9 +51,10 @@ export class MergeEditorPanel {
         workspaceRoot: vscode.Uri,
         filePath: string,
         labels: { oursSourceLabel?: string; theirsSourceLabel?: string } | undefined,
-        onResolved: () => void,
+        onResolved: () => Promise<void> | void,
     ): void {
-        const existing = MergeEditorPanel.panels.get(filePath);
+        const panelKey = MergeEditorPanel.getPanelKey(workspaceRoot, filePath);
+        const existing = MergeEditorPanel.panels.get(panelKey);
         if (existing && !existing.disposed) {
             existing.panel.reveal();
             return;
@@ -80,7 +81,7 @@ export class MergeEditorPanel {
             labels?.theirsSourceLabel?.trim() || "incoming branch",
             onResolved,
         );
-        MergeEditorPanel.panels.set(filePath, instance);
+        MergeEditorPanel.panels.set(panelKey, instance);
     }
 
     private async handleMessage(msg: { type: string; [key: string]: unknown }): Promise<void> {
@@ -109,7 +110,7 @@ export class MergeEditorPanel {
                 await this.gitOps.stageFile(this.filePath);
                 vscode.window.showInformationMessage(`Resolved: ${this.filePath}`);
                 try {
-                    this.onResolved();
+                    await this.onResolved();
                 } finally {
                     this.panel.dispose();
                 }
@@ -120,7 +121,7 @@ export class MergeEditorPanel {
                 await this.gitOps.acceptConflictSide(this.filePath, "ours");
                 vscode.window.showInformationMessage(`Accepted yours: ${this.filePath}`);
                 try {
-                    this.onResolved();
+                    await this.onResolved();
                 } finally {
                     this.panel.dispose();
                 }
@@ -131,7 +132,7 @@ export class MergeEditorPanel {
                 await this.gitOps.acceptConflictSide(this.filePath, "theirs");
                 vscode.window.showInformationMessage(`Accepted theirs: ${this.filePath}`);
                 try {
-                    this.onResolved();
+                    await this.onResolved();
                 } finally {
                     this.panel.dispose();
                 }
@@ -188,6 +189,14 @@ export class MergeEditorPanel {
             styleFiles: ["webview-mergeeditor.css"],
             title: "Merge Editor",
         });
+    }
+
+    private static getPanelKey(workspaceRoot: vscode.Uri, filePath: string): string {
+        return `${workspaceRoot.fsPath}::${filePath}`;
+    }
+
+    private getPanelKey(): string {
+        return MergeEditorPanel.getPanelKey(this.workspaceRoot, this.filePath);
     }
 
     private async detectTextFormatForOutput(): Promise<{

@@ -28,7 +28,7 @@ export function getJetBrainsMergeToolPath(): string {
 }
 
 export function getPreferExternalMergeTool(): boolean {
-    return getIntelliGitConfig()?.get<boolean>("jetbrainsMergeTool.preferExternal", true) ?? true;
+    return getIntelliGitConfig()?.get<boolean>("jetbrainsMergeTool.preferExternal", false) ?? false;
 }
 
 function getDefaultJetBrainsMergeToolPath(): string {

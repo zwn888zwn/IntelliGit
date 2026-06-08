@@ -9,6 +9,7 @@ import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
 import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
 import { MergeConflictSessionPanel } from "./views/MergeConflictSessionPanel";
 import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
+import { MergeEditorPanel } from "./views/MergeEditorPanel";
 import { NoWorkspaceViewProvider } from "./views/NoWorkspaceViewProvider";
 import { ProjectBranchComparisonPanel } from "./views/ProjectBranchComparisonPanel";
 import type { Branch, CommitDetail } from "./types";
@@ -525,20 +526,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
     };
 
-    const openMergeConflictForFile = async (filePath: string): Promise<void> => {
+    const openMergeConflictForFile = async (
+        filePath: string,
+        labels?: {
+            sourceBranch?: string;
+            targetBranch?: string;
+        },
+    ): Promise<void> => {
+        const safePath = assertRepoRelativePath(filePath);
+        const repository = requireCurrentRepository();
         const preferExternal = getPreferExternalMergeTool();
 
         if (preferExternal && getJetBrainsMergeToolPath()) {
             const opened = await openJetBrainsMergeToolForFile(
-                filePath,
-                requireCurrentRepository().root,
-                gitOps,
+                safePath,
+                repository.root,
+                repository.gitOps,
                 () => refreshService.refreshConflictUi(),
                 openBuiltInMergeEditorForFile,
             );
             if (opened) return;
         }
-        await openBuiltInMergeEditorForFile(filePath);
+
+        const targetBranch =
+            labels?.targetBranch || currentBranches.find((branch) => branch.isCurrent)?.name;
+        MergeEditorPanel.open(
+            context.extensionUri,
+            repository.gitOps,
+            repository.uri,
+            safePath,
+            {
+                oursSourceLabel: targetBranch,
+                theirsSourceLabel: labels?.sourceBranch,
+            },
+            async () => {
+                await refreshService.refreshConflictUi();
+                await MergeConflictSessionPanel.refreshIfOpen({ resolvedPath: safePath });
+            },
+        );
     };
 
     const openConflictSession = async (labels?: {
@@ -547,7 +572,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }): Promise<void> => {
         await MergeConflictSessionPanel.open(context.extensionUri, gitOps, labels ?? {}, {
             onOpenMergeConflict: async (filePath) => {
-                await openMergeConflictForFile(filePath);
+                await openMergeConflictForFile(filePath, labels);
             },
             onConflictStateChanged: async () => {
                 await refreshService.refreshConflictUi();

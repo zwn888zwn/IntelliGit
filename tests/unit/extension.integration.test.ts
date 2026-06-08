@@ -1150,6 +1150,33 @@ describe("extension integration", () => {
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
+    it("opens the built-in merge editor by default for conflict files", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/default-conflicted.ts",
+        });
+
+        const vscode = await import("vscode");
+        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
+        expect(createWebviewPanelMock).toHaveBeenCalledWith(
+            "intelligit.mergeEditor",
+            "Merge: src/default-conflicted.ts",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(executeCommandFallback).not.toHaveBeenCalledWith(
+            "git.openMergeEditor",
+            expect.anything(),
+        );
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
     it("opens conflict session when merge fails with unresolved conflicts", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
@@ -1186,6 +1213,37 @@ describe("extension integration", () => {
             expect.any(Number),
             expect.objectContaining({ enableScripts: true }),
         );
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("selects the next unresolved file after resolving a session conflict", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+
+        const a = { path: "src/a.ts", code: "UU", ours: "Modified", theirs: "Modified" } as const;
+        const b = { path: "src/b.ts", code: "UU", ours: "Modified", theirs: "Modified" } as const;
+        const c = { path: "src/c.ts", code: "UU", ours: "Modified", theirs: "Modified" } as const;
+        gitOpsState.getConflictFilesDetailed
+            .mockResolvedValueOnce([a, b, c])
+            .mockResolvedValueOnce([a, b, c])
+            .mockResolvedValueOnce([a, c]);
+
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        await latestWebviewPanel?.emitMessage({ type: "acceptYours", filePath: "src/b.ts" });
+
+        expect(gitOpsState.acceptConflictSide).toHaveBeenCalledWith("src/b.ts", "ours");
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenLastCalledWith({
+            type: "setSessionData",
+            data: expect.objectContaining({
+                selectedPath: "src/c.ts",
+                files: [a, c],
+            }),
+        });
     });
 
     it("offers restore action after deleting local branch", async () => {

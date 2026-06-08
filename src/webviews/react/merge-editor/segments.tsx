@@ -20,7 +20,6 @@ import {
     tokenizeWordDiff,
     alignCompareLinesForWordDiff,
 } from "./wordDiff";
-import { getResultLines } from "./mergeState";
 
 // --- Syntax highlighting ---
 
@@ -171,6 +170,8 @@ function CodeBlock({
     className,
     wordHighlight,
     compareLines,
+    editable,
+    onEdit,
 }: {
     lines: string[];
     lineCount: number;
@@ -178,6 +179,8 @@ function CodeBlock({
     className?: string;
     wordHighlight?: boolean;
     compareLines?: string[];
+    editable?: boolean;
+    onEdit?: (value: string) => void;
 }) {
     const padded = useMemo(() => padLines(lines, lineCount), [lines, lineCount]);
     const paddedCompare = useMemo(() => {
@@ -190,15 +193,26 @@ function CodeBlock({
         <div className={`code-block ${className ?? ""} ${wordHighlight ? "word-highlight" : ""}`}>
             <LineNumbers primary={lineNumbers.primary} secondary={lineNumbers.secondary} />
             <div className="code-lines">
-                {padded.map((line, i) => (
-                    <div key={i} className="code-line">
-                        {wordHighlight && paddedCompare ? (
-                            <WordDiffLine line={line} compareLine={paddedCompare[i]} />
-                        ) : (
-                            <HighlightedLine line={line} />
-                        )}
-                    </div>
-                ))}
+                {editable ? (
+                    <textarea
+                        className="result-editor-textarea"
+                        value={lines.join("\n")}
+                        rows={Math.max(lineCount, 1)}
+                        spellCheck={false}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => onEdit?.(event.target.value)}
+                    />
+                ) : (
+                    padded.map((line, i) => (
+                        <div key={i} className="code-line">
+                            {wordHighlight && paddedCompare ? (
+                                <WordDiffLine line={line} compareLine={paddedCompare[i]} />
+                            ) : (
+                                <HighlightedLine line={line} />
+                            )}
+                        </div>
+                    ))
+                )}
             </div>
         </div>
     );
@@ -234,6 +248,7 @@ function getHunkStatus(
     if (resolution === "ours") return { label: "Use left", tone: "ok" };
     if (resolution === "theirs") return { label: "Use right", tone: "ok" };
     if (resolution === "both") return { label: "Use both", tone: "ok" };
+    if (resolution === "custom") return { label: "Custom result", tone: "ok" };
     return { label: "Remove block", tone: "muted" };
 }
 
@@ -247,14 +262,18 @@ function getHunkKindLabel(segment: ConflictSegment): string {
 
 export function CommonSection({
     segment,
+    resultLines,
     lineCount,
     lineNumbers,
     highlightWords,
+    onEditResult,
 }: {
     segment: CommonSegment;
+    resultLines: string[];
     lineCount: number;
     lineNumbers: SegmentPaneLineNumbers;
     highlightWords: boolean;
+    onEditResult: (value: string) => void;
 }) {
     return (
         <div className="segment segment-common">
@@ -268,10 +287,12 @@ export function CommonSection({
             </div>
             <div className="column column-middle result-column">
                 <CodeBlock
-                    lines={segment.lines}
+                    lines={resultLines}
                     lineCount={lineCount}
                     lineNumbers={lineNumbers.middle}
                     wordHighlight={highlightWords}
+                    editable
+                    onEdit={onEditResult}
                 />
             </div>
             <div className="column column-right">
@@ -289,9 +310,11 @@ export function CommonSection({
 export interface ConflictSectionProps {
     segment: ConflictSegment;
     resolution: HunkResolution | undefined;
+    resultLines: string[];
     lineCount: number;
     lineNumbers: SegmentPaneLineNumbers;
     onResolve: (id: number, resolution: HunkResolution) => void;
+    onEditResult: (value: string) => void;
     onSelect: (id: number) => void;
     setSectionRef: (el: HTMLDivElement | null) => void;
     isActive: boolean;
@@ -304,9 +327,11 @@ export interface ConflictSectionProps {
 export function ConflictSection({
     segment,
     resolution,
+    resultLines,
     lineCount,
     lineNumbers,
     onResolve,
+    onEditResult,
     onSelect,
     setSectionRef,
     isActive,
@@ -315,13 +340,13 @@ export function ConflictSection({
     conflictOrdinal,
     trueConflictOrdinal,
 }: ConflictSectionProps) {
-    const resultLines = getResultLines(segment, resolution);
     const status = getHunkStatus(segment, resolution);
 
     const isOurs = resolution === "ours";
     const isTheirs = resolution === "theirs";
     const isBoth = resolution === "both";
     const isNone = resolution === "none";
+    const isCustom = resolution === "custom";
     const isResolved = segment.changeKind !== "conflict" || resolution !== undefined;
     const kindLabel = getHunkKindLabel(segment);
     const resultCompareLines =
@@ -447,9 +472,17 @@ export function ConflictSection({
                         lines={resultLines}
                         lineCount={lineCount}
                         lineNumbers={lineNumbers.middle}
-                        className={`conflict-result ${isResolved ? "resolved" : "unresolved"}`}
+                        className={[
+                            "conflict-result",
+                            isResolved ? "resolved" : "unresolved",
+                            isCustom ? "custom" : "",
+                        ]
+                            .filter(Boolean)
+                            .join(" ")}
                         wordHighlight={highlightWords}
                         compareLines={resultCompareLines}
+                        editable
+                        onEdit={onEditResult}
                     />
                 </div>
 

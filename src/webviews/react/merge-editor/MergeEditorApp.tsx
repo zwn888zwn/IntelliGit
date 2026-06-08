@@ -24,6 +24,7 @@ import {
     trueConflictCount,
     resolvedTrueConflictCount,
     paneChangeCount,
+    getSegmentResultKey,
 } from "./mergeState";
 import {
     buildLineNumberValues,
@@ -41,10 +42,20 @@ function getVsCodeApi() {
     return getSharedVsCodeApi<OutboundMessage, unknown>();
 }
 
+function splitEditedResultLines(value: string): string[] {
+    if (value === "") return [];
+    return value.replace(/\r\n/g, "\n").split("\n");
+}
+
 // --- App ---
 
 function App() {
-    const [state, dispatch] = useReducer(reducer, { data: null, error: null, resolutions: {} });
+    const [state, dispatch] = useReducer(reducer, {
+        data: null,
+        error: null,
+        resolutions: {},
+        resultEdits: {},
+    });
     const [showDetails, setShowDetails] = useState(false);
     const [highlightWords, setHighlightWords] = useState(true);
     const [ignoreMode, setIgnoreMode] = useState<"none" | "whitespace">("none");
@@ -67,9 +78,13 @@ function App() {
             let lineNumbers: SegmentPaneLineNumbers;
             let startLine: number;
 
+            const resultKey = getSegmentResultKey(segment, index);
+
             if (segment.type === "common") {
                 const commonLen = segment.lines.length;
-                lineCount = Math.max(commonLen, 1);
+                const resultLines = state.resultEdits[resultKey] ?? segment.lines;
+                const resultLen = resultLines.length;
+                lineCount = Math.max(commonLen, resultLen, 1);
                 startLine = visualLineCursor;
                 lineNumbers = {
                     left: {
@@ -77,7 +92,7 @@ function App() {
                         secondary: buildLineNumberValues(baseCursor, commonLen, lineCount),
                     },
                     middle: {
-                        primary: buildLineNumberValues(resultCursor, commonLen, lineCount),
+                        primary: buildLineNumberValues(resultCursor, resultLen, lineCount),
                         secondary: buildLineNumberValues(baseCursor, commonLen, lineCount),
                     },
                     right: {
@@ -88,9 +103,13 @@ function App() {
                 oursCursor += commonLen;
                 baseCursor += commonLen;
                 theirsCursor += commonLen;
-                resultCursor += commonLen;
+                resultCursor += resultLen;
             } else {
-                const resultLines = getResultLines(segment, state.resolutions[segment.id]);
+                const resultLines = getResultLines(
+                    segment,
+                    state.resolutions[segment.id],
+                    state.resultEdits[resultKey],
+                );
                 const oursLen = segment.oursLines.length;
                 const theirsLen = segment.theirsLines.length;
                 const baseLen = segment.baseLines.length;
@@ -134,6 +153,7 @@ function App() {
             return {
                 segment,
                 index,
+                resultKey,
                 startLine,
                 lineCount,
                 lineNumbers,
@@ -141,7 +161,7 @@ function App() {
                 trueConflictOrdinal: computedTrueConflictOrdinal,
             };
         });
-    }, [segments, state.resolutions]);
+    }, [segments, state.resolutions, state.resultEdits]);
 
     const conflictSegments = useMemo(
         () => segments.filter((seg): seg is ConflictSegment => seg.type === "conflict"),
@@ -186,11 +206,26 @@ function App() {
         dispatch({ type: "RESOLVE_HUNK", id, resolution });
     }, []);
 
+    const handleEditResult = useCallback(
+        (key: string, value: string, conflictId?: number) => {
+            if (conflictId !== undefined) {
+                setActiveConflictId(conflictId);
+            }
+            dispatch({
+                type: "EDIT_RESULT",
+                key,
+                lines: splitEditedResultLines(value),
+                conflictId,
+            });
+        },
+        [],
+    );
+
     const handleApply = useCallback(() => {
         if (!state.data) return;
-        const content = buildResultContent(state.data, state.resolutions);
-        getVsCodeApi().postMessage({ type: "applyResolution", content });
-    }, [state.data, state.resolutions]);
+        const content = buildResultContent(state.data, state.resolutions, state.resultEdits);
+        getVsCodeApi().postMessage({ type: "applyResolution", content, mode: "apply" });
+    }, [state.data, state.resolutions, state.resultEdits]);
 
     const handleAcceptAllYours = useCallback(() => {
         if (!state.data) return;
@@ -529,6 +564,7 @@ function App() {
                         ({
                             segment,
                             index,
+                            resultKey,
                             lineCount,
                             lineNumbers,
                             conflictOrdinal,
@@ -538,18 +574,28 @@ function App() {
                                 <CommonSection
                                     key={index}
                                     segment={segment}
+                                    resultLines={state.resultEdits[resultKey] ?? segment.lines}
                                     lineCount={lineCount}
                                     lineNumbers={lineNumbers}
                                     highlightWords={highlightWords}
+                                    onEditResult={(value) => handleEditResult(resultKey, value)}
                                 />
                             ) : (
                                 <ConflictSection
                                     key={index}
                                     segment={segment}
                                     resolution={state.resolutions[segment.id]}
+                                    resultLines={getResultLines(
+                                        segment,
+                                        state.resolutions[segment.id],
+                                        state.resultEdits[resultKey],
+                                    )}
                                     lineCount={lineCount}
                                     lineNumbers={lineNumbers}
                                     onResolve={handleResolve}
+                                    onEditResult={(value) =>
+                                        handleEditResult(resultKey, value, segment.id)
+                                    }
                                     onSelect={setActiveConflictId}
                                     setSectionRef={(el) => {
                                         conflictSectionRefs.current[segment.id] = el;

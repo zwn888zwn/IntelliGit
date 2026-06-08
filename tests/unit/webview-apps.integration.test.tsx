@@ -28,7 +28,13 @@ function fireClick(el: Element | null): void {
 
 function fireInput(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
     act(() => {
-        el.value = value;
+        const prototype =
+            el instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : HTMLInputElement.prototype;
+        const valueSetter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+        if (valueSetter) valueSetter.call(el, value);
+        else el.value = value;
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -527,5 +533,156 @@ describe("CommitInfoApp integration", () => {
         });
         await flush();
         expect(document.body.textContent).toContain("No commit selected");
+    });
+});
+
+describe("MergeEditorApp integration", () => {
+    it("allows editing the result pane and applying custom content", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/merge-editor/MergeEditorApp");
+        await flush();
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "ready" });
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setConflictData",
+                        data: {
+                            filePath: "src/conflicted.ts",
+                            oursLabel: "main",
+                            theirsLabel: "feature",
+                            eol: "\n",
+                            hasTrailingNewline: true,
+                            segments: [
+                                {
+                                    type: "conflict",
+                                    id: 0,
+                                    changeKind: "conflict",
+                                    oursLines: ["ours"],
+                                    theirsLines: ["theirs"],
+                                    baseLines: ["base"],
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        const applyButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Apply (0/1)"),
+        ) as HTMLButtonElement;
+        expect(applyButton.disabled).toBe(true);
+
+        const resultEditor = document.querySelector(
+            ".result-editor-textarea",
+        ) as HTMLTextAreaElement;
+        fireInput(resultEditor, "manual\nresult");
+        await flush();
+
+        const enabledApplyButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Apply (1/1)"),
+        ) as HTMLButtonElement;
+        expect(enabledApplyButton.disabled).toBe(false);
+        fireClick(enabledApplyButton);
+
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "applyResolution",
+            content: "manual\nresult\n",
+            mode: "apply",
+        });
+    });
+});
+
+describe("MergeConflictSessionApp integration", () => {
+    it("uses host-selected conflict paths when opening the merge editor", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/merge-conflicts-session/MergeConflictSessionApp");
+        await flush();
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "ready" });
+        vscode.postMessage.mockClear();
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setSessionData",
+                        data: {
+                            sourceBranch: "feature",
+                            targetBranch: "main",
+                            selectedPath: "src/b.ts",
+                            files: [
+                                {
+                                    path: "src/a.ts",
+                                    code: "UU",
+                                    ours: "Modified",
+                                    theirs: "Modified",
+                                },
+                                {
+                                    path: "src/b.ts",
+                                    code: "UU",
+                                    ours: "Modified",
+                                    theirs: "Modified",
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find((button) =>
+                button.textContent?.includes("Merge"),
+            ) ?? null,
+        );
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "openMerge",
+            filePath: "src/b.ts",
+        });
+
+        vscode.postMessage.mockClear();
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setSessionData",
+                        data: {
+                            sourceBranch: "feature",
+                            targetBranch: "main",
+                            selectedPath: "src/a.ts",
+                            files: [
+                                {
+                                    path: "src/a.ts",
+                                    code: "UU",
+                                    ours: "Modified",
+                                    theirs: "Modified",
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find((button) =>
+                button.textContent?.includes("Merge"),
+            ) ?? null,
+        );
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "openMerge",
+            filePath: "src/a.ts",
+        });
     });
 });

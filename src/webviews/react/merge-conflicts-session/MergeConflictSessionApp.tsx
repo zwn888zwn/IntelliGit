@@ -38,11 +38,17 @@ function App() {
                 setTargetBranch(next.targetBranch);
                 setFiles(next.files);
                 setError(null);
-                setSelectedPath((prev) =>
-                    prev && next.files.some((file) => file.path === prev)
+                setSelectedPath((prev) => {
+                    if (
+                        next.selectedPath &&
+                        next.files.some((file) => file.path === next.selectedPath)
+                    ) {
+                        return next.selectedPath;
+                    }
+                    return prev && next.files.some((file) => file.path === prev)
                         ? prev
-                        : (next.files[0]?.path ?? null),
-                );
+                        : (next.files[0]?.path ?? null);
+                });
                 return;
             }
             if (event.data.type === "loadError") {

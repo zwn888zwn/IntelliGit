@@ -9,6 +9,8 @@ import {
     trueConflictCount,
     resolvedTrueConflictCount,
     paneChangeCount,
+    getConflictResultKey,
+    getCommonResultKey,
 } from "../../src/webviews/react/merge-editor/mergeState";
 import type {
     MergeEditorData,
@@ -40,7 +42,7 @@ function makeData(segments: MergeSegment[]): MergeEditorData {
 }
 
 describe("reducer", () => {
-    const initial = { data: null, error: null, resolutions: {} };
+    const initial = { data: null, error: null, resolutions: {}, resultEdits: {} };
 
     it("SET_DATA replaces data and clears resolutions", () => {
         const data = makeData([]);
@@ -63,6 +65,30 @@ describe("reducer", () => {
         expect(state.resolutions[1]).toBe("ours");
         expect(initial.resolutions).toEqual({});
     });
+
+    it("EDIT_RESULT marks conflict hunks as custom", () => {
+        const state = reducer(initial, {
+            type: "EDIT_RESULT",
+            key: getConflictResultKey(2),
+            lines: ["manual"],
+            conflictId: 2,
+        });
+        expect(state.resolutions[2]).toBe("custom");
+        expect(state.resultEdits[getConflictResultKey(2)]).toEqual(["manual"]);
+    });
+
+    it("RESOLVE_HUNK clears stale custom result lines for that conflict", () => {
+        const state = reducer(
+            {
+                ...initial,
+                resultEdits: { [getConflictResultKey(0)]: ["manual"] },
+                resolutions: { 0: "custom" },
+            },
+            { type: "RESOLVE_HUNK", id: 0, resolution: "ours" },
+        );
+        expect(state.resolutions[0]).toBe("ours");
+        expect(state.resultEdits[getConflictResultKey(0)]).toBeUndefined();
+    });
 });
 
 describe("getResultLines", () => {
@@ -82,6 +108,10 @@ describe("getResultLines", () => {
 
     it("returns empty for 'none' resolution", () => {
         expect(getResultLines(segment, "none")).toEqual([]);
+    });
+
+    it("returns custom lines for 'custom' resolution", () => {
+        expect(getResultLines(segment, "custom", ["manual"])).toEqual(["manual"]);
     });
 
     it("returns baseLines for unresolved conflict", () => {
@@ -120,6 +150,37 @@ describe("buildResultContent", () => {
         const data = makeData([{ type: "common", lines: [""] }]);
         expect(buildResultContent(data, {})).toBe("\n");
     });
+
+    it("prefers custom conflict result edits", () => {
+        const data = makeData([
+            { type: "common", lines: ["line1"] },
+            makeConflict({ id: 0 }),
+            { type: "common", lines: ["line3"] },
+        ]);
+        const result = buildResultContent(
+            data,
+            { 0: "custom" },
+            {
+                [getConflictResultKey(0)]: ["manual", "result"],
+            },
+        );
+        expect(result).toBe("line1\nmanual\nresult\nline3\n");
+    });
+
+    it("preserves editable common result lines", () => {
+        const data = makeData([
+            { type: "common", lines: ["line1"] },
+            makeConflict({ id: 0 }),
+        ]);
+        const result = buildResultContent(
+            data,
+            { 0: "ours" },
+            {
+                [getCommonResultKey(0)]: ["edited common"],
+            },
+        );
+        expect(result).toBe("edited common\nours\n");
+    });
 });
 
 describe("allResolved", () => {
@@ -129,6 +190,11 @@ describe("allResolved", () => {
             makeConflict({ id: 1, changeKind: "ours-only" }),
         ];
         expect(allResolved(segments, { 0: "ours" })).toBe(true);
+    });
+
+    it("returns true when a true conflict has a custom result", () => {
+        const segments: MergeSegment[] = [makeConflict({ id: 0 })];
+        expect(allResolved(segments, { 0: "custom" })).toBe(true);
     });
 
     it("returns false when a true conflict is unresolved", () => {
