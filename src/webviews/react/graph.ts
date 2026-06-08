@@ -3,7 +3,7 @@ import { buildRenderRows, type CommitGraphLayoutResult } from "./commit-list/gra
 
 export const LANE_WIDTH = 16;
 export const DOT_RADIUS = 3.25;
-export const ROW_HEIGHT = 28;
+export const ROW_HEIGHT = 24;
 
 export type {
     ArrowMarker,

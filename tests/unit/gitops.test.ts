@@ -252,18 +252,18 @@ describe("GitOps", () => {
             await ops.getLog(100, "feature");
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toContain("--topo-order");
+            expect(call).toContain("--date-order");
             expect(call).toContain("feature");
             expect(call).not.toContain("--all");
         });
 
-        it("requests topological order for graphable commit history", async () => {
+        it("requests date order for graphable commit history", async () => {
             const executor = createMockExecutor({ log: "" });
             const ops = new GitOps(executor);
             await ops.getLog();
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toContain("--topo-order");
+            expect(call).toContain("--date-order");
         });
 
         it("passes filter text argument", async () => {

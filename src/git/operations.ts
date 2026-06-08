@@ -193,7 +193,7 @@ export class GitOps {
         const format =
             ["%H", "%h", "%s", "%an", "%ae", "%aI", "%P", "%D"].join(FIELD_SEP) + RECORD_SEP;
 
-        const args = ["log", "--topo-order", `--max-count=${maxCount}`, `--pretty=format:${format}`];
+        const args = ["log", "--date-order", `--max-count=${maxCount}`, `--pretty=format:${format}`];
         if (skip > 0) {
             args.push(`--skip=${skip}`);
         }
