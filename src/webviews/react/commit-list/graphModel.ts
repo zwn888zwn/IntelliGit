@@ -240,24 +240,16 @@ function collectLayoutSeedIndexes(
     commits: GraphCommitLike[],
     graphNodes: InternalGraphNode[],
 ): number[] {
-    const branchSeedIndexes = commits
-        .map((commit, rowIndex) => ({ commit, rowIndex }))
-        .filter(({ commit }) => hasBranchRef(commit))
-        .sort(
-            (left, right) =>
-                compareHeadImportance(left.commit, right.commit) || left.rowIndex - right.rowIndex,
-        )
-        .map(({ rowIndex }) => rowIndex);
     const headIndexes = graphNodes
         .map((node, rowIndex) => ({ node, rowIndex }))
         .filter(({ node }) => node.upNodes.length === 0)
         .sort(
             (left, right) =>
-                compareHeadImportance(left.node.commit, right.node.commit) || left.rowIndex - right.rowIndex,
+                compareHeadImportance(right.node.commit, left.node.commit) || left.rowIndex - right.rowIndex,
         )
         .map(({ rowIndex }) => rowIndex);
 
-    return [...new Set([...branchSeedIndexes, ...headIndexes])];
+    return headIndexes;
 }
 
 function compareHeadImportance(left: GraphCommitLike, right: GraphCommitLike): number {
@@ -288,7 +280,7 @@ function getHeadImportanceKey(commit: GraphCommitLike): {
     if (branchRefs.length > 0) {
         const selected = branchRefs[0];
         return {
-            priority: getStableBranchPriority(selected.name),
+            priority: getStableBranchPriority(selected.name) + (selected.kind === 0 ? -100 : 0),
             name: selected.name,
             kind: selected.kind,
         };
@@ -316,7 +308,7 @@ function hasBranchRef(commit: GraphCommitLike): boolean {
 
 function parseBranchRef(ref: string): { name: string; kind: number } | null {
     if (ref.startsWith("HEAD -> ")) {
-        return { name: ref.slice("HEAD -> ".length).trim(), kind: 1 };
+        return { name: ref.slice("HEAD -> ".length).trim(), kind: 0 };
     }
     if (isLocalBranchRef(ref)) {
         return { name: ref.trim(), kind: 1 };
@@ -331,25 +323,6 @@ function parseBranchRef(ref: string): { name: string; kind: number } | null {
 }
 
 function getStableBranchPriority(name: string): number {
-    const normalized = name.toLowerCase();
-    if (
-        normalized === "master" ||
-        normalized === "main" ||
-        normalized === "trunk" ||
-        normalized === "default"
-    ) {
-        return 0;
-    }
-    if (
-        normalized === "develop" ||
-        normalized === "development" ||
-        normalized === "dev" ||
-        normalized === "release" ||
-        normalized === "staging" ||
-        normalized === "prod" ||
-        normalized === "production"
-    ) {
-        return 1;
-    }
+    void name;
     return 10;
 }

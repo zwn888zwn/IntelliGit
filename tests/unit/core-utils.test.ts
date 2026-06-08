@@ -236,7 +236,7 @@ describe("core utilities", () => {
         ).toHaveLength(2);
     });
 
-    it("graph layout can keep the first-parent mainline on one layout through the merge base", () => {
+    it("graph layout keeps the true head path on one layout through the merge base", () => {
         const permanent = buildPermanentGraph([
             { hash: "top", parentHashes: ["main"] },
             { hash: "merge", parentHashes: ["main", "side"] },
@@ -245,12 +245,13 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[2].node.layoutIndex);
+        expect(permanent.rows[0].node.layoutIndex).toBe(permanent.rows[2].node.layoutIndex);
         expect(permanent.rows[2].node.layoutIndex).toBe(permanent.rows[4].node.layoutIndex);
+        expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
         expect(permanent.rows[0].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
     });
 
-    it("graph layout can prioritize the alpha mainline over the incoming feature branch", () => {
+    it("graph layout can keep the alpha merge path unified even when refs sit on a non-head commit", () => {
         const permanent = buildPermanentGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
             {
@@ -264,7 +265,6 @@ describe("core utilities", () => {
         ]);
 
         expect(permanent.rows[1].node.layoutIndex).toBe(permanent.rows[3].node.layoutIndex);
-        expect(permanent.rows[0].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
         expect(permanent.rows[2].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
     });
 
@@ -329,7 +329,7 @@ describe("core utilities", () => {
         expect(graph.rows[1].elements.filter((element) => element.type === "edge").length).toBeGreaterThanOrEqual(2);
     });
 
-    it("graph compute places a newly encountered mainline merge row by layout priority", () => {
+    it("graph compute can bring a newly encountered mainline back to the left edge", () => {
         const graph = computeGraph([
             { hash: "top-merge", parentHashes: ["alpha-bridge", "side-1"], refs: ["feature/top"] },
             { hash: "merge-2", parentHashes: ["alpha-next", "side-2"], refs: ["alpha"] },
@@ -340,8 +340,8 @@ describe("core utilities", () => {
             { hash: "base", parentHashes: [] },
         ]);
 
-        expect(graph.rows[1].nodePosition).toBe(0);
-        expect(graph.rows[2].nodePosition).toBeGreaterThan(graph.rows[1].nodePosition);
+        expect(graph.rows[4].nodePosition).toBe(0);
+        expect(graph.rows[2].nodePosition).toBeGreaterThan(graph.rows[4].nodePosition);
     });
 
     it("graph compute keeps cross-lane edge transitions local between adjacent rows", () => {
@@ -385,7 +385,7 @@ describe("core utilities", () => {
         ]);
 
         expect(graph.rows[0].nodePosition).toBe(0);
-        expect(graph.rows[1].nodePosition).toBe(1);
+        expect(graph.rows[1].nodePosition).toBe(0);
         expect(graph.recommendedWidth).toBeGreaterThanOrEqual(graph.rows[0].occupiedWidth);
     });
 

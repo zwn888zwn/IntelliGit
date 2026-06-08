@@ -261,7 +261,6 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
     const layoutIndexByHash = new Map(
         graph.rows.map((row) => [row.node.commitHash, row.node.layoutIndex]),
     );
-
     for (const edge of graph.edges) {
         if (edge.downRowIndex <= edge.upRowIndex) continue;
         visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge));
@@ -274,12 +273,16 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
     return graph.rows.map((row, rowIndex) => {
         let activeNodeIndex = activeLanes.findIndex((lane) => lane.hash === row.node.commitHash);
         if (activeNodeIndex < 0) {
-            activeNodeIndex = activeLanes.length;
-            activeLanes.push({ hash: row.node.commitHash });
+            activeNodeIndex = findInsertionIndexByLayout(
+                activeLanes,
+                row.node.layoutIndex,
+                layoutIndexByHash,
+            );
+            activeLanes.splice(activeNodeIndex, 0, { hash: row.node.commitHash });
         }
 
-        const rawEdgeLayouts = new Map<string, number>();
-        const visibleLayouts = new Set<number>([row.node.layoutIndex]);
+        const rawEdgePositions = new Map<string, number>();
+        const visibleLaneIndexes = new Set<number>([activeNodeIndex]);
 
         for (const edge of graph.edges) {
             if (edge.downRowIndex <= edge.upRowIndex) continue;
@@ -287,22 +290,20 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
             if (!visibleRows?.includes(rowIndex)) continue;
             const edgeActiveIndex = activeLanes.findIndex((lane) => lane.hash === edge.targetHash);
             if (edgeActiveIndex >= 0) {
-                const edgeLayoutIndex =
-                    layoutIndexByHash.get(edge.targetHash) ?? edge.downLayoutIndex;
-                rawEdgeLayouts.set(edge.edgeId, edgeLayoutIndex);
-                visibleLayouts.add(edgeLayoutIndex);
+                rawEdgePositions.set(edge.edgeId, edgeActiveIndex);
+                visibleLaneIndexes.add(edgeActiveIndex);
             }
         }
 
         const densePositions = new Map(
-            [...visibleLayouts]
+            [...visibleLaneIndexes]
                 .sort((left, right) => left - right)
-                .map((layoutIndex, index) => [layoutIndex, index]),
+                .map((laneIndex, index) => [laneIndex, index]),
         );
-        const denseNodePosition = densePositions.get(row.node.layoutIndex) ?? 0;
+        const denseNodePosition = densePositions.get(activeNodeIndex) ?? 0;
         const rowEdgePositions = new Map<string, number>();
-        for (const [edgeId, edgeLayoutIndex] of rawEdgeLayouts) {
-            rowEdgePositions.set(edgeId, densePositions.get(edgeLayoutIndex) ?? denseNodePosition);
+        for (const [edgeId, edgeLaneIndex] of rawEdgePositions) {
+            rowEdgePositions.set(edgeId, densePositions.get(edgeLaneIndex) ?? denseNodePosition);
         }
 
         const rowEdges = edgeByTargetRow.get(rowIndex) ?? [];
@@ -334,9 +335,23 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
         return {
             nodePosition: denseNodePosition,
             edgePositions: rowEdgePositions,
-            maxPosition: Math.max(0, visibleLayouts.size - 1),
+            maxPosition: Math.max(0, visibleLaneIndexes.size - 1),
         };
     });
+}
+
+function findInsertionIndexByLayout(
+    activeLanes: ActiveLane[],
+    targetLayoutIndex: number,
+    layoutIndexByHash: Map<string, number>,
+): number {
+    for (let index = 0; index < activeLanes.length; index += 1) {
+        const laneLayoutIndex = layoutIndexByHash.get(activeLanes[index].hash) ?? Number.MAX_SAFE_INTEGER;
+        if (laneLayoutIndex > targetLayoutIndex) {
+            return index;
+        }
+    }
+    return activeLanes.length;
 }
 
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
