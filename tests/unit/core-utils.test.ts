@@ -484,7 +484,57 @@ describe("core utilities", () => {
         expect(Math.abs((sideRow?.nodePosition ?? -1) - (alphaRow?.nodePosition ?? -1))).toBeLessThanOrEqual(1);
     });
 
-    it("graph orders date-ordered merge lanes with the IDEA layout comparator", () => {
+    it("graph routes reciprocal top merges with IDEA print columns", () => {
+        const graph = computeGraph([
+            {
+                hash: "alpha-top",
+                parentHashes: ["alpha-event-merge", "ios-merge"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "ios-merge",
+                parentHashes: ["ios-fix", "alpha-event-merge"],
+                graphRefs: [
+                    { name: "wip_ios_137_zwn", type: "head" },
+                    { name: "wip_ios_137_zwn", type: "local" },
+                    { name: "origin/wip_ios_137_zwn", type: "remote", tracked: true },
+                ],
+            },
+            { hash: "ios-fix", parentHashes: ["ios-skin"] },
+            {
+                hash: "alpha-event-merge",
+                parentHashes: ["alpha-prev", "event-head"],
+                graphRefs: [{ name: "alpha", type: "local" }],
+            },
+            {
+                hash: "event-head",
+                parentHashes: ["event-prev"],
+                graphRefs: [{ name: "origin/wip_event_362373", type: "remote" }],
+            },
+            { hash: "ios-skin", parentHashes: ["ios-base"] },
+            { hash: "event-prev", parentHashes: ["event-base"] },
+            { hash: "ios-base", parentHashes: ["master"] },
+            { hash: "alpha-prev", parentHashes: ["master"] },
+            { hash: "event-base", parentHashes: ["master"] },
+            {
+                hash: "master",
+                parentHashes: [],
+                graphRefs: [
+                    { name: "origin/master", type: "remote", tracked: true },
+                    { name: "master", type: "local" },
+                ],
+            },
+        ]);
+
+        expect(graph.rows.find((row) => row.commitHash === "alpha-top")?.nodePosition).toBe(0);
+        expect(graph.rows.find((row) => row.commitHash === "ios-merge")?.nodePosition).toBe(1);
+        expect(graph.rows.find((row) => row.commitHash === "ios-fix")?.nodePosition).toBe(2);
+        expect(graph.rows.find((row) => row.commitHash === "alpha-event-merge")?.nodePosition).toBe(0);
+        expect(graph.rows.find((row) => row.commitHash === "event-head")?.nodePosition).toBe(1);
+        expect(graph.rows.find((row) => row.commitHash === "ios-skin")?.nodePosition).toBe(2);
+    });
+
+    it("graph keeps merge-introduced side branches adjacent to the mainline", () => {
         const graph = computeGraph([
             {
                 hash: "alpha-top",
@@ -538,8 +588,62 @@ describe("core utilities", () => {
         ]);
 
         expect(graph.rows.find((row) => row.commitHash === "alpha-merge")?.nodePosition).toBe(0);
-        expect(graph.rows.find((row) => row.commitHash === "ios-135-head")?.nodePosition).toBe(2);
+        expect(graph.rows.find((row) => row.commitHash === "ios-135-head")?.nodePosition).toBe(1);
         expect(graph.rows.find((row) => row.commitHash === "master")?.nodePosition).toBe(0);
+    });
+
+    it("graph keeps inactive secondary merge parents after primary continuations", () => {
+        const graph = computeGraph([
+            {
+                hash: "alpha-top",
+                parentHashes: ["alpha-next"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "topic-merge",
+                parentHashes: ["topic-next", "ad-head"],
+                graphRefs: [{ name: "origin/wip_zwn_sta_260529", type: "remote", tracked: true }],
+            },
+            {
+                hash: "doc-head",
+                parentHashes: ["doc-next"],
+                graphRefs: [{ name: "origin/wip_jack_doc", type: "remote" }],
+            },
+            { hash: "alpha-next", parentHashes: ["alpha-base"] },
+            { hash: "topic-next", parentHashes: ["topic-base"] },
+            {
+                hash: "ad-head",
+                parentHashes: ["master-next"],
+                graphRefs: [{ name: "origin/wip_ad_banner_260601", type: "remote" }],
+            },
+            { hash: "doc-next", parentHashes: ["doc-base"] },
+            { hash: "topic-base", parentHashes: ["master-base"] },
+            { hash: "doc-base", parentHashes: ["alpha-base"] },
+            { hash: "master-next", parentHashes: ["master-base"] },
+            { hash: "alpha-base", parentHashes: ["master-base"] },
+            {
+                hash: "master-base",
+                parentHashes: [],
+                graphRefs: [
+                    { name: "origin/master", type: "remote", tracked: true },
+                    { name: "master", type: "local" },
+                ],
+            },
+        ]);
+
+        const mergeRow = graph.rows.find((row) => row.commitHash === "topic-merge");
+        const primaryEdge = mergeRow?.elements.find(
+            (element) => element.type === "edge" && element.edgeId === "topic-merge:topic-next:0",
+        );
+        const secondaryEdge = mergeRow?.elements.find(
+            (element) => element.type === "edge" && element.edgeId === "topic-merge:ad-head:1",
+        );
+
+        expect(primaryEdge?.type).toBe("edge");
+        expect(secondaryEdge?.type).toBe("edge");
+        expect(primaryEdge && primaryEdge.type === "edge" ? primaryEdge.toPosition : -1).toBeLessThan(
+            secondaryEdge && secondaryEdge.type === "edge" ? secondaryEdge.toPosition : -1,
+        );
     });
 
     it("graph compute can render merge rows with an extra edge column", () => {
