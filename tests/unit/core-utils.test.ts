@@ -411,6 +411,33 @@ describe("core utilities", () => {
         expect(permanent.rows[1].node.color).toBe(permanent.rows[3].node.color);
     });
 
+    it("graph colors non-head fragments by fragment index instead of the nearest head ref", () => {
+        const commits = [
+            {
+                hash: "alpha-head",
+                parentHashes: ["alpha-next"],
+                graphRefs: [{ name: "origin/alpha", type: "remote", tracked: true }],
+            },
+            {
+                hash: "topic-head",
+                parentHashes: ["merge"],
+                graphRefs: [{ name: "origin/topic", type: "remote", tracked: true }],
+            },
+            { hash: "alpha-next", parentHashes: ["base"] },
+            { hash: "merge", parentHashes: ["topic-next", "side-base"] },
+            { hash: "topic-next", parentHashes: ["base"] },
+            { hash: "side-base", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ];
+        const { layoutIndexByHash, headRows } = orderCommitsForGraph(commits);
+        const permanent = buildPermanentGraph(commits, layoutIndexByHash, headRows);
+
+        expect(headRows).toEqual([0, 1]);
+        expect(permanent.rows[1].node.color).not.toBe(permanent.rows[0].node.color);
+        expect(permanent.rows[5].node.layoutIndex).not.toBe(permanent.rows[1].node.layoutIndex);
+        expect(permanent.rows[5].node.color).not.toBe(permanent.rows[1].node.color);
+    });
+
     it("graph keeps the incoming branch to the right of the alpha mainline", () => {
         const graph = computeGraph([
             { hash: "side-head", parentHashes: ["merge"], refs: ["feature/demo"] },
@@ -899,6 +926,36 @@ describe("core utilities", () => {
                     : arrow.targetRowIndex < arrow.rowIndex,
             ),
         ).toBe(true);
+    });
+
+    it("graph compute aligns cropped up arrows with their destination node", () => {
+        const filtered = computeGraph([
+            { hash: "merge", parentHashes: ["main-01", "side-01"] },
+            ...Array.from({ length: 34 }, (_item, index) => ({
+                hash: `main-${String(index + 1).padStart(2, "0")}`,
+                parentHashes:
+                    index === 33
+                        ? ["base"]
+                        : [`main-${String(index + 2).padStart(2, "0")}`],
+            })),
+            { hash: "side-01", parentHashes: ["base"] },
+            { hash: "base", parentHashes: [] },
+        ]);
+        const targetRowIndex = filtered.rows.findIndex((row) => row.commitHash === "side-01");
+        const upTerminal = filtered.rows
+            .flatMap((row, rowIndex) =>
+                row.elements.flatMap((element) =>
+                    element.type === "terminal" &&
+                    element.edgeId === "merge:side-01:1" &&
+                    element.direction === "up"
+                        ? [{ rowIndex, element }]
+                        : [],
+                ),
+            )
+            .at(0);
+
+        expect(targetRowIndex).toBeGreaterThan(0);
+        expect(upTerminal?.element.position).toBe(filtered.rows[targetRowIndex].nodePosition);
     });
 
     it("graph compute reserves width from compressed visible lanes instead of historical layout ids", () => {

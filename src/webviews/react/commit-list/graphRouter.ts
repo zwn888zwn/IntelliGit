@@ -169,7 +169,7 @@ function renderLongEdge(
 
     if (bottomStubRow > edge.upRowIndex) {
         const sourceRow = graph.rows[edge.upRowIndex];
-        const position = getEdgePosition(rowRenderPositions, bottomStubRow, edge.edgeId);
+        const position = getNodePosition(rowRenderPositions, edge.downRowIndex);
         rows[bottomStubRow].elements.push({
             type: "terminal",
             edgeId: edge.edgeId,

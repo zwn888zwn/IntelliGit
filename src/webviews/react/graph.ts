@@ -27,8 +27,8 @@ export function computeGraph(
         date?: string;
     }>,
 ): CommitGraphLayoutResult {
-    const { commits: orderedCommits, layoutIndexByHash } = orderCommitsForGraph(commits);
-    const permanentGraph = buildPermanentGraph(orderedCommits, layoutIndexByHash);
+    const { commits: orderedCommits, layoutIndexByHash, headRows } = orderCommitsForGraph(commits);
+    const permanentGraph = buildPermanentGraph(orderedCommits, layoutIndexByHash, headRows);
     const result = buildRenderRows(permanentGraph);
     return {
         ...result,

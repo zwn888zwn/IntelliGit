@@ -59,17 +59,19 @@ interface InternalGraphNode {
 
 interface GraphAssignments {
     layoutIndexByHash: Map<string, number>;
-    colorIndexByHash: Map<string, number>;
+    headRows: number[];
 }
 
 export function orderCommitsForGraph<T extends GraphCommitLike>(commits: T[]): {
     commits: T[];
     layoutIndexByHash: Map<string, number>;
+    headRows: number[];
 } {
     if (commits.length <= 1) {
         return {
             commits,
             layoutIndexByHash: new Map(commits.map((commit) => [commit.hash, 0])),
+            headRows: commits.length === 1 ? [0] : [],
         };
     }
 
@@ -79,20 +81,27 @@ export function orderCommitsForGraph<T extends GraphCommitLike>(commits: T[]): {
     return {
         commits,
         layoutIndexByHash: layout.layoutIndexByHash,
+        headRows: layout.headRows,
     };
 }
 
 export function buildPermanentGraph(
     commits: Array<{ hash: string; parentHashes: string[]; refs?: string[]; graphRefs?: GraphRefInfo[] }>,
     layoutIndexOverride?: Map<string, number>,
+    headRowsOverride?: number[],
 ): PermanentGraphModel {
     const graphNodes = buildInternalGraph(commits);
-    const { layoutIndexByHash } = layoutIndexOverride
+    const { layoutIndexByHash, headRows } = layoutIndexOverride
         ? {
               layoutIndexByHash: layoutIndexOverride,
+              headRows:
+                  headRowsOverride ??
+                  collectLayoutSeedIndexes(commits, graphNodes).filter((rowIndex) =>
+                      layoutIndexOverride.has(commits[rowIndex].hash),
+                  ),
           }
         : buildGraphAssignments(commits, graphNodes);
-    const colorIndexByHash = buildColorAssignments(commits, layoutIndexByHash);
+    const colorIndexByHash = buildColorAssignments(commits, layoutIndexByHash, headRows);
     const laneColors = new Map<string, string>();
     const rows: PermanentRow[] = commits.map((commit, rowIndex) => {
         const layoutIndex = layoutIndexByHash.get(commit.hash) ?? 0;
@@ -167,9 +176,9 @@ function buildGraphAssignments(
     graphNodes: InternalGraphNode[],
 ): GraphAssignments {
     const layoutIndexByHash = new Map<string, number>();
-    const colorIndexByHash = new Map<string, number>();
     const sortedHeads = collectLayoutSeedIndexes(commits, graphNodes);
     let nextLayoutIndex = 0;
+    const headRows: number[] = [];
     const assignLayoutFrom = (startIndex: number): void => {
         let currentIndex: number | undefined = startIndex;
         let firstVisitInWalk = false;
@@ -197,6 +206,7 @@ function buildGraphAssignments(
 
     for (const rowIndex of sortedHeads) {
         if (layoutIndexByHash.has(commits[rowIndex].hash)) continue;
+        headRows.push(rowIndex);
         assignLayoutFrom(rowIndex);
     }
 
@@ -205,11 +215,7 @@ function buildGraphAssignments(
         assignLayoutFrom(rowIndex);
     });
 
-    for (const commit of commits) {
-        colorIndexByHash.set(commit.hash, layoutIndexByHash.get(commit.hash) ?? 0);
-    }
-
-    return { layoutIndexByHash, colorIndexByHash };
+    return { layoutIndexByHash, headRows };
 }
 
 function buildInternalGraph(commits: GraphCommitLike[]): InternalGraphNode[] {
@@ -235,22 +241,37 @@ function buildInternalGraph(commits: GraphCommitLike[]): InternalGraphNode[] {
 function buildColorAssignments(
     commits: GraphCommitLike[],
     layoutIndexByHash: Map<string, number>,
+    headRows: number[],
 ): Map<string, number> {
-    const headByLayoutIndex = new Map<number, GraphCommitLike>();
-    for (const commit of commits) {
-        const layoutIndex = layoutIndexByHash.get(commit.hash) ?? 0;
-        if (!headByLayoutIndex.has(layoutIndex)) {
-            headByLayoutIndex.set(layoutIndex, commit);
-        }
-    }
+    const headRowsByLayoutIndex = headRows
+        .map((rowIndex) => ({
+            rowIndex,
+            layoutIndex: layoutIndexByHash.get(commits[rowIndex].hash) ?? 0,
+        }))
+        .sort((left, right) => left.layoutIndex - right.layoutIndex);
 
     return new Map(
         commits.map((commit) => {
             const layoutIndex = layoutIndexByHash.get(commit.hash) ?? 0;
-            const head = headByLayoutIndex.get(layoutIndex) ?? commit;
-            return [commit.hash, getHeadColorId(head, layoutIndex)];
+            const headRow = getHeadRowForLayout(headRowsByLayoutIndex, layoutIndex);
+            if (!headRow || headRow.layoutIndex !== layoutIndex) {
+                return [commit.hash, layoutIndex];
+            }
+            return [commit.hash, getHeadColorId(commits[headRow.rowIndex], layoutIndex)];
         }),
     );
+}
+
+function getHeadRowForLayout(
+    headRowsByLayoutIndex: Array<{ rowIndex: number; layoutIndex: number }>,
+    layoutIndex: number,
+): { rowIndex: number; layoutIndex: number } | undefined {
+    let selected = headRowsByLayoutIndex[0];
+    for (const headRow of headRowsByLayoutIndex) {
+        if (headRow.layoutIndex > layoutIndex) break;
+        selected = headRow;
+    }
+    return selected;
 }
 
 function getHeadColorId(commit: GraphCommitLike, fallbackLayoutIndex: number): number {
