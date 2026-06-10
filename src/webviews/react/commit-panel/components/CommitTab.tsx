@@ -38,6 +38,7 @@ interface Props {
     onAmendChange: (isAmend: boolean) => void;
     onCommit: () => void;
     onCommitAndPush: () => void;
+    onCreateStash: () => void;
     groupByDir: boolean;
     onToggleGroupBy: () => void;
 }
@@ -63,6 +64,7 @@ export function CommitTab({
     onAmendChange,
     onCommit,
     onCommitAndPush,
+    onCreateStash,
     groupByDir,
     onToggleGroupBy,
 }: Props): React.ReactElement {
@@ -85,16 +87,6 @@ export function CommitTab({
             .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
             .map<RepoPathRef>((file) => ({ repoRoot: file.repoRoot, path: file.path }));
         vscode.postMessage({ type: "rollback", targets });
-    }, [vscode, checkedPaths, files]);
-
-    const handleShelve = useCallback(() => {
-        const selected = files
-            .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
-            .map<RepoPathRef>((file) => ({ repoRoot: file.repoRoot, path: file.path }));
-        vscode.postMessage({
-            type: "shelveSave",
-            targets: selected.length > 0 ? selected : undefined,
-        });
     }, [vscode, checkedPaths, files]);
 
     const handleShowDiff = useCallback(() => {
@@ -124,7 +116,7 @@ export function CommitTab({
                 isRefreshing={isRefreshing}
                 onRollback={handleRollback}
                 onToggleGroupBy={onToggleGroupBy}
-                onShelve={handleShelve}
+                onShelve={onCreateStash}
                 onShowDiff={handleShowDiff}
                 onExpandAll={() => setExpandAllSignal((s) => s + 1)}
                 onCollapseAll={() => setCollapseAllSignal((s) => s + 1)}

@@ -107,6 +107,86 @@ afterEach(() => {
 });
 
 describe("CommitPanelApp integration", () => {
+    it("creates a stash from the toolbar dialog", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock({ checked: [] });
+        const rootHost = createRootHost();
+        void rootHost;
+
+        await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+        await flush();
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setRepositoryContext",
+                        repository: {
+                            repoId: ".",
+                            name: "repo",
+                            root: "/repo",
+                            color: "#4CAF50",
+                        },
+                    },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "update",
+                        repositories: [
+                            {
+                                repoId: ".",
+                                name: "repo",
+                                root: "/repo",
+                                color: "#4CAF50",
+                            },
+                        ],
+                        files: [
+                            {
+                                repoId: ".",
+                                repoRoot: "/repo",
+                                path: "src/a.ts",
+                                status: "M",
+                                staged: false,
+                                additions: 1,
+                                deletions: 0,
+                            },
+                        ],
+                        stashes: [],
+                        shelfFiles: [],
+                        selectedShelfIndex: null,
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        fireClick(document.querySelector('button[aria-label="Shelve Changes"]'));
+        await flush();
+
+        fireInput(
+            document.querySelector('input[placeholder="Shelved changes"]') as HTMLInputElement,
+            "111",
+        );
+        const checkboxes = Array.from(
+            document.querySelectorAll('input[type="checkbox"]'),
+        ) as HTMLInputElement[];
+        fireClick(checkboxes[checkboxes.length - 1]);
+        const createButtons = Array.from(document.querySelectorAll("button")).filter(
+            (button) => button.textContent?.trim() === "Create Stash",
+        );
+        fireClick(createButtons[createButtons.length - 1]);
+
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "shelveSave",
+            repoRoot: "/repo",
+            targets: undefined,
+            name: "111",
+            keepIndex: true,
+        });
+    });
+
     it("handles extension messages and commit/shelf interactions", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock({ checked: [] });

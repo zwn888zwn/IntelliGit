@@ -993,6 +993,24 @@ describe("GitOps", () => {
                 "src/b.ts",
             ]);
         });
+
+        it("keeps the index when requested", async () => {
+            const executor = createMockExecutor({});
+            const ops = new GitOps(executor);
+            await ops.shelveSave(["src/a.ts"], "partial", { keepIndex: true });
+
+            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
+            expect(call).toEqual([
+                "stash",
+                "push",
+                "--include-untracked",
+                "-m",
+                "partial",
+                "--keep-index",
+                "--",
+                "src/a.ts",
+            ]);
+        });
     });
 
     describe("shelvePop", () => {
@@ -1002,7 +1020,7 @@ describe("GitOps", () => {
             await ops.shelvePop(2);
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "pop", "stash@{2}"]);
+            expect(call).toEqual(["stash", "pop", "--index", "stash@{2}"]);
         });
     });
 
@@ -1013,7 +1031,7 @@ describe("GitOps", () => {
             await ops.shelveApply(1);
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "apply", "stash@{1}"]);
+            expect(call).toEqual(["stash", "apply", "--index", "stash@{1}"]);
         });
     });
 
@@ -1201,8 +1219,8 @@ describe("GitOps", () => {
             await expect(ops.shelveDelete(0)).resolves.toBe("");
 
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-            expect(calls).toContainEqual(["stash", "pop", "stash@{0}"]);
-            expect(calls).toContainEqual(["stash", "apply", "stash@{0}"]);
+            expect(calls).toContainEqual(["stash", "pop", "--index", "stash@{0}"]);
+            expect(calls).toContainEqual(["stash", "apply", "--index", "stash@{0}"]);
             expect(calls).toContainEqual(["stash", "drop", "stash@{0}"]);
         });
 

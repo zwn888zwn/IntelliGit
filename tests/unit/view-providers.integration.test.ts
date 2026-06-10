@@ -1172,12 +1172,29 @@ describe("view providers integration", () => {
 
     it("CommitPanelViewProvider handles shelf operations", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
-        await webview.send({ type: "shelveSave", name: "work", paths: ["src/a.ts"] });
+        await webview.send({
+            type: "shelveSave",
+            name: "work",
+            keepIndex: true,
+            paths: ["src/a.ts"],
+        });
         await webview.send({ type: "shelfPop", index: 0 });
         await webview.send({ type: "shelfApply", index: 0 });
         showWarningMessage.mockResolvedValueOnce("Delete");
         await webview.send({ type: "shelfDelete", index: 0 });
-        expect(gitOps.shelveSave).toHaveBeenCalled();
+        expect(gitOps.shelveSave).toHaveBeenCalledWith(["src/a.ts"], "work", {
+            keepIndex: true,
+        });
+        gitOps.shelveSave.mockClear();
+        await webview.send({
+            type: "shelveSave",
+            name: "all",
+            repoRoot: "/repo",
+            keepIndex: false,
+        });
+        expect(gitOps.shelveSave).toHaveBeenCalledWith(undefined, "all", {
+            keepIndex: false,
+        });
         expect(gitOps.shelvePop).toHaveBeenCalledWith(0);
         expect(gitOps.shelveApply).toHaveBeenCalledWith(0);
         expect(gitOps.shelveDelete).toHaveBeenCalledWith(0);
@@ -1190,13 +1207,30 @@ describe("view providers integration", () => {
             }),
         );
 
+        openTextDocument.mockClear();
+        executeCommand.mockClear();
         await webview.send({ type: "showShelfDiff", index: 0, path: "src/a.ts" });
-        expect(gitOps.getShelvedFilePatch).toHaveBeenCalledWith(0, "src/a.ts");
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(1, "src/a.ts", "stash@{0}^");
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(2, "src/a.ts", "stash@{0}");
+        expect(gitOps.getShelvedFilePatch).not.toHaveBeenCalled();
+        expect(openTextDocument).toHaveBeenCalledTimes(2);
         expect(openTextDocument).toHaveBeenCalledWith(
             expect.objectContaining({
-                content: "diff --git a b",
-                language: "diff",
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("path=src%2Fa.ts"),
             }),
+        );
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("ref=stash%40%7B0%7D%5E"),
+            }),
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("ref=stash%40%7B0%7D"),
+            }),
+            "src/a.ts (Stash 0)",
         );
         provider.dispose();
     });

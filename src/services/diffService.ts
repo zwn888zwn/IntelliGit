@@ -811,6 +811,53 @@ export async function openCommitFileDiff(
     return { parentRef, parentDisplayHash, leftUri: leftDoc.uri, rightUri: rightDoc.uri };
 }
 
+export async function openShelvedFileDiff(
+    index: number,
+    filePath: string,
+    repoRoot: string,
+    gitOps: GitOps,
+): Promise<{ baseRef: string; stashRef: string; leftUri: vscode.Uri; rightUri: vscode.Uri }> {
+    if (!Number.isInteger(index) || index < 0) {
+        throw new Error(`Invalid stash index: ${index}`);
+    }
+
+    const safePath = assertRepoRelativePath(filePath);
+    const baseRef = `stash@{${index}}^`;
+    const stashRef = `stash@{${index}}`;
+    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+
+    const [baseContent, stashedContent] = await Promise.all([
+        gitOps.getFileContentAtRef(safePath, baseRef).catch(() => ""),
+        gitOps.getFileContentAtRef(safePath, stashRef).catch(() => ""),
+    ]);
+
+    const baseSnapshot = makeTextDiffSnapshot(safePath, baseContent, baseRef);
+    const stashSnapshot = makeTextDiffSnapshot(safePath, stashedContent, stashRef);
+    const diffProvider = getDiffContentProvider();
+    const leftDoc = await vscode.workspace.openTextDocument(
+        diffProvider.createUri(safePath, baseRef, baseSnapshot.content, {
+            forcePlainTextUri: baseSnapshot.forcePlainTextUri,
+            originalPath: safePath,
+            sourceFsPath: workingTreeUri.fsPath,
+        }),
+    );
+    const rightDoc = await vscode.workspace.openTextDocument(
+        diffProvider.createUri(safePath, stashRef, stashSnapshot.content, {
+            forcePlainTextUri: stashSnapshot.forcePlainTextUri,
+            originalPath: safePath,
+            sourceFsPath: workingTreeUri.fsPath,
+        }),
+    );
+
+    await vscode.commands.executeCommand(
+        "vscode.diff",
+        leftDoc.uri,
+        rightDoc.uri,
+        `${safePath} (Stash ${index})`,
+    );
+    return { baseRef, stashRef, leftUri: leftDoc.uri, rightUri: rightDoc.uri };
+}
+
 export async function openBranchComparisonFileDiff(
     file: ProjectComparisonFile,
     ref: string,

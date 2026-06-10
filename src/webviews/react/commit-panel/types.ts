@@ -27,7 +27,13 @@ export type OutboundMessage =
     | { type: "getLastCommitMessage" }
     | { type: "rollback"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
-    | { type: "shelveSave"; name?: string; targets?: RepoPathRef[] }
+    | {
+          type: "shelveSave";
+          name?: string;
+          repoRoot?: string;
+          targets?: RepoPathRef[];
+          keepIndex?: boolean;
+      }
     | { type: "shelfPop"; index: number }
     | { type: "shelfApply"; index: number }
     | { type: "shelfDelete"; index: number }

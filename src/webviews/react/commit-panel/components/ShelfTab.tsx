@@ -21,6 +21,7 @@ interface Props {
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
     groupByDir: boolean;
+    onCreateStash: () => void;
 }
 
 type ShelfActionKind = "apply" | "pop" | "delete";
@@ -33,6 +34,7 @@ export function ShelfTab({
     folderExpandedIcon,
     folderIconsByName,
     groupByDir,
+    onCreateStash,
 }: Props): React.ReactElement {
     const vscode = getVsCodeApi();
     const tree = useFileTree(shelfFiles, groupByDir);
@@ -297,10 +299,22 @@ export function ShelfTab({
             <Flex
                 align="center"
                 gap="8px"
+                flexWrap="wrap"
                 px="8px"
                 py="8px"
                 borderTop="1px solid var(--vscode-panel-border)"
             >
+                <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={onCreateStash}
+                    fontSize="12px"
+                    h="28px"
+                    minW="96px"
+                    px="12px"
+                >
+                    Create Stash
+                </Button>
                 <Button
                     variant="secondary"
                     size="sm"

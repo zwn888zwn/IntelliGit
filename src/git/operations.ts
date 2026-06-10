@@ -874,8 +874,15 @@ export class GitOps {
 
     // --- Shelf operations (implemented via git stash) ---
 
-    async shelveSave(paths?: string[], message: string = "Shelved changes"): Promise<string> {
+    async shelveSave(
+        paths?: string[],
+        message: string = "Shelved changes",
+        options: { keepIndex?: boolean } = {},
+    ): Promise<string> {
         const args = ["stash", "push", "--include-untracked", "-m", message];
+        if (options.keepIndex) {
+            args.push("--keep-index");
+        }
         if (paths && paths.length > 0) {
             args.push("--", ...paths);
         }
@@ -884,12 +891,12 @@ export class GitOps {
 
     async shelvePop(index: number = 0): Promise<string> {
         assertStashIndex(index);
-        return this.executor.run(["stash", "pop", `stash@{${index}}`]);
+        return this.executor.run(["stash", "pop", "--index", `stash@{${index}}`]);
     }
 
     async shelveApply(index: number = 0): Promise<string> {
         assertStashIndex(index);
-        return this.executor.run(["stash", "apply", `stash@{${index}}`]);
+        return this.executor.run(["stash", "apply", "--index", `stash@{${index}}`]);
     }
 
     async listShelved(): Promise<StashEntry[]> {

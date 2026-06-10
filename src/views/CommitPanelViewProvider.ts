@@ -19,6 +19,7 @@ import { runWithNotificationProgress } from "../utils/notifications";
 import {
     getDiffOriginalFilePathFromUri,
     getRepoRelativeFilePathFromUri,
+    openShelvedFileDiff,
     openWorkingTreeFileDiff,
 } from "../services/diffService";
 import { buildFileTree, type TreeEntry } from "../webviews/react/shared/fileTree";
@@ -699,12 +700,17 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
             case "shelveSave": {
                 const name = typeof msg.name === "string" ? msg.name : "Shelved changes";
+                const keepIndex = msg.keepIndex === true;
+                const repoRoot = typeof msg.repoRoot === "string" ? msg.repoRoot : undefined;
                 const targets = this.getMessageTargets(msg);
-                if (!targets || targets.length === 0) {
-                    await this.gitOps.shelveSave(undefined, name);
+                if (targets.length === 0) {
+                    const repository = repoRoot ? this.getRepositoryEntry(repoRoot) : null;
+                    await (repository?.gitOps ?? this.gitOps).shelveSave(undefined, name, {
+                        keepIndex,
+                    });
                 } else {
                     await this.runGroupedTargets(targets, async (repository, paths) => {
-                        await repository.gitOps.shelveSave(paths, name);
+                        await repository.gitOps.shelveSave(paths, name, { keepIndex });
                     });
                 }
                 vscode.window.showInformationMessage("Changes shelved.");
@@ -770,12 +776,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             case "showShelfDiff": {
                 const index = this.assertNumber(msg.index, "index");
                 const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
-                const patch = await this.gitOps.getShelvedFilePatch(index, filePath);
-                const doc = await vscode.workspace.openTextDocument({
-                    content: patch || `No shelved diff found for ${filePath}.`,
-                    language: "diff",
-                });
-                await vscode.window.showTextDocument(doc, { preview: true });
+                await openShelvedFileDiff(
+                    index,
+                    filePath,
+                    this.getRepositoryRoot().fsPath,
+                    this.gitOps,
+                );
                 break;
             }
 
