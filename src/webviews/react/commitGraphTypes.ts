@@ -65,6 +65,7 @@ export function isCommitAction(value: string): value is CommitAction {
 export type CommitGraphOutbound =
     | { type: "ready" }
     | { type: "selectCommit"; hash: string; repoRoot: string }
+    | { type: "revealCommit"; hash: string }
     | { type: "filterText"; text: string }
     | { type: "loadMore" }
     | { type: "filterBranch"; branch: string | null }

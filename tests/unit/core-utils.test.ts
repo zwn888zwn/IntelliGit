@@ -1016,13 +1016,22 @@ describe("core utilities", () => {
         expect(filtered.arrowMarkers).toHaveLength(0);
     });
 
-    it("graph compute skips arrows when the target commit is not visible", () => {
+    it("graph compute marks down arrows when the parent commit is outside the loaded window", () => {
         const partial = computeGraph([
             { hash: "head", parentHashes: ["missing-parent"] },
             { hash: "next", parentHashes: [] },
         ]);
 
-        expect(partial.arrowMarkers).toHaveLength(0);
+        expect(partial.arrowMarkers).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    direction: "down",
+                    rowIndex: 0,
+                    position: partial.rows[0].nodePosition,
+                    targetHash: "missing-parent",
+                }),
+            ]),
+        );
     });
 
     it("graph compute routes merge edges without fake jump markers", () => {

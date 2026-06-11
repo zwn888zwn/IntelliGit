@@ -283,6 +283,12 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "selectCommit", hash, repoRoot: selectedCommit.repoRoot });
     }, [commits]);
 
+    const handleRevealCommit = useCallback((hash: string) => {
+        setSelectedHash(hash);
+        setRevealHash(hash);
+        vscode.postMessage({ type: "revealCommit", hash });
+    }, []);
+
     const handleFilterText = useCallback((text: string) => {
         setFilterText(text);
         if (text.length >= 3 || text.length === 0) {
@@ -394,6 +400,7 @@ function App(): React.ReactElement {
                             repoRailExpanded={repoRailExpanded}
                             onToggleRepoRail={() => setRepoRailExpanded((value) => !value)}
                             onSelectCommit={handleSelectCommit}
+                            onRevealCommit={handleRevealCommit}
                             onFilterText={handleFilterText}
                             onLoadMore={handleLoadMore}
                             onCommitAction={handleCommitAction}

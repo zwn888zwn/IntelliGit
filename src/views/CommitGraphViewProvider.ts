@@ -154,6 +154,9 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                             this._onCommitSelected.fire(msg.hash as never);
                         }
                         break;
+                    case "revealCommit":
+                        await this.revealCommit(msg.hash);
+                        break;
                     case "loadMore":
                         await this.loadMore();
                         break;

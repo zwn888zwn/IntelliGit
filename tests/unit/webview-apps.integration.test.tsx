@@ -524,6 +524,16 @@ describe("CommitGraphApp integration", () => {
             }),
         );
 
+        const externalJumpArrow = document.querySelector(
+            'button[title="Load and jump to \'p1\'"]',
+        );
+        expect(externalJumpArrow).toBeTruthy();
+        fireClick(externalJumpArrow);
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "revealCommit",
+            hash: "p1",
+        });
+
         act(() => {
             window.dispatchEvent(
                 new MessageEvent("message", {

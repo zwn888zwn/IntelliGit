@@ -48,6 +48,7 @@ interface Props {
     repoRailExpanded: boolean;
     onToggleRepoRail: () => void;
     onSelectCommit: (hash: string) => void;
+    onRevealCommit: (hash: string) => void;
     onFilterText: (text: string) => void;
     onLoadMore: () => void | Promise<void>;
     onCommitAction: (action: CommitAction, hash: string) => void;
@@ -67,6 +68,7 @@ export function CommitList({
     repoRailExpanded,
     onToggleRepoRail,
     onSelectCommit,
+    onRevealCommit,
     onFilterText,
     onLoadMore,
     onCommitAction,
@@ -451,7 +453,6 @@ export function CommitList({
                                 )
                                 .map((arrow) => {
                                     const targetCommit = commitByHash.get(arrow.targetHash);
-                                    if (!targetCommit) return null;
                                     const buttonSize = 18;
                                     const left =
                                         (arrow.position * LANE_WIDTH + LANE_WIDTH / 2) * graphScale -
@@ -464,19 +465,32 @@ export function CommitList({
                                         <button
                                             key={`arrow:${arrow.direction}:${arrow.rowIndex}:${arrow.edgeId}`}
                                             type="button"
-                                            title={`Jump to '${targetCommit.shortHash} ${targetCommit.message}'`}
+                                            title={
+                                                targetCommit
+                                                    ? `Jump to '${targetCommit.shortHash} ${targetCommit.message}'`
+                                                    : `Load and jump to '${arrow.targetHash.slice(0, 8)}'`
+                                            }
                                             onMouseEnter={() =>
-                                                setJumpTooltip({
-                                                    targetHash: arrow.targetHash,
-                                                    left: repoRailWidth + left + buttonSize + 6,
-                                                    top: top - 4,
-                                                })
+                                                targetCommit
+                                                    ? setJumpTooltip({
+                                                          targetHash: arrow.targetHash,
+                                                          left: repoRailWidth + left + buttonSize + 6,
+                                                          top: top - 4,
+                                                      })
+                                                    : undefined
                                             }
                                             onMouseLeave={() => setJumpTooltip(null)}
                                             onClick={(event) => {
                                                 event.preventDefault();
                                                 event.stopPropagation();
-                                                handleJumpNavigate(arrow.targetHash, arrow.targetRowIndex);
+                                                if (targetCommit) {
+                                                    handleJumpNavigate(
+                                                        arrow.targetHash,
+                                                        arrow.targetRowIndex,
+                                                    );
+                                                    return;
+                                                }
+                                                onRevealCommit(arrow.targetHash);
                                             }}
                                             style={{
                                                 position: "absolute",
@@ -491,23 +505,23 @@ export function CommitList({
                                                 cursor: "pointer",
                                                 pointerEvents: "auto",
                                             }}
+                                        >
+                                            <svg
+                                                width={buttonSize}
+                                                height={buttonSize}
+                                                viewBox="0 0 18 18"
+                                                fill="none"
+                                                aria-hidden="true"
+                                                style={{
+                                                    transform:
+                                                        arrow.direction === "up"
+                                                            ? "rotate(180deg)"
+                                                            : "none",
+                                                }}
                                             >
-                                                <svg
-                                                    width={buttonSize}
-                                                    height={buttonSize}
-                                                    viewBox="0 0 18 18"
-                                                    fill="none"
-                                                    aria-hidden="true"
-                                                    style={{
-                                                        transform:
-                                                            arrow.direction === "up"
-                                                                ? "rotate(180deg)"
-                                                                : "none",
-                                                    }}
-                                                >
-                                                    <path
-                                                        d="M9 2.5V13"
-                                                        stroke="currentColor"
+                                                <path
+                                                    d="M9 2.5V13"
+                                                    stroke="currentColor"
                                                     strokeWidth="2.4"
                                                     strokeLinecap="round"
                                                 />
