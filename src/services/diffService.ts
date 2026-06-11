@@ -791,7 +791,7 @@ export async function openCommitFileDiff(
     const leftDoc = await vscode.workspace.openTextDocument(
         diffProvider.createUri(safePath, parentRef, leftSnapshot.content, {
             forcePlainTextUri: leftSnapshot.forcePlainTextUri,
-            markAsCommitDiff: !isBinaryFilePath(safePath) && leftExists && rightExists,
+            markAsCommitDiff: true,
             originalPath: safePath,
             sourceFsPath: workingTreeUri.fsPath,
         }),
@@ -799,7 +799,7 @@ export async function openCommitFileDiff(
     const rightDoc = await vscode.workspace.openTextDocument(
         diffProvider.createUri(safePath, commitHash, rightSnapshot.content, {
             forcePlainTextUri: rightSnapshot.forcePlainTextUri,
-            markAsCommitDiff: !isBinaryFilePath(safePath) && leftExists && rightExists,
+            markAsCommitDiff: true,
             originalPath: safePath,
             sourceFsPath: workingTreeUri.fsPath,
         }),

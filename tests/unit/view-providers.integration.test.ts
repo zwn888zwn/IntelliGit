@@ -922,6 +922,48 @@ describe("view providers integration", () => {
         );
     });
 
+    it("openCommitFileDiff keeps added files eligible for Open in Editor", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async (_filePath: string, ref: string) =>
+                ref === "parent1234" ? "" : "package main\n",
+            ),
+        };
+        const executor = {
+            run: vi.fn(async (args: string[]) => {
+                if (args[0] === "rev-list" && args[1] === "--parents") {
+                    return "a1b2c3d4 parent1234";
+                }
+                if (args[0] === "cat-file" && args[1] === "-e") {
+                    return args[2] === "a1b2c3d4:src/new-file.go" ? "" : Promise.reject(new Error("missing"));
+                }
+                return "";
+            }),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "src/new-file.go",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result).not.toBeNull();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("intelligitCommitDiff=1"),
+            }),
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("intelligitCommitDiff=1"),
+            }),
+            "src/new-file.go (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
     it("CommitPanelViewProvider opens binary working files as placeholder diffs", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();
