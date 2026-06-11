@@ -13,7 +13,7 @@ interface MergeConflictSessionLabels {
 
 interface MergeConflictSessionCallbacks {
     onOpenMergeConflict: (filePath: string) => Promise<void>;
-    onConflictStateChanged: () => Promise<void>;
+    onConflictStateChanged: (resolvedPath?: string) => Promise<void>;
 }
 
 export class MergeConflictSessionPanel {
@@ -148,7 +148,7 @@ export class MergeConflictSessionPanel {
                         await this.gitOps.acceptConflictSide(filePath, "ours");
                     },
                 );
-                await this.callbacks.onConflictStateChanged();
+                await this.callbacks.onConflictStateChanged(filePath);
                 await this.postSessionData({ closeWhenResolved: true, resolvedPath: filePath });
                 return;
             }
@@ -162,7 +162,7 @@ export class MergeConflictSessionPanel {
                         await this.gitOps.acceptConflictSide(filePath, "theirs");
                     },
                 );
-                await this.callbacks.onConflictStateChanged();
+                await this.callbacks.onConflictStateChanged(filePath);
                 await this.postSessionData({ closeWhenResolved: true, resolvedPath: filePath });
                 return;
             }

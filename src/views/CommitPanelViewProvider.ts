@@ -178,6 +178,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                           await this.gitOps.getShelvedFiles(selectedShelfIndex),
                       )
                     : [];
+            const suggestedCommitMessage = await this.gitOps.getPendingCommitMessage();
             this.folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
                 ...files,
                 ...shelfFiles,
@@ -206,6 +207,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 folderExpandedIcon: folderIcons.folderExpandedIcon,
                 folderIconsByName: this.folderIconsByName,
                 iconFonts,
+                suggestedCommitMessage,
             });
             this.postToWebview({ type: "setActiveFile", target: this.activeFile });
         } finally {

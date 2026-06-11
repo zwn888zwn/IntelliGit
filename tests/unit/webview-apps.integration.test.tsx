@@ -617,6 +617,69 @@ describe("CommitInfoApp integration", () => {
 });
 
 describe("MergeEditorApp integration", () => {
+    it("applies non-conflicting changes only after the All action", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/merge-editor/MergeEditorApp");
+        await flush();
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setConflictData",
+                        data: {
+                            filePath: "src/non-conflicting.ts",
+                            oursLabel: "main",
+                            theirsLabel: "feature",
+                            eol: "\n",
+                            hasTrailingNewline: true,
+                            segments: [
+                                {
+                                    type: "conflict",
+                                    id: 0,
+                                    changeKind: "theirs-only",
+                                    oursLines: ["base"],
+                                    theirsLines: ["right"],
+                                    baseLines: ["base"],
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        const resultEditor = document.querySelector(
+            ".result-editor-textarea",
+        ) as HTMLTextAreaElement;
+        expect(resultEditor.value).toBe("base");
+
+        const allButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent === "All",
+        ) as HTMLButtonElement;
+        expect(allButton.disabled).toBe(false);
+        fireClick(allButton);
+        await flush();
+        expect(resultEditor.value).toBe("right");
+        expect(allButton.disabled).toBe(true);
+
+        const applyButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Apply (0/0)"),
+        ) as HTMLButtonElement;
+        expect(applyButton.disabled).toBe(false);
+        fireClick(applyButton);
+
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "applyResolution",
+            content: "right\n",
+            mode: "apply",
+        });
+    });
+
     it("allows editing the result pane and applying custom content", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();

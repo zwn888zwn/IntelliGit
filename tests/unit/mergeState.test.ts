@@ -118,14 +118,24 @@ describe("getResultLines", () => {
         expect(getResultLines(segment, undefined)).toEqual(["base"]);
     });
 
-    it("auto-resolves ours-only to oursLines", () => {
+    it("keeps base lines for unresolved ours-only changes", () => {
         const seg = makeConflict({ changeKind: "ours-only" });
-        expect(getResultLines(seg, undefined)).toEqual(["ours"]);
+        expect(getResultLines(seg, undefined)).toEqual(["base"]);
     });
 
-    it("auto-resolves theirs-only to theirsLines", () => {
+    it("keeps base lines for unresolved theirs-only changes", () => {
         const seg = makeConflict({ changeKind: "theirs-only" });
-        expect(getResultLines(seg, undefined)).toEqual(["theirs"]);
+        expect(getResultLines(seg, undefined)).toEqual(["base"]);
+    });
+
+    it("uses ours-only lines after applying that side", () => {
+        const seg = makeConflict({ changeKind: "ours-only" });
+        expect(getResultLines(seg, "ours")).toEqual(["ours"]);
+    });
+
+    it("uses theirs-only lines after applying that side", () => {
+        const seg = makeConflict({ changeKind: "theirs-only" });
+        expect(getResultLines(seg, "theirs")).toEqual(["theirs"]);
     });
 });
 

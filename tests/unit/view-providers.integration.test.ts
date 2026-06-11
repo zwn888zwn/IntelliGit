@@ -280,6 +280,7 @@ function makeGitOpsMock() {
         unstageFiles: vi.fn(async () => undefined),
         commit: vi.fn(async () => "ok"),
         commitAndPush: vi.fn(async () => "ok"),
+        getPendingCommitMessage: vi.fn(async () => ""),
         getLastCommitMessage: vi.fn(async () => "last message"),
         rollbackAll: vi.fn(async () => undefined),
         rollbackFiles: vi.fn(async () => undefined),

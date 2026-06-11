@@ -29,6 +29,7 @@ export interface BranchCommandDeps {
         targetBranch?: string;
     }) => Promise<void>;
     refreshConflictUi: () => Promise<void>;
+    finalizeMergeIfReady: () => Promise<boolean>;
 }
 
 export interface BranchCommandEntry {
@@ -44,7 +45,33 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
         getCurrentBranches,
         openConflictSession,
         refreshConflictUi,
+        finalizeMergeIfReady,
     } = deps;
+
+    const continueExistingMergeIfNeeded = async (sourceBranch?: string): Promise<boolean> => {
+        if (!(await gitOps.isMergeInProgress())) return false;
+
+        const conflicts = await gitOps.getConflictFilesDetailed();
+        if (conflicts.length > 0) {
+            await openConflictSession({
+                sourceBranch,
+                targetBranch: getCurrentBranchName() || undefined,
+            });
+            await refreshConflictUi();
+            vscode.window.showWarningMessage(
+                `Merge is already in progress with ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
+            );
+            return true;
+        }
+
+        if (await finalizeMergeIfReady()) return true;
+
+        await refreshConflictUi();
+        vscode.window.showWarningMessage(
+            "Merge is already in progress. Resolve or commit the current merge before starting another merge.",
+        );
+        return true;
+    };
 
     return [
         {
@@ -143,6 +170,13 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
             handler: async (item) => {
                 const name = item.branch?.name;
                 if (!name) return;
+                try {
+                    if (await continueExistingMergeIfNeeded(name)) return;
+                } catch (err) {
+                    const msg = getErrorMessage(err);
+                    vscode.window.showErrorMessage(`Merge failed: ${msg}`);
+                    return;
+                }
                 const confirm = await vscode.window.showWarningMessage(
                     `Merge ${name} into current branch?`,
                     { modal: true },
@@ -155,6 +189,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                     await vscode.commands.executeCommand("intelligit.refresh");
                 } catch (err) {
                     try {
+                        if (await continueExistingMergeIfNeeded(name)) return;
                         const conflicts = await gitOps.getConflictFilesDetailed();
                         if (conflicts.length > 0) {
                             await openConflictSession({

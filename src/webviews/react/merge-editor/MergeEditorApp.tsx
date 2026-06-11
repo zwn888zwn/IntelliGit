@@ -60,6 +60,7 @@ function App() {
     const [highlightWords, setHighlightWords] = useState(true);
     const [ignoreMode, setIgnoreMode] = useState<"none" | "whitespace">("none");
     const [activeConflictId, setActiveConflictId] = useState<number | null>(null);
+    const [bulkActionMessage, setBulkActionMessage] = useState("");
     const segments = state.data?.segments ?? [];
 
     const conflictSectionRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -115,7 +116,7 @@ function App() {
                 const baseLen = segment.baseLines.length;
                 const resultLen = resultLines.length;
 
-                lineCount = Math.max(oursLen, resultLen, theirsLen, 1);
+                lineCount = Math.max(oursLen, resultLen, theirsLen, 8);
                 startLine = visualLineCursor;
                 lineNumbers = {
                     left: {
@@ -245,16 +246,40 @@ function App() {
         }
     }, [state.data]);
 
-    const handleApplyNonConflicting = useCallback(() => {
+    const handleApplyNonConflicting = useCallback((mode: "ours" | "all" | "theirs") => {
         if (!state.data) return;
+        let applied = 0;
         for (const seg of state.data.segments) {
-            if (seg.type === "conflict" && seg.changeKind === "ours-only") {
+            if (seg.type !== "conflict" || seg.changeKind === "conflict") continue;
+            const currentResolution = state.resolutions[seg.id];
+            if (
+                seg.changeKind === "ours-only" &&
+                currentResolution !== "ours" &&
+                (mode === "ours" || mode === "all")
+            ) {
                 dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "ours" });
-            } else if (seg.type === "conflict" && seg.changeKind === "theirs-only") {
+                applied += 1;
+            } else if (
+                seg.changeKind === "theirs-only" &&
+                currentResolution !== "theirs" &&
+                (mode === "theirs" || mode === "all")
+            ) {
                 dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "theirs" });
+                applied += 1;
             }
         }
-    }, [state.data]);
+        setBulkActionMessage(
+            applied > 0
+                ? `Applied ${applied} non-conflicting change${applied === 1 ? "" : "s"}`
+                : "No non-conflicting changes to apply",
+        );
+    }, [state.data, state.resolutions]);
+
+    useEffect(() => {
+        if (!bulkActionMessage) return;
+        const timeout = window.setTimeout(() => setBulkActionMessage(""), 2200);
+        return () => window.clearTimeout(timeout);
+    }, [bulkActionMessage]);
 
     const handleBulkAcceptYours = useCallback(() => {
         getVsCodeApi().postMessage({ type: "acceptYours" });
@@ -346,6 +371,13 @@ function App() {
     const changeCount = conflictSegments.length;
     const oursChanges = paneChangeCount(segments, "ours");
     const theirsChanges = paneChangeCount(segments, "theirs");
+    const unappliedOursOnlyCount = conflictSegments.filter(
+        (seg) => seg.changeKind === "ours-only" && state.resolutions[seg.id] !== "ours",
+    ).length;
+    const unappliedTheirsOnlyCount = conflictSegments.filter(
+        (seg) => seg.changeKind === "theirs-only" && state.resolutions[seg.id] !== "theirs",
+    ).length;
+    const unappliedNonConflictingCount = unappliedOursOnlyCount + unappliedTheirsOnlyCount;
     const currentConflictIndex =
         activeConflictId !== null ? trueConflictIds.indexOf(activeConflictId) + 1 : 0;
 
@@ -395,12 +427,43 @@ function App() {
         >
             <div className="merge-toolbar">
                 <div className="toolbar-left">
-                    <button className="toolbar-btn subtle" onClick={handleApplyNonConflicting}>
-                        <span className="toolbar-icon">
-                            <IconSpark />
+                    <div className="toolbar-apply-group">
+                        <span className="toolbar-group-label">
+                            <span className="toolbar-icon">
+                                <IconSpark />
+                            </span>
+                            Apply non-conflicting changes:
                         </span>
-                        Apply non-conflicting changes
-                    </button>
+                        <div className="toolbar-segmented">
+                            <button
+                                className="toolbar-btn subtle compact"
+                                onClick={() => handleApplyNonConflicting("ours")}
+                                title={`Apply ${unappliedOursOnlyCount} non-conflicting left-side change${unappliedOursOnlyCount === 1 ? "" : "s"}`}
+                                disabled={unappliedOursOnlyCount === 0}
+                            >
+                                Left
+                            </button>
+                            <button
+                                className="toolbar-btn subtle compact"
+                                onClick={() => handleApplyNonConflicting("all")}
+                                title={`Apply ${unappliedNonConflictingCount} non-conflicting change${unappliedNonConflictingCount === 1 ? "" : "s"} from both sides`}
+                                disabled={unappliedNonConflictingCount === 0}
+                            >
+                                All
+                            </button>
+                            <button
+                                className="toolbar-btn subtle compact"
+                                onClick={() => handleApplyNonConflicting("theirs")}
+                                title={`Apply ${unappliedTheirsOnlyCount} non-conflicting right-side change${unappliedTheirsOnlyCount === 1 ? "" : "s"}`}
+                                disabled={unappliedTheirsOnlyCount === 0}
+                            >
+                                Right
+                            </button>
+                        </div>
+                        {bulkActionMessage ? (
+                            <span className="toolbar-inline-note">{bulkActionMessage}</span>
+                        ) : null}
+                    </div>
                     <div className="toolbar-nav-group">
                         <button
                             className="toolbar-icon-btn"

@@ -84,9 +84,6 @@ export function getResultLines(
         case "custom":
             return customLines ?? segment.baseLines;
         default:
-            // Non-conflicting changes auto-resolve to the changed side
-            if (segment.changeKind === "ours-only") return segment.oursLines;
-            if (segment.changeKind === "theirs-only") return segment.theirsLines;
             return segment.baseLines;
     }
 }

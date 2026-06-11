@@ -120,7 +120,7 @@ describe("BranchColumn integration", () => {
         act(() => {
             renameItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main");
+        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main", undefined, undefined);
 
         unmount(root, container);
     });

@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { GitExecutor } from "./executor";
 import { decodeGitQuotedPath } from "./pathEncoding";
@@ -92,6 +93,15 @@ function assertGitRelativePath(filePath: string): string {
 
 function normalizeGitOutputPath(filePath: string | undefined): string {
     return decodeGitQuotedPath(filePath ?? "");
+}
+
+function stripGitCommitCommentLines(message: string): string {
+    return message
+        .replace(/\r\n/g, "\n")
+        .split("\n")
+        .filter((line) => !line.trimStart().startsWith("#"))
+        .join("\n")
+        .trim();
 }
 
 export class UpstreamPushDeclinedError extends Error {
@@ -754,10 +764,26 @@ export class GitOps {
     async commit(message: string, amend: boolean = false, paths?: string[]): Promise<string> {
         const args = ["commit", "-m", message];
         if (amend) args.push("--amend");
-        if (paths && paths.length > 0) {
+        if (paths && paths.length > 0 && !(await this.isMergeInProgress())) {
             args.push("--only", "--", ...paths);
         }
         return this.executor.run(args);
+    }
+
+    async isMergeInProgress(): Promise<boolean> {
+        const repoRoot = this.repoMetadata?.repoRoot?.trim();
+        if (!repoRoot) return false;
+        const mergeHeadPath = path.join(this.resolveGitDir(repoRoot), "MERGE_HEAD");
+        try {
+            await fs.promises.access(mergeHeadPath);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async abortMerge(): Promise<string> {
+        return this.executor.run(["merge", "--abort"]);
     }
 
     async push(): Promise<string> {
@@ -829,6 +855,17 @@ export class GitOps {
     async getLastCommitMessage(): Promise<string> {
         try {
             return (await this.executor.run(["log", "-1", "--format=%B"])).trim();
+        } catch {
+            return "";
+        }
+    }
+
+    async getPendingCommitMessage(): Promise<string> {
+        const repoRoot = this.repoMetadata?.repoRoot?.trim();
+        if (!repoRoot) return "";
+        const mergeMsgPath = path.join(this.resolveGitDir(repoRoot), "MERGE_MSG");
+        try {
+            return stripGitCommitCommentLines(await fs.promises.readFile(mergeMsgPath, "utf8"));
         } catch {
             return "";
         }
@@ -1133,6 +1170,24 @@ export class GitOps {
     async deleteFile(filePath: string, force: boolean = false): Promise<void> {
         const args = force ? ["rm", "-f", "--", filePath] : ["rm", "--", filePath];
         await this.executor.run(args);
+    }
+
+    private resolveGitDir(repoRoot: string): string {
+        const dotGit = path.join(repoRoot, ".git");
+        try {
+            const stat = fs.statSync(dotGit);
+            if (stat.isFile()) {
+                const content = fs.readFileSync(dotGit, "utf8").trim();
+                const match = content.match(/^gitdir:\s*(.+)$/);
+                if (match) {
+                    const gitDir = match[1];
+                    return path.isAbsolute(gitDir) ? gitDir : path.resolve(repoRoot, gitDir);
+                }
+            }
+        } catch {
+            // Fall through to default
+        }
+        return dotGit;
     }
 }
 

@@ -3,6 +3,7 @@ import type { Branch, RepositoryContextInfo } from "../types";
 
 export class BranchStatusBarController implements vscode.Disposable {
     private readonly item: vscode.StatusBarItem;
+    private readonly abortMergeItem: vscode.StatusBarItem;
 
     constructor() {
         this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -12,14 +13,30 @@ export class BranchStatusBarController implements vscode.Disposable {
             label: "IntelliGit branch menu",
             role: "button",
         };
+
+        this.abortMergeItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+        this.abortMergeItem.name = "IntelliGit Abort Merge";
+        this.abortMergeItem.text = "$(close)";
+        this.abortMergeItem.command = "intelligit.abortMerge";
+        this.abortMergeItem.tooltip = "Abort current merge";
+        this.abortMergeItem.backgroundColor = new vscode.ThemeColor(
+            "statusBarItem.errorBackground",
+        );
+        this.abortMergeItem.color = new vscode.ThemeColor("statusBarItem.errorForeground");
+        this.abortMergeItem.accessibilityInformation = {
+            label: "Abort current IntelliGit merge",
+            role: "button",
+        };
     }
 
     update(
         repository: { info: RepositoryContextInfo } | null,
         branches: Branch[],
+        options: { mergeInProgress?: boolean } = {},
     ): void {
         if (!repository) {
             this.item.hide();
+            this.abortMergeItem.hide();
             return;
         }
 
@@ -27,18 +44,36 @@ export class BranchStatusBarController implements vscode.Disposable {
         if (!current) {
             this.item.text = "$(git-branch) Detached HEAD";
             this.item.tooltip = `IntelliGit: ${repository.info.relativePath ?? repository.info.name}`;
+            this.item.command = "intelligit.showBranchPopup";
+            this.abortMergeItem.hide();
             this.item.show();
+            return;
+        }
+
+        if (options.mergeInProgress) {
+            this.item.text = `$(warning) Merging ${current.name}`;
+            this.item.tooltip = [
+                `IntelliGit: ${repository.info.relativePath ?? repository.info.name}`,
+                `Merge in progress on ${current.name}`,
+                "Click to open conflict resolution.",
+            ].join("\n");
+            this.item.command = "intelligit.openConflictSession";
+            this.item.show();
+            this.abortMergeItem.show();
             return;
         }
 
         const tracking = formatTrackingCounts(current);
         this.item.text = `$(git-branch) ${current.name}${tracking ? ` ${tracking}` : ""}`;
         this.item.tooltip = buildBranchTooltip(repository.info, current);
+        this.item.command = "intelligit.showBranchPopup";
+        this.abortMergeItem.hide();
         this.item.show();
     }
 
     dispose(): void {
         this.item.dispose();
+        this.abortMergeItem.dispose();
     }
 }
 

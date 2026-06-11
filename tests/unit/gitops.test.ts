@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { GitOps, UpstreamPushDeclinedError } from "../../src/git/operations";
 import type { GitExecutor } from "../../src/git/executor";
 
@@ -665,6 +668,19 @@ describe("GitOps", () => {
                 "src/b.ts",
             ]);
         });
+
+        it("does not create a partial commit while a merge is in progress", async () => {
+            const repoRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-merge-"));
+            await fs.promises.mkdir(path.join(repoRoot, ".git"));
+            await fs.promises.writeFile(path.join(repoRoot, ".git", "MERGE_HEAD"), "abc123\n");
+            const executor = createMockExecutor({});
+            const ops = new GitOps(executor, undefined, { repoRoot });
+
+            await ops.commit("merge message", false, ["src/a.ts", "src/b.ts"]);
+
+            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
+            expect(call).toEqual(["commit", "-m", "merge message"]);
+        });
     });
 
     describe("push", () => {
@@ -825,6 +841,28 @@ describe("GitOps", () => {
         });
     });
 
+    describe("getPendingCommitMessage", () => {
+        it("strips git comment lines from merge messages", async () => {
+            const repoRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-msg-"));
+            await fs.promises.mkdir(path.join(repoRoot, ".git"));
+            await fs.promises.writeFile(
+                path.join(repoRoot, ".git", "MERGE_MSG"),
+                [
+                    "Merge branch 'master' into alpha",
+                    "",
+                    "# Conflicts:",
+                    "#\twebProj/deployGin.go",
+                    "",
+                ].join("\n"),
+            );
+            const ops = new GitOps(createMockExecutor({}), undefined, { repoRoot });
+
+            await expect(ops.getPendingCommitMessage()).resolves.toBe(
+                "Merge branch 'master' into alpha",
+            );
+        });
+    });
+
     describe("getLastCommitMessage", () => {
         it("returns last commit message", async () => {
             const executor = createMockExecutor({ log: "Previous commit message\n" });
@@ -963,6 +1001,15 @@ describe("GitOps", () => {
             expect(
                 calls.filter((args) => args.join(" ") === "add -- src/conflicted.ts"),
             ).toHaveLength(2);
+        });
+
+        it("aborts an in-progress merge", async () => {
+            const executor = createMockExecutor({});
+            const ops = new GitOps(executor);
+
+            await ops.abortMerge();
+
+            expect(executor.run).toHaveBeenCalledWith(["merge", "--abort"]);
         });
     });
 

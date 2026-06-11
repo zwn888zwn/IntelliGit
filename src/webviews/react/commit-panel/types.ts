@@ -57,6 +57,7 @@ export type InboundMessage =
           folderExpandedIcon?: ThemeTreeIcon;
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
+          suggestedCommitMessage?: string;
       }
     | { type: "lastCommitMessage"; message: string }
     | { type: "committed" }
@@ -79,6 +80,7 @@ export interface CommitPanelState {
     repository: RepositoryContextInfo | null;
     activeFile: RepoPathRef | null;
     commitMessage: string;
+    suggestedCommitMessage: string;
     isAmend: boolean;
     isRefreshing: boolean;
     error: string | null;
@@ -97,6 +99,7 @@ export type CommitPanelAction =
           folderExpandedIcon?: ThemeTreeIcon;
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
+          suggestedCommitMessage?: string;
       }
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }
     | { type: "COMMITTED" }

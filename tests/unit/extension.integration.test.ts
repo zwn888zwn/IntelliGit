@@ -31,6 +31,8 @@ const createdStatusBarItems: Array<{
     tooltip?: string;
     command?: string;
     name?: string;
+    backgroundColor?: unknown;
+    color?: unknown;
     accessibilityInformation?: unknown;
     show: ReturnType<typeof vi.fn>;
     hide: ReturnType<typeof vi.fn>;
@@ -42,6 +44,8 @@ const createStatusBarItem = vi.fn(() => {
         tooltip: "",
         command: "",
         name: "",
+        backgroundColor: undefined,
+        color: undefined,
         accessibilityInformation: undefined,
         show: vi.fn(),
         hide: vi.fn(),
@@ -244,6 +248,11 @@ const gitOpsState = {
     acceptConflictSide: vi.fn(async () => undefined),
     getConflictFileVersions: vi.fn(async () => ({ base: "", ours: "", theirs: "" })),
     stageFile: vi.fn(async () => undefined),
+    commit: vi.fn(async () => "committed"),
+    commitAndPush: vi.fn(async () => "committed and pushed"),
+    isMergeInProgress: vi.fn(async () => false),
+    abortMerge: vi.fn(async () => ""),
+    getPendingCommitMessage: vi.fn(async () => ""),
     push: vi.fn(async () => ""),
 };
 
@@ -597,6 +606,11 @@ vi.mock("../../src/git/operations", async (importOriginal) => {
             acceptConflictSide = gitOpsState.acceptConflictSide;
             getConflictFileVersions = gitOpsState.getConflictFileVersions;
             stageFile = gitOpsState.stageFile;
+            commit = gitOpsState.commit;
+            commitAndPush = gitOpsState.commitAndPush;
+            isMergeInProgress = gitOpsState.isMergeInProgress;
+            abortMerge = gitOpsState.abortMerge;
+            getPendingCommitMessage = gitOpsState.getPendingCommitMessage;
             push = gitOpsState.push;
         },
     };
@@ -693,6 +707,11 @@ vi.mock("../../src/services/RepositoryContextService", () => ({
         acceptConflictSide: gitOpsState.acceptConflictSide,
         getConflictFileVersions: gitOpsState.getConflictFileVersions,
         stageFile: gitOpsState.stageFile,
+        commit: gitOpsState.commit,
+        commitAndPush: gitOpsState.commitAndPush,
+        isMergeInProgress: gitOpsState.isMergeInProgress,
+        abortMerge: gitOpsState.abortMerge,
+        getPendingCommitMessage: gitOpsState.getPendingCommitMessage,
         push: gitOpsState.push,
     })),
 }));
@@ -726,6 +745,20 @@ async function waitForAsync(): Promise<void> {
 describe("extension integration", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        [
+            showInformationMessage,
+            showErrorMessage,
+            showWarningMessage,
+            showInputBox,
+            showSaveDialog,
+            showQuickPick,
+            showTextDocument,
+            openTextDocument,
+            fsStat,
+            executorRun,
+            deleteFileWithFallback,
+        ].forEach((mock) => mock.mockReset());
+        Object.values(gitOpsState).forEach((mock) => mock.mockReset());
         registeredCommands.clear();
         mockDisposables.length = 0;
         textDocListeners.length = 0;
@@ -838,6 +871,11 @@ describe("extension integration", () => {
         gitOpsState.getConflictedFiles.mockResolvedValue([]);
         gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
         gitOpsState.acceptConflictSide.mockResolvedValue(undefined);
+        gitOpsState.commit.mockResolvedValue("committed");
+        gitOpsState.commitAndPush.mockResolvedValue("committed and pushed");
+        gitOpsState.isMergeInProgress.mockResolvedValue(false);
+        gitOpsState.abortMerge.mockResolvedValue("");
+        gitOpsState.getPendingCommitMessage.mockResolvedValue("");
         deleteFileWithFallback.mockResolvedValue(true);
 
         showWarningMessage.mockImplementation(
@@ -880,6 +918,7 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
         expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
         expect(registeredCommands.has("intelligit.showBranchPopup")).toBe(true);
+        expect(registeredCommands.has("intelligit.abortMerge")).toBe(true);
         expect(registeredCommands.has("intelligit.previousDiffChange")).toBe(true);
         expect(registeredCommands.has("intelligit.previousDiffChangeUnavailable")).toBe(true);
         expect(registeredCommands.has("intelligit.nextDiffChange")).toBe(true);
@@ -896,12 +935,15 @@ describe("extension integration", () => {
         }
 
         expect(createStatusBarItem).toHaveBeenCalledWith(1, 100);
+        expect(createStatusBarItem).toHaveBeenCalledWith(1, 99);
         expect(createdStatusBarItems[0]?.command).toBe("intelligit.showBranchPopup");
         expect(createdStatusBarItems[0]?.text).toContain("main");
         expect(createdStatusBarItems[0]?.text).not.toContain("chevron-down");
         expect(createdStatusBarItems[0]?.text).not.toContain("↗");
         expect(createdStatusBarItems[0]?.text).not.toContain("↙");
         expect(createdStatusBarItems[0]?.show).toHaveBeenCalled();
+        expect(createdStatusBarItems[1]?.command).toBe("intelligit.abortMerge");
+        expect(createdStatusBarItems[1]?.hide).toHaveBeenCalled();
 
         await getCommand("intelligit.showBranchPopup")();
         expect(executeCommandFallback).toHaveBeenCalledWith("intelligit.commitGraph.focus");
@@ -983,6 +1025,32 @@ describe("extension integration", () => {
         expect(latestBlameController!.annotateActiveEditor).toHaveBeenCalled();
         expect(latestBlameController!.clear).toHaveBeenCalled();
         expect(latestCommitGraphProvider!.revealCommit).toHaveBeenCalledWith("deadbee");
+    });
+
+    it("shows merge state in the status bar and aborts the current merge", async () => {
+        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        expect(createdStatusBarItems[0]?.text).toBe("$(warning) Merging main");
+        expect(createdStatusBarItems[0]?.command).toBe("intelligit.openConflictSession");
+        expect(createdStatusBarItems[1]?.text).toBe("$(close)");
+        expect(createdStatusBarItems[1]?.command).toBe("intelligit.abortMerge");
+        expect(createdStatusBarItems[1]?.show).toHaveBeenCalled();
+
+        await registeredCommands.get("intelligit.abortMerge")?.();
+
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Abort the current merge and discard merge conflict resolutions?",
+            { modal: true },
+            "Abort Merge",
+        );
+        expect(gitOpsState.abortMerge).toHaveBeenCalled();
+        expect(showInformationMessage).toHaveBeenCalledWith("Merge aborted.");
     });
 
     it("opens the previous working file at its last diff hunk", async () => {
@@ -1177,6 +1245,134 @@ describe("extension integration", () => {
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
+    it("opens conflict session when refresh detects new unresolved conflicts", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+
+        gitOpsState.getConflictedFiles.mockResolvedValue(["src/conflicted.ts"]);
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([
+            {
+                path: "src/conflicted.ts",
+                code: "UU",
+                ours: "Modified",
+                theirs: "Modified",
+            },
+        ]);
+
+        await registeredCommands.get("intelligit.mergeConflictsRefresh")?.();
+
+        const vscode = await import("vscode");
+        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
+        expect(createWebviewPanelMock).toHaveBeenCalledWith(
+            "intelligit.mergeConflictSession",
+            "Conflicts",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Detected 1 unresolved merge conflict file. Opened Conflicts session.",
+        );
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("auto commits the merge after the final conflict is resolved", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
+        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        gitOpsState.getPendingCommitMessage.mockResolvedValue(
+            "Merge branch 'master' into alpha",
+        );
+
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/final-conflict.ts",
+        });
+        await latestWebviewPanel?.emitMessage({
+            type: "applyResolution",
+            content: "resolved\n",
+        });
+
+        expect(gitOpsState.stageFile).toHaveBeenCalledWith("src/final-conflict.ts");
+        expect(gitOpsState.commit).toHaveBeenCalledWith(
+            "Merge branch 'master' into alpha",
+            false,
+        );
+        expect(showInformationMessage).toHaveBeenCalledWith("Merge committed successfully.");
+    });
+
+    it("opens existing merge conflicts instead of starting another merge", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([
+            {
+                path: "src/conflicted.ts",
+                code: "UU",
+                ours: "Modified",
+                theirs: "Modified",
+            },
+        ]);
+
+        await registeredCommands.get("intelligit.mergeIntoCurrent")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+
+        const vscode = await import("vscode");
+        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
+        expect(executorRun).not.toHaveBeenCalledWith(["merge", "feature-local"]);
+        expect(createWebviewPanelMock).toHaveBeenCalledWith(
+            "intelligit.mergeConflictSession",
+            "Conflicts",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Merge is already in progress with 1 unresolved conflict file. Opened Conflicts session.",
+        );
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("commits an existing merge instead of starting another merge when conflicts are resolved", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
+        gitOpsState.getPendingCommitMessage.mockResolvedValue(
+            "Merge branch 'master' into alpha",
+        );
+
+        await registeredCommands.get("intelligit.mergeIntoCurrent")?.({
+            branch: { name: "feature-local", isRemote: false },
+        });
+
+        expect(executorRun).not.toHaveBeenCalledWith(["merge", "feature-local"]);
+        expect(gitOpsState.commit).toHaveBeenCalledWith(
+            "Merge branch 'master' into alpha",
+            false,
+        );
+        expect(showInformationMessage).toHaveBeenCalledWith("Merge committed successfully.");
+    });
+
     it("opens conflict session when merge fails with unresolved conflicts", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
@@ -1231,6 +1427,8 @@ describe("extension integration", () => {
         gitOpsState.getConflictFilesDetailed
             .mockResolvedValueOnce([a, b, c])
             .mockResolvedValueOnce([a, b, c])
+            .mockResolvedValueOnce([a, c])
+            .mockResolvedValueOnce([a, c])
             .mockResolvedValueOnce([a, c]);
 
         await registeredCommands.get("intelligit.openConflictSession")?.();

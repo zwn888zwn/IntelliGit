@@ -461,7 +461,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
 
         currentBranches = await repository.gitOps.getBranches();
-        branchStatusBar.update(repository, currentBranches);
+        branchStatusBar.update(repository, currentBranches, {
+            mergeInProgress: await repository.gitOps.isMergeInProgress(),
+        });
         commitGraph.setBranches(currentBranches);
         await commitGraph.refresh({ reset: options.resetGraph ?? true });
         await commitPanel.refresh();
@@ -494,6 +496,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // --- Refresh service ---
 
+    let openConflictSession: (labels?: {
+        sourceBranch?: string;
+        targetBranch?: string;
+    }) => Promise<void> = async () => undefined;
+
     const refreshService = new RefreshService(
         {
             gitOps,
@@ -501,15 +508,59 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             commitPanel,
             mergeConflicts,
             mergeConflictsView,
-            onBranchesUpdated: (branches) => {
+            onBranchesUpdated: async (branches) => {
                 currentBranches = branches;
-                branchStatusBar.update(getCurrentRepository(), currentBranches);
+                branchStatusBar.update(getCurrentRepository(), currentBranches, {
+                    mergeInProgress: await gitOps.isMergeInProgress(),
+                });
+            },
+            onMergeConflictsDetected: async (count) => {
+                if (MergeConflictSessionPanel.isOpen()) return;
+                await openConflictSession({
+                    targetBranch: currentBranches.find((branch) => branch.isCurrent)?.name,
+                });
+                vscode.window.showWarningMessage(
+                    `Detected ${count} unresolved merge conflict file${count === 1 ? "" : "s"}. Opened Conflicts session.`,
+                );
             },
         },
         repositoryService.listRepositories().map((entry) => entry.root),
     );
 
     // --- Merge conflict helpers ---
+
+    let isFinalizingMerge = false;
+
+    const finalizeMergeIfReady = async (): Promise<boolean> => {
+        if (isFinalizingMerge) return false;
+        const conflicts = await gitOps.getConflictFilesDetailed();
+        if (conflicts.length > 0) return false;
+        if (!(await gitOps.isMergeInProgress())) return false;
+
+        isFinalizingMerge = true;
+        try {
+            const message = (await gitOps.getPendingCommitMessage()) || "Merge commit";
+            await runWithNotificationProgress("Committing merge...", async () => {
+                await gitOps.commit(message, false);
+            });
+            vscode.window.showInformationMessage("Merge committed successfully.");
+            await vscode.commands.executeCommand("intelligit.refresh");
+            return true;
+        } finally {
+            isFinalizingMerge = false;
+        }
+    };
+
+    const handleConflictStateChanged = async (
+        resolvedPath?: string,
+        refreshSession: boolean = true,
+    ): Promise<void> => {
+        await refreshService.refreshConflictUi();
+        if (resolvedPath && refreshSession) {
+            await MergeConflictSessionPanel.refreshIfOpen({ resolvedPath });
+        }
+        await finalizeMergeIfReady();
+    };
 
     const openBuiltInMergeEditorForFile = async (filePath: string): Promise<void> => {
         const fileUri = vscode.Uri.file(
@@ -560,13 +611,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 theirsSourceLabel: labels?.sourceBranch,
             },
             async () => {
-                await refreshService.refreshConflictUi();
-                await MergeConflictSessionPanel.refreshIfOpen({ resolvedPath: safePath });
+                await handleConflictStateChanged(safePath);
             },
         );
     };
 
-    const openConflictSession = async (labels?: {
+    openConflictSession = async (labels?: {
         sourceBranch?: string;
         targetBranch?: string;
     }): Promise<void> => {
@@ -574,8 +624,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             onOpenMergeConflict: async (filePath) => {
                 await openMergeConflictForFile(filePath, labels);
             },
-            onConflictStateChanged: async () => {
-                await refreshService.refreshConflictUi();
+            onConflictStateChanged: async (resolvedPath) => {
+                await handleConflictStateChanged(resolvedPath, false);
             },
         });
     };
@@ -1070,6 +1120,32 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             commitGraph.openBranchPopup();
         }),
 
+        vscode.commands.registerCommand("intelligit.abortMerge", async () => {
+            if (!(await gitOps.isMergeInProgress())) {
+                vscode.window.showInformationMessage("No merge in progress.");
+                await vscode.commands.executeCommand("intelligit.refresh");
+                return;
+            }
+
+            const confirm = await vscode.window.showWarningMessage(
+                "Abort the current merge and discard merge conflict resolutions?",
+                { modal: true },
+                "Abort Merge",
+            );
+            if (confirm !== "Abort Merge") return;
+
+            try {
+                await runWithNotificationProgress("Aborting merge...", async () => {
+                    await gitOps.abortMerge();
+                });
+                vscode.window.showInformationMessage("Merge aborted.");
+                await vscode.commands.executeCommand("intelligit.refresh");
+            } catch (error) {
+                const message = getErrorMessage(error);
+                vscode.window.showErrorMessage(`Abort merge failed: ${message}`);
+            }
+        }),
+
         vscode.commands.registerCommand("intelligit.annotateWithGitBlame", async () => {
             await blameController.annotateActiveEditor();
         }),
@@ -1245,6 +1321,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         getCurrentBranches: () => currentBranches,
         openConflictSession,
         refreshConflictUi: () => refreshService.refreshConflictUi(),
+        finalizeMergeIfReady,
     });
 
     for (const cmd of branchCommands) {

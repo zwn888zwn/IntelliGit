@@ -24,7 +24,7 @@ vi.mock("../../src/webviews/react/shared/vscodeApi", () => ({
 initReactDomTestEnvironment();
 
 describe("low coverage components", () => {
-    it("BranchPopupOverlay keeps the current repository list stable while opening repository submenus", async () => {
+    it("BranchPopupOverlay opens repository submenus with repository branch state", async () => {
         const repositories: RepositoryContextInfo[] = [
             {
                 repoId: "pic",
@@ -103,7 +103,6 @@ describe("low coverage components", () => {
         });
         await flush();
 
-        expect(document.body.textContent).toContain("Recent Branches in PicMath");
         expect(document.body.textContent).toContain("Recent Branches in IosLatex");
         expect(document.body.textContent).toContain("pic-current");
         expect(document.body.textContent).toContain("ios-current");

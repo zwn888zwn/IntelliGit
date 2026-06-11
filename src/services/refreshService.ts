@@ -18,7 +18,8 @@ export interface RefreshServiceDeps {
     commitPanel: CommitPanelViewProvider;
     mergeConflicts: MergeConflictsTreeProvider;
     mergeConflictsView: vscode.TreeView<unknown>;
-    onBranchesUpdated: (branches: Branch[]) => void;
+    onBranchesUpdated: (branches: Branch[]) => Promise<void> | void;
+    onMergeConflictsDetected?: (count: number) => Promise<void>;
 }
 
 export class RefreshService implements vscode.Disposable {
@@ -27,6 +28,7 @@ export class RefreshService implements vscode.Disposable {
     private readonly fsWatchers: fs.FSWatcher[] = [];
     private readonly disposables: vscode.Disposable[] = [];
     private readonly gitWatcherDisposables: vscode.Disposable[] = [];
+    private lastConflictCount: number | undefined;
 
     constructor(
         private readonly deps: RefreshServiceDeps,
@@ -48,12 +50,17 @@ export class RefreshService implements vscode.Disposable {
 
     async refreshMergeConflicts(): Promise<void> {
         const count = await this.deps.mergeConflicts.refresh();
+        const previousCount = this.lastConflictCount;
+        this.lastConflictCount = count;
         this.deps.mergeConflictsView.description = count > 0 ? `${count}` : "";
         await vscode.commands.executeCommand(
             "setContext",
             "intelligit.hasMergeConflicts",
             count > 0,
         );
+        if (count > 0 && (previousCount === undefined || previousCount === 0)) {
+            await this.deps.onMergeConflictsDetected?.(count);
+        }
     }
 
     async refreshConflictUi(): Promise<void> {
@@ -79,7 +86,7 @@ export class RefreshService implements vscode.Disposable {
         this.fullTimer = setTimeout(() => {
             void (async () => {
                 const branches = await this.deps.gitOps.getBranches();
-                this.deps.onBranchesUpdated(branches);
+                await this.deps.onBranchesUpdated(branches);
                 this.deps.commitGraph.setBranches(branches);
                 await this.deps.commitGraph.refresh();
                 await this.deps.commitPanel.refresh();

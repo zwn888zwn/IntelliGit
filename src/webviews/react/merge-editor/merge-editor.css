@@ -1,5 +1,7 @@
 
 .merge-editor {
+    --merge-pane-min-width: 460px;
+    --merge-editor-line-height: 22px;
     --merge-border: color-mix(in srgb, var(--vscode-panel-border, #3f4654) 70%, transparent);
     --merge-toolbar-bg: color-mix(in srgb, var(--vscode-sideBar-background, #2b2d30) 82%, #000 18%);
     --merge-header-bg: color-mix(in srgb, var(--vscode-editorGroupHeader-tabsBackground, #31343a) 88%, #000 12%);
@@ -99,6 +101,7 @@
 }
 .toolbar-left {
     flex: 1 1 auto;
+    flex-wrap: wrap;
 }
 .toolbar-center {
     justify-content: center;
@@ -120,6 +123,33 @@
     height: 16px;
     background: color-mix(in srgb, var(--merge-border) 80%, transparent);
     margin: 0 4px;
+}
+.toolbar-apply-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.toolbar-group-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--merge-muted);
+    white-space: nowrap;
+}
+.toolbar-segmented {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px;
+    border: 1px solid color-mix(in srgb, var(--merge-border) 82%, transparent);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.toolbar-inline-note {
+    color: var(--merge-muted);
+    font-size: 11px;
+    white-space: nowrap;
 }
 .toolbar-icon {
     display: inline-flex;
@@ -147,6 +177,10 @@
 }
 .toolbar-btn {
     padding: 0 7px;
+}
+.toolbar-btn.compact {
+    padding: 0 8px;
+    height: 22px;
 }
 .toolbar-icon-btn {
     width: 22px;
@@ -277,14 +311,15 @@
     background: color-mix(in srgb, var(--merge-header-bg) 82%, #000 18%);
     min-height: 28px;
     flex-shrink: 0;
+    min-width: calc(var(--merge-pane-min-width) * 3);
 }
 .pane-meta {
-    flex: 1;
+    flex: 0 0 var(--merge-pane-min-width);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-width: 0;
+    min-width: var(--merge-pane-min-width);
     padding: 4px 10px;
     color: var(--merge-muted);
     font-size: 11px;
@@ -339,14 +374,17 @@
     flex: 1;
     min-height: 0;
     background: var(--vscode-editor-background);
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 .merge-content {
     height: 100%;
-    overflow-x: hidden;
+    min-width: calc(var(--merge-pane-min-width) * 3);
+    overflow-x: visible;
     overflow-y: auto;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: var(--vscode-editor-font-size, 12px);
-    line-height: 20px;
+    line-height: var(--merge-editor-line-height);
     background: var(--vscode-editor-background);
     padding-right: 14px;
 }
@@ -363,10 +401,11 @@
 
 .segment {
     display: flex;
+    min-width: calc(var(--merge-pane-min-width) * 3);
 }
 .column {
-    flex: 1;
-    min-width: 0;
+    flex: 0 0 var(--merge-pane-min-width);
+    min-width: var(--merge-pane-min-width);
     border-right: 1px solid var(--merge-border);
     background: color-mix(in srgb, var(--vscode-editor-background) 95%, #0b0d11 5%);
 }
@@ -379,9 +418,36 @@
 }
 .code-block {
     display: grid;
-    grid-template-columns: 74px 1fr;
+    grid-template-columns: 76px minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+}
+.code-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    background:
+        repeating-linear-gradient(
+            to right,
+            transparent 0,
+            transparent 39px,
+            color-mix(in srgb, var(--vscode-editorIndentGuide-background1, #404040) 38%, transparent)
+                39px,
+            transparent 40px
+        ),
+        var(--vscode-editor-background);
+    background-position: 10px 0, 0 0;
+    background-size: 40px var(--merge-editor-line-height), auto;
+}
+.code-scroll::-webkit-scrollbar {
+    height: 10px;
+}
+.code-scroll::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
 }
 .line-numbers {
     background: color-mix(
@@ -391,6 +457,7 @@
     );
     border-right: 1px solid var(--merge-border);
     color: var(--vscode-editorLineNumber-foreground, var(--merge-muted));
+    user-select: none;
 }
 .line-number-row {
     display: grid;
@@ -402,9 +469,9 @@
 .line-number {
     padding: 0 8px 0 4px;
     text-align: right;
-    min-height: 20px;
-    line-height: 20px;
-    font-size: 11px;
+    min-height: var(--merge-editor-line-height);
+    line-height: var(--merge-editor-line-height);
+    font-size: calc(var(--vscode-editor-font-size, 12px) - 1px);
     opacity: 0.92;
     border-left: 1px solid transparent;
 }
@@ -420,42 +487,83 @@
     border-left-color: color-mix(in srgb, var(--merge-border) 60%, transparent);
 }
 .code-lines {
-    min-width: 0;
+    min-width: max-content;
     position: relative;
+    tab-size: 4;
+    background: var(--vscode-editor-background);
+}
+.editable-code-shell {
+    position: relative;
+    min-height: var(--merge-editor-line-height);
+}
+.code-scroll-preview {
+    overflow: hidden;
+    pointer-events: none;
 }
 .result-editor-textarea {
+    position: absolute;
+    inset: 0;
     display: block;
     width: 100%;
-    min-height: 20px;
+    min-height: var(--merge-editor-line-height);
     padding: 0 10px;
     border: 0;
     outline: 0;
-    resize: vertical;
-    color: var(--vscode-editor-foreground);
+    resize: none;
+    color: transparent;
+    caret-color: var(--vscode-editor-foreground);
     background: transparent;
     font-family: var(--vscode-editor-font-family, monospace);
     font-size: var(--vscode-editor-font-size, 12px);
-    line-height: 20px;
+    line-height: var(--merge-editor-line-height);
     white-space: pre;
     overflow-wrap: normal;
     overflow-x: auto;
+    overflow-y: hidden;
     box-sizing: border-box;
+}
+.result-editor-textarea::selection {
+    background: rgba(78, 161, 255, 0.32);
 }
 .result-editor-textarea:focus {
     background: color-mix(
         in srgb,
-        var(--vscode-editor-background) 92%,
-        var(--merge-accent) 8%
+        var(--vscode-editor-background) 96%,
+        transparent
     );
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--merge-accent) 45%, transparent);
+}
+.editable-code-shell.editing .code-scroll-preview {
+    opacity: 0.92;
 }
 .code-line {
     padding: 0 10px;
     white-space: pre;
-    line-height: 20px;
-    min-height: 20px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: var(--merge-editor-line-height);
+    min-height: var(--merge-editor-line-height);
+    overflow: visible;
+    font-variant-ligatures: none;
+    box-sizing: border-box;
+}
+.code-line:hover {
+    background: var(--vscode-editor-hoverHighlightBackground, rgba(128, 128, 128, 0.08));
+}
+.code-line-content {
+    display: inline-block;
+    min-width: 1ch;
+}
+.code-line.empty-line .code-line-content {
+    min-width: 100%;
+}
+.editor-whitespace {
+    color: var(--vscode-editorWhitespace-foreground, rgba(120, 120, 120, 0.52));
+}
+.tok-comment.editor-whitespace {
+    color: color-mix(
+        in srgb,
+        var(--vscode-editorLineNumber-foreground, #6e7681) 72%,
+        transparent
+    );
 }
 .segment-common .code-line {
     color: color-mix(in srgb, var(--vscode-editor-foreground) 90%, transparent);
@@ -600,6 +708,7 @@
 }
 .hunk-columns {
     display: flex;
+    align-items: stretch;
 }
 .conflict-actions-left {
     position: absolute;
@@ -830,6 +939,9 @@
 }
 .tok-string {
     color: var(--vscode-symbolIcon-stringForeground, #ce9178);
+}
+.tok-type {
+    color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0);
 }
 .tok-number {
     color: var(--vscode-symbolIcon-numberForeground, #b5cea8);

@@ -18,6 +18,7 @@ const initialState: CommitPanelState = {
     repository: null,
     activeFile: null,
     commitMessage: "",
+    suggestedCommitMessage: "",
     isAmend: false,
     isRefreshing: false,
     error: null,
@@ -25,7 +26,12 @@ const initialState: CommitPanelState = {
 
 function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPanelState {
     switch (action.type) {
-        case "SET_FILES_AND_STASHES":
+        case "SET_FILES_AND_STASHES": {
+            const nextSuggestedCommitMessage = action.suggestedCommitMessage ?? "";
+            const shouldAdoptSuggestedCommitMessage =
+                !state.isAmend &&
+                (state.commitMessage.length === 0 ||
+                    state.commitMessage === state.suggestedCommitMessage);
             return {
                 ...state,
                 repositories: action.repositories,
@@ -37,8 +43,13 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
                 folderExpandedIcon: action.folderExpandedIcon ?? state.folderExpandedIcon,
                 folderIconsByName: action.folderIconsByName ?? state.folderIconsByName,
                 iconFonts: action.iconFonts ?? state.iconFonts,
+                suggestedCommitMessage: nextSuggestedCommitMessage,
+                commitMessage: shouldAdoptSuggestedCommitMessage
+                    ? nextSuggestedCommitMessage
+                    : state.commitMessage,
                 error: null,
             };
+        }
         case "SET_REFRESHING":
             return { ...state, isRefreshing: action.active };
         case "SET_LAST_COMMIT_MESSAGE":
@@ -79,6 +90,7 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                         folderExpandedIcon: msg.folderExpandedIcon,
                         folderIconsByName: msg.folderIconsByName,
                         iconFonts: msg.iconFonts,
+                        suggestedCommitMessage: msg.suggestedCommitMessage,
                     });
                     break;
                 case "lastCommitMessage":
