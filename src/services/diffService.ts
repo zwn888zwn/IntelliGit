@@ -51,6 +51,8 @@ const PREVIEWABLE_IMAGE_EXTENSIONS = new Set([
     ".png",
     ".webp",
 ]);
+const TRANSPARENT_PNG_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sZ4VwAAAABJRU5ErkJggg==";
 
 class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvider, vscode.Disposable {
     private readonly contents = new Map<string, string>();
@@ -353,6 +355,28 @@ function parseGitResourceQuery(
 function parseDiffDocumentQuery(uri: vscode.Uri): URLSearchParams | null {
     if (uri.scheme !== DIFF_DOCUMENT_SCHEME && uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
     return new URLSearchParams(uri.query);
+}
+
+function sanitizeTempFileSegment(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]+/g, "-");
+}
+
+async function createTransparentImagePlaceholderUri(
+    filePath: string,
+    side: "left" | "right",
+): Promise<vscode.Uri> {
+    const fileName = path.posix.basename(normalizeGitPath(filePath)) || "image";
+    const placeholderDir = path.join(os.tmpdir(), "intelligit-image-placeholders");
+    const placeholderPath = path.join(
+        placeholderDir,
+        `${sanitizeTempFileSegment(fileName)}-${side}.png`,
+    );
+    const placeholderUri = vscode.Uri.file(placeholderPath);
+    await vscode.workspace.fs.writeFile(
+        placeholderUri,
+        Buffer.from(TRANSPARENT_PNG_BASE64, "base64"),
+    );
+    return placeholderUri;
 }
 
 function isIntelliGitCommitDiffTextUri(uri: vscode.Uri): boolean {
@@ -750,18 +774,22 @@ export async function openCommitFileDiff(
             gitFileExistsAtRef(safePath, parentRef, executor),
             gitFileExistsAtRef(safePath, commitHash, executor),
         ]);
-        if (leftExists && rightExists) {
+        if (leftExists || rightExists) {
             const shortParent = parentDisplayHash.slice(0, 8);
             const shortCommit = commitHash.slice(0, 8);
             const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
-            const leftUri = createGitResourceUri(workingTreeUri, parentRef, {
-                markAsCommitDiff: true,
-                originalPath: safePath,
-            });
-            const rightUri = createGitResourceUri(workingTreeUri, commitHash, {
-                markAsCommitDiff: true,
-                originalPath: safePath,
-            });
+            const leftUri = leftExists
+                ? createGitResourceUri(workingTreeUri, parentRef, {
+                      markAsCommitDiff: true,
+                      originalPath: safePath,
+                  })
+                : await createTransparentImagePlaceholderUri(safePath, "left");
+            const rightUri = rightExists
+                ? createGitResourceUri(workingTreeUri, commitHash, {
+                      markAsCommitDiff: true,
+                      originalPath: safePath,
+                  })
+                : await createTransparentImagePlaceholderUri(safePath, "right");
             await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
             return { parentRef, parentDisplayHash, leftUri, rightUri };
         }

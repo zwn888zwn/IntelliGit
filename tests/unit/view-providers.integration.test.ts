@@ -922,6 +922,112 @@ describe("view providers integration", () => {
         );
     });
 
+    it("openCommitFileDiff uses an image placeholder for added previewable images", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async () => {
+                throw new Error("text fallback should not run for added previewable images");
+            }),
+        };
+        const executor = {
+            run: vi.fn(async (args: string[]) => {
+                if (args[0] === "rev-list" && args[1] === "--parents") {
+                    return "a1b2c3d4 parent1234";
+                }
+                if (args[0] === "cat-file" && args[1] === "-e") {
+                    return args[2] === "a1b2c3d4:assets/new-logo.png"
+                        ? ""
+                        : Promise.reject(new Error("missing"));
+                }
+                return "";
+            }),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "assets/new-logo.png",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result).not.toBeNull();
+        expect(gitOps.getFileContentAtRef).not.toHaveBeenCalled();
+        expect(writeFile).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            expect.any(Uint8Array),
+        );
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/new-logo.png",
+                query: expect.stringContaining("\"ref\":\"a1b2c3d4\""),
+            }),
+            "assets/new-logo.png (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
+    it("openCommitFileDiff uses an image placeholder for deleted previewable images", async () => {
+        const { openCommitFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async () => {
+                throw new Error("text fallback should not run for deleted previewable images");
+            }),
+        };
+        const executor = {
+            run: vi.fn(async (args: string[]) => {
+                if (args[0] === "rev-list" && args[1] === "--parents") {
+                    return "a1b2c3d4 parent1234";
+                }
+                if (args[0] === "cat-file" && args[1] === "-e") {
+                    return args[2] === "parent1234:assets/removed-logo.png"
+                        ? ""
+                        : Promise.reject(new Error("missing"));
+                }
+                return "";
+            }),
+        };
+
+        const result = await openCommitFileDiff(
+            "a1b2c3d4",
+            "assets/removed-logo.png",
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(result).not.toBeNull();
+        expect(gitOps.getFileContentAtRef).not.toHaveBeenCalled();
+        expect(writeFile).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            expect.any(Uint8Array),
+        );
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/removed-logo.png",
+                query: expect.stringContaining("\"ref\":\"parent1234\""),
+            }),
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            "assets/removed-logo.png (parent12 ↔ a1b2c3d4)",
+        );
+    });
+
     it("openCommitFileDiff keeps added files eligible for Open in Editor", async () => {
         const { openCommitFileDiff } = await import("../../src/services/diffService");
         const gitOps = {
