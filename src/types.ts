@@ -28,6 +28,15 @@ export interface RepositoryContextInfo {
     color: string;
 }
 
+export interface GitWorktree {
+    path: string;
+    head?: string;
+    branch?: string;
+    detached: boolean;
+    bare?: boolean;
+    prunable?: string;
+}
+
 export interface RepoPathRef {
     repoRoot: string;
     path: string;

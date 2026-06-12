@@ -10,6 +10,7 @@ import type {
     CommitDetail,
     GraphRefInfo,
     GitTag,
+    GitWorktree,
     RepositoryContextInfo,
     ThemeFolderIconMap,
 } from "../types";
@@ -19,12 +20,16 @@ import type {
     CommitAction,
     CommitGraphOutbound,
     CommitGraphInbound,
+    CreateWorktreePayload,
+    OpenWorktreeDialogPayload,
+    WorktreePathPayload,
 } from "../webviews/react/commitGraphTypes";
 import { getErrorMessage } from "../utils/errors";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import { buildWebviewShellHtml } from "./webviewHtml";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
+import { parseWorktreeListPorcelain } from "../services/worktreeService";
 
 interface CommitGraphRefreshOptions {
     reset?: boolean;
@@ -47,6 +52,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     private branches: Branch[] = [];
     private branchSnapshotsByRoot: Record<string, Branch[]> = {};
+    private worktreeSnapshotsByRoot: Record<string, GitWorktree[]> = {};
     private selectedCommitDetail: CommitDetail | null = null;
     private loadedCommits: Commit[] = [];
     private folderIconsByName: ThemeFolderIconMap = {};
@@ -76,6 +82,20 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         allRepositories?: boolean;
     }>();
     readonly onBranchPopupAction = this._onBranchPopupAction.event;
+
+    private readonly _onChooseWorktreeLocation = new vscode.EventEmitter<{
+        currentLocation?: string;
+    }>();
+    readonly onChooseWorktreeLocation = this._onChooseWorktreeLocation.event;
+
+    private readonly _onCreateWorktree = new vscode.EventEmitter<CreateWorktreePayload>();
+    readonly onCreateWorktree = this._onCreateWorktree.event;
+
+    private readonly _onOpenWorktree = new vscode.EventEmitter<WorktreePathPayload>();
+    readonly onOpenWorktree = this._onOpenWorktree.event;
+
+    private readonly _onDeleteWorktree = new vscode.EventEmitter<WorktreePathPayload>();
+    readonly onDeleteWorktree = this._onDeleteWorktree.event;
 
     private readonly _onCommitAction = new vscode.EventEmitter<{
         action: CommitAction;
@@ -187,6 +207,20 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                             allRepositories: msg.allRepositories,
                         });
                         break;
+                    case "chooseWorktreeLocation":
+                        this._onChooseWorktreeLocation.fire({
+                            currentLocation: msg.currentLocation,
+                        });
+                        break;
+                    case "createWorktree":
+                        this._onCreateWorktree.fire(msg.payload);
+                        break;
+                    case "openWorktree":
+                        this._onOpenWorktree.fire(msg.payload);
+                        break;
+                    case "deleteWorktree":
+                        this._onDeleteWorktree.fire(msg.payload);
+                        break;
                     case "commitAction":
                         if (msg.repoRoot) {
                             this._onCommitAction.fire({
@@ -239,6 +273,45 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         }
 
         this.postToWebview({ type: "openBranchPopup" });
+    }
+
+    openWorktreeDialog(payload: OpenWorktreeDialogPayload): void {
+        this.postToWebview({ type: "openWorktreeDialog", payload });
+    }
+
+    setWorktreeLocationSelected(location: string): void {
+        this.postToWebview({ type: "worktreeLocationSelected", location });
+    }
+
+    setWorktreeCreateResult(result: { success: true; path: string } | { success: false; message: string }): void {
+        this.postToWebview(
+            result.success
+                ? { type: "worktreeCreateResult", success: true, path: result.path }
+                : { type: "worktreeCreateResult", success: false, message: result.message },
+        );
+    }
+
+    setRepositoryWorktrees(root: string, worktrees: GitWorktree[]): void {
+        this.worktreeSnapshotsByRoot = {
+            ...this.worktreeSnapshotsByRoot,
+            [root]: worktrees,
+        };
+        this.postToWebview({
+            type: "setRepositoryWorktrees",
+            worktreesByRoot: this.worktreeSnapshotsByRoot,
+        });
+    }
+
+    openWorktreesDialog(root: string): void {
+        this.postToWebview({ type: "openWorktreesDialog", repoRoot: root });
+    }
+
+    setWorktreeDeleteResult(result: { success: true; path: string } | { success: false; message: string }): void {
+        this.postToWebview(
+            result.success
+                ? { type: "worktreeDeleteResult", success: true, path: result.path }
+                : { type: "worktreeDeleteResult", success: false, message: result.message },
+        );
     }
 
     setRepositoryContext(repository: RepositoryContextInfo | null): void {
@@ -381,6 +454,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         const repositories = this.getRepositories();
         const branchesByRoot: Record<string, Branch[]> = {};
         const tagsByRoot: Record<string, GitTag[]> = {};
+        const worktreesByRoot: Record<string, GitWorktree[]> = {};
         await Promise.all(
             repositories.map(async (entry) => {
                 if (entry.root === this.repository?.root) {
@@ -392,9 +466,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                     typeof (entry.gitOps as Partial<GitOps>).getTags === "function"
                         ? await entry.gitOps.getTags().catch(() => [])
                         : [];
+                worktreesByRoot[entry.root] = await this.getWorktrees(entry);
             }),
         );
         this.branchSnapshotsByRoot = branchesByRoot;
+        this.worktreeSnapshotsByRoot = worktreesByRoot;
         this.branchFolderIconsByName = await this.iconTheme.getFolderIconsByBranches(this.branches);
         const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
         this.postToWebview({
@@ -403,6 +479,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         });
         this.postToWebview({ type: "setRepositoryBranches", branchesByRoot });
         this.postToWebview({ type: "setRepositoryTags", tagsByRoot });
+        this.postToWebview({ type: "setRepositoryWorktrees", worktreesByRoot });
         this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.postToWebview({
             type: "setBranches",
@@ -412,6 +489,17 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             folderIconsByName: this.branchFolderIconsByName,
             iconFonts,
         });
+    }
+
+    private async getWorktrees(entry: RepositoryEntry): Promise<GitWorktree[]> {
+        if (typeof entry.executor?.run !== "function") return [];
+        try {
+            return parseWorktreeListPorcelain(
+                await entry.executor.run(["worktree", "list", "--porcelain"]),
+            );
+        } catch {
+            return [];
+        }
     }
 
     private async loadInitial(): Promise<void> {
@@ -818,6 +906,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this._onCommitSelected.dispose();
         this._onBranchFilterChanged.dispose();
         this._onBranchAction.dispose();
+        this._onBranchPopupAction.dispose();
+        this._onChooseWorktreeLocation.dispose();
+        this._onCreateWorktree.dispose();
+        this._onOpenWorktree.dispose();
+        this._onDeleteWorktree.dispose();
         this._onCommitAction.dispose();
         this._onOpenCommitFileDiff.dispose();
     }

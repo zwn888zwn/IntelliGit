@@ -1,4 +1,4 @@
-import type { Branch } from "../../../types";
+import type { Branch, GitWorktree } from "../../../types";
 import type { BranchAction } from "../commitGraphTypes";
 import type { MenuItem } from "../shared/components/ContextMenu";
 
@@ -22,13 +22,26 @@ function separator(action: SeparatorAction): BranchMenuItem {
     return { label: "", action, separator: true };
 }
 
-export function getBranchMenuItems(branch: Branch, currentBranchName: string): BranchMenuItem[] {
+export interface BranchMenuOptions {
+    checkedOutWorktree?: GitWorktree | null;
+}
+
+export function getBranchMenuItems(
+    branch: Branch,
+    currentBranchName: string,
+    options: BranchMenuOptions = {},
+): BranchMenuItem[] {
     const current = quoted(currentBranchName);
     const selected = quoted(branch.name);
+    const worktreeItem: BranchMenuItem[] = options.checkedOutWorktree
+        ? [{ label: "Open Worktree...", action: "openWorktree" }, separator("sep-worktree-open")]
+        : [];
 
     if (branch.isCurrent) {
         return [
+            ...worktreeItem,
             { label: `New Branch from ${current}...`, action: "newBranchFrom" },
+            { label: `New Worktree from ${current}...`, action: "newWorktreeFrom" },
             separator("sep-current-1"),
             { label: "Update", action: "updateBranch" },
             { label: "Push...", action: "pushBranch" },
@@ -37,9 +50,26 @@ export function getBranchMenuItems(branch: Branch, currentBranchName: string): B
         ];
     }
 
+    if (options.checkedOutWorktree && !branch.isRemote) {
+        return [
+            ...worktreeItem,
+            { label: `New Branch from ${selected}...`, action: "newBranchFrom" },
+            { label: `New Worktree from ${selected}...`, action: "newWorktreeFrom" },
+            separator("sep-shared-1"),
+            { label: `Rebase ${current} onto ${selected}`, action: "rebaseCurrentOnto" },
+            { label: `Merge ${selected} into ${current}`, action: "mergeIntoCurrent" },
+            separator("sep-shared-2"),
+            { label: "Push...", action: "pushBranch" },
+            separator("sep-local-1"),
+            { label: "Rename...", action: "renameBranch" },
+            { label: "Delete", action: "deleteBranch" },
+        ];
+    }
+
     const nonCurrentBase: BranchMenuItem[] = [
         { label: "Checkout", action: "checkout" },
         { label: `New Branch from ${selected}...`, action: "newBranchFrom" },
+        { label: `New Worktree from ${selected}...`, action: "newWorktreeFrom" },
         { label: `Checkout and Rebase onto ${current}`, action: "checkoutAndRebase" },
         separator("sep-shared-1"),
         { label: `Rebase ${current} onto ${selected}`, action: "rebaseCurrentOnto" },

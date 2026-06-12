@@ -3,8 +3,22 @@
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import type { Branch, GitTag, RepositoryContextInfo, ThemeFolderIconMap, ThemeTreeIcon } from "../../types";
-import { isBranchAction, type BranchAction, type BranchPopupAction } from "./commitGraphTypes";
+import type {
+    Branch,
+    GitTag,
+    GitWorktree,
+    RepositoryContextInfo,
+    ThemeFolderIconMap,
+    ThemeTreeIcon,
+} from "../../types";
+import {
+    isBranchAction,
+    type BranchAction,
+    type BranchPopupAction,
+    type CreateWorktreePayload,
+    type OpenWorktreeDialogPayload,
+    type WorktreePathPayload,
+} from "./commitGraphTypes";
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getBranchMenuItems } from "./branch-column/menu";
 import { buildPrefixTree, buildRemoteGroups } from "./branch-column/treeModel";
@@ -12,6 +26,8 @@ import { BranchTreeNodeRow } from "./branch-column/components/BranchTreeNodeRow"
 import { BranchSectionHeader } from "./branch-column/components/BranchSectionHeader";
 import { BranchSearchBar } from "./branch-column/components/BranchSearchBar";
 import { BranchPopupOverlay } from "./branch-column/components/BranchPopupOverlay";
+import { NewWorktreeDialog } from "./branch-column/components/NewWorktreeDialog";
+import { WorktreesDialog } from "./branch-column/components/WorktreesDialog";
 import { RepoIcon, TagRightIcon } from "./branch-column/icons";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import {
@@ -27,12 +43,18 @@ import {
 
 interface Props {
     branches: Branch[];
-    repositoryBranches: Record<string, Branch[]>;
-    repositoryTags: Record<string, GitTag[]>;
-    repositories: RepositoryContextInfo[];
-    repository: RepositoryContextInfo | null;
+    repositoryBranches?: Record<string, Branch[]>;
+    repositoryTags?: Record<string, GitTag[]>;
+    repositoryWorktrees?: Record<string, GitWorktree[]>;
+    repositories?: RepositoryContextInfo[];
+    repository?: RepositoryContextInfo | null;
     selectedBranch: string | null;
     openPopupRequest?: { seq: number } | null;
+    worktreeDialog?: OpenWorktreeDialogPayload | null;
+    worktreesDialogRepoRoot?: string | null;
+    worktreeLocationSelection?: { seq: number; location: string } | null;
+    worktreeCreateError?: { success: false; message: string } | null;
+    worktreeDeleteResult?: { seq: number; success: true; path: string } | { seq: number; success: false; message: string } | null;
     onSelectBranch: (name: string | null) => void;
     onBranchAction: (
         action: BranchAction,
@@ -40,12 +62,18 @@ interface Props {
         repoRoot?: string,
         allRepositories?: boolean,
     ) => void;
-    onBranchPopupAction: (
+    onBranchPopupAction?: (
         action: BranchPopupAction,
         root?: string,
         refName?: string,
         allRepositories?: boolean,
     ) => void;
+    onChooseWorktreeLocation?: (currentLocation: string) => void;
+    onCreateWorktree?: (payload: CreateWorktreePayload) => void;
+    onOpenWorktree?: (payload: WorktreePathPayload) => void;
+    onDeleteWorktree?: (payload: WorktreePathPayload) => void;
+    onCloseWorktreeDialog?: () => void;
+    onCloseWorktreesDialog?: () => void;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
@@ -120,7 +148,7 @@ function computeAnchorPosition(
     return { anchorX, anchorY };
 }
 
-function getAllRepositoriesBranchMenuItems(branch: Branch, currentBranchName: string) {
+export function getAllRepositoriesBranchMenuItems(branch: Branch, currentBranchName: string) {
     const items = getBranchMenuItems(branch, currentBranchName).filter(
         (item) => item.separator || ALL_REPOSITORIES_BRANCH_ACTIONS.has(item.action),
     );
@@ -134,15 +162,27 @@ function getAllRepositoriesBranchMenuItems(branch: Branch, currentBranchName: st
 
 export function BranchColumn({
     branches,
-    repositoryBranches,
-    repositoryTags,
-    repositories,
-    repository,
+    repositoryBranches = {},
+    repositoryTags = {},
+    repositoryWorktrees = {},
+    repositories = [],
+    repository = null,
     selectedBranch,
     openPopupRequest,
+    worktreeDialog,
+    worktreesDialogRepoRoot,
+    worktreeLocationSelection,
+    worktreeCreateError,
+    worktreeDeleteResult,
     onSelectBranch,
     onBranchAction,
-    onBranchPopupAction,
+    onBranchPopupAction = () => {},
+    onChooseWorktreeLocation = () => {},
+    onCreateWorktree = () => {},
+    onOpenWorktree = () => {},
+    onDeleteWorktree = () => {},
+    onCloseWorktreeDialog = () => {},
+    onCloseWorktreesDialog = () => {},
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
@@ -372,7 +412,18 @@ export function BranchColumn({
                                   contextMenu.branch,
                                   actualCurrent?.name ?? "HEAD",
                               )
-                            : getBranchMenuItems(contextMenu.branch, actualCurrent?.name ?? "HEAD")
+                            : getBranchMenuItems(
+                                  contextMenu.branch,
+                                  actualCurrent?.name ?? "HEAD",
+                                  {
+                                      checkedOutWorktree: getCheckedOutWorktree(
+                                          contextMenu.branch,
+                                          repositoryWorktrees[
+                                              contextMenu.repoRoot ?? repository?.root ?? ""
+                                          ] ?? [],
+                                      ),
+                                  },
+                              )
                     }
                     minWidth={310}
                     onSelect={handleContextMenuAction}
@@ -387,6 +438,7 @@ export function BranchColumn({
                     repository={repository}
                     repositoryBranches={repositoryBranches}
                     repositoryTags={repositoryTags}
+                    repositoryWorktrees={repositoryWorktrees}
                     onTopAction={(action, root, refName, allRepositories) => {
                         setBranchPopupOpen(false);
                         onBranchPopupAction(action, root, refName, allRepositories);
@@ -403,6 +455,48 @@ export function BranchColumn({
                     onClose={() => setBranchPopupOpen(false)}
                 />
             )}
+
+            {worktreeDialog && (
+                <NewWorktreeDialog
+                    repository={worktreeDialog.repository}
+                    branches={
+                        repositoryBranches[worktreeDialog.repository.root] ??
+                        (repository?.root === worktreeDialog.repository.root ? branches : [])
+                    }
+                    initialBranch={worktreeDialog.branch}
+                    defaultLocation={worktreeDialog.defaultLocation}
+                    defaultProjectName={worktreeDialog.defaultProjectName}
+                    worktrees={worktreeDialog.worktrees}
+                    locationSelection={worktreeLocationSelection}
+                    createError={worktreeCreateError}
+                    onChooseLocation={onChooseWorktreeLocation}
+                    onCreate={onCreateWorktree}
+                    onClose={onCloseWorktreeDialog}
+                />
+            )}
+
+            {worktreesDialogRepoRoot && (
+                <WorktreesDialog
+                    repository={
+                        repositories.find((repo) => repo.root === worktreesDialogRepoRoot) ??
+                        (repository?.root === worktreesDialogRepoRoot ? repository : null)
+                    }
+                    worktrees={repositoryWorktrees[worktreesDialogRepoRoot] ?? []}
+                    deleteResult={worktreeDeleteResult}
+                    onOpen={(path) =>
+                        onOpenWorktree({ repoRoot: worktreesDialogRepoRoot, path })
+                    }
+                    onDelete={(path) =>
+                        onDeleteWorktree({ repoRoot: worktreesDialogRepoRoot, path })
+                    }
+                    onClose={onCloseWorktreesDialog}
+                />
+            )}
         </div>
     );
+}
+
+function getCheckedOutWorktree(branch: Branch, worktrees: GitWorktree[]): GitWorktree | null {
+    if (branch.isRemote) return null;
+    return worktrees.find((worktree) => worktree.branch === branch.name) ?? null;
 }

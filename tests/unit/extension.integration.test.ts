@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "fs/promises";
+import * as os from "os";
+import * as path from "path";
 
 type CommandHandler = (...args: unknown[]) => unknown;
 
@@ -19,6 +22,7 @@ const showInputBox = vi.fn(async (opts?: { prompt?: string; value?: string }) =>
     return "input";
 });
 const showSaveDialog = vi.fn(async () => ({ fsPath: "/tmp/patch.diff", path: "/tmp/patch.diff" }));
+const showOpenDialog = vi.fn(async () => [{ fsPath: "/tmp", path: "/tmp" }]);
 const showQuickPick = vi.fn(async (items: Array<Record<string, unknown>>) => items[0]);
 const showTextDocument = vi.fn(async () => undefined);
 const openTextDocument = vi.fn(async (arg: unknown) => arg);
@@ -132,13 +136,16 @@ class MockRange {
 }
 
 class MockEventEmitter<T> {
-    private listeners: Array<(value: T) => void> = [];
+    private listeners: Array<(value: T) => unknown> = [];
     readonly event = (listener: (value: T) => void) => {
         this.listeners.push(listener);
         return { dispose: vi.fn() };
     };
     fire(value: T): void {
-        for (const listener of this.listeners) listener(value);
+        void this.fireAsync(value);
+    }
+    async fireAsync(value: T): Promise<void> {
+        for (const listener of this.listeners) await listener(value);
     }
     dispose = vi.fn();
 }
@@ -147,6 +154,9 @@ const defaultExecutorRunImpl = async (args: string[]) => {
     if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
     if (args[0] === "rev-parse" && args[1] === "--short") return args[2]?.slice(0, 7) ?? "feed123";
     if (args[0] === "rev-parse" && args[1] === "HEAD") return "feed1234";
+    if (args[0] === "worktree" && args[1] === "list") {
+        return ["worktree /repo-a", "HEAD feed1234", "branch refs/heads/main", ""].join("\n");
+    }
     if (args[0] === "format-patch") return "patch-content";
     if (args[0] === "log" && args.includes("--format=%B")) return "current commit body";
     if (args[0] === "rev-list" && args[1] === "--count") return "2";
@@ -293,6 +303,10 @@ class MockCommitGraphViewProvider {
         action: string;
         root?: string;
     }>();
+    private chooseWorktreeLocationEmitter = new MockEventEmitter<{ currentLocation?: string }>();
+    private createWorktreeEmitter = new MockEventEmitter<Record<string, unknown>>();
+    private openWorktreeEmitter = new MockEventEmitter<{ repoRoot: string; path: string }>();
+    private deleteWorktreeEmitter = new MockEventEmitter<{ repoRoot: string; path: string }>();
     private commitActionEmitter = new MockEventEmitter<{
         action: string;
         hash: string;
@@ -310,6 +324,10 @@ class MockCommitGraphViewProvider {
     onBranchFilterChanged = this.branchFilterEmitter.event;
     onBranchAction = this.branchActionEmitter.event;
     onBranchPopupAction = this.branchPopupActionEmitter.event;
+    onChooseWorktreeLocation = this.chooseWorktreeLocationEmitter.event;
+    onCreateWorktree = this.createWorktreeEmitter.event;
+    onOpenWorktree = this.openWorktreeEmitter.event;
+    onDeleteWorktree = this.deleteWorktreeEmitter.event;
     onCommitAction = this.commitActionEmitter.event;
     onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
     setBranches = vi.fn();
@@ -318,6 +336,12 @@ class MockCommitGraphViewProvider {
     filterByBranch = vi.fn(async () => undefined);
     revealCommit = vi.fn(async () => undefined);
     openBranchPopup = vi.fn();
+    openWorktreeDialog = vi.fn();
+    openWorktreesDialog = vi.fn();
+    setWorktreeLocationSelected = vi.fn();
+    setWorktreeCreateResult = vi.fn();
+    setRepositoryWorktrees = vi.fn();
+    setWorktreeDeleteResult = vi.fn();
     setCommitDetail = vi.fn();
     clearCommitDetail = vi.fn();
     dispose = vi.fn();
@@ -328,11 +352,23 @@ class MockCommitGraphViewProvider {
     emitBranchFilterChanged(value: string | null): void {
         this.branchFilterEmitter.fire(value);
     }
-    emitBranchAction(payload: { action: string; branchName: string }): void {
-        this.branchActionEmitter.fire(payload);
+    async emitBranchAction(payload: { action: string; branchName: string }): Promise<void> {
+        await this.branchActionEmitter.fireAsync(payload);
     }
-    emitBranchPopupAction(payload: { action: string; root?: string }): void {
-        this.branchPopupActionEmitter.fire(payload);
+    async emitBranchPopupAction(payload: { action: string; root?: string }): Promise<void> {
+        await this.branchPopupActionEmitter.fireAsync(payload);
+    }
+    async emitChooseWorktreeLocation(payload: { currentLocation?: string }): Promise<void> {
+        await this.chooseWorktreeLocationEmitter.fireAsync(payload);
+    }
+    async emitCreateWorktree(payload: Record<string, unknown>): Promise<void> {
+        await this.createWorktreeEmitter.fireAsync(payload);
+    }
+    async emitOpenWorktree(payload: { repoRoot: string; path: string }): Promise<void> {
+        await this.openWorktreeEmitter.fireAsync(payload);
+    }
+    async emitDeleteWorktree(payload: { repoRoot: string; path: string }): Promise<void> {
+        await this.deleteWorktreeEmitter.fireAsync(payload);
     }
     emitCommitAction(payload: { action: string; hash: string }): void {
         this.commitActionEmitter.fire(payload);
@@ -528,6 +564,7 @@ vi.mock("vscode", () => ({
         showWarningMessage,
         showInputBox,
         showSaveDialog,
+        showOpenDialog,
         showQuickPick,
         showTextDocument,
         createStatusBarItem,
@@ -751,6 +788,7 @@ describe("extension integration", () => {
             showWarningMessage,
             showInputBox,
             showSaveDialog,
+            showOpenDialog,
             showQuickPick,
             showTextDocument,
             openTextDocument,
@@ -893,6 +931,7 @@ describe("extension integration", () => {
             fsPath: "/tmp/patch.diff",
             path: "/tmp/patch.diff",
         } as unknown as { fsPath: string; path: string });
+        showOpenDialog.mockResolvedValue([{ fsPath: "/tmp", path: "/tmp" }]);
         showQuickPick.mockImplementation(async (items: Array<Record<string, unknown>>) => items[0]);
     });
 
@@ -1216,6 +1255,320 @@ describe("extension integration", () => {
         );
         expect(showInformationMessage).not.toHaveBeenCalledWith("Updated main");
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("opens the new worktree dialog from a branch action", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitBranchAction({
+            action: "newWorktreeFrom",
+            branchName: "main",
+        });
+        await waitForAsync();
+
+        expect(executorRun).toHaveBeenCalledWith(["worktree", "list", "--porcelain"]);
+        expect(latestCommitGraphProvider!.openWorktreeDialog).toHaveBeenCalledWith(
+            expect.objectContaining({
+                branch: expect.objectContaining({ name: "main" }),
+                defaultLocation: "/",
+                defaultProjectName: "repo-a-main",
+                worktrees: [{ path: "/repo-a", head: "feed1234", branch: "main", detached: false }],
+            }),
+        );
+        expect(executorRun).not.toHaveBeenCalledWith(
+            expect.arrayContaining(["worktree", "add"]),
+        );
+    });
+
+    it("opens the checked-out worktree for a branch action", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "worktree" && args[1] === "list") {
+                return [
+                    "worktree /repo-a",
+                    "HEAD feed1234",
+                    "branch refs/heads/main",
+                    "",
+                    "worktree /repo-a-feature",
+                    "HEAD a1b2c3d4",
+                    "branch refs/heads/feature-local",
+                    "",
+                ].join("\n");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+        await activate(context);
+        executeCommandFallback.mockClear();
+
+        await latestCommitGraphProvider!.emitBranchAction({
+            action: "openWorktree",
+            branchName: "feature-local",
+        });
+        await waitForAsync();
+
+        expect(latestCommitGraphProvider!.setRepositoryWorktrees).toHaveBeenCalledWith(
+            "/repo-a",
+            expect.arrayContaining([
+                expect.objectContaining({ path: "/repo-a-feature", branch: "feature-local" }),
+            ]),
+        );
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.openFolder",
+            expect.objectContaining({ fsPath: "/repo-a-feature" }),
+            true,
+        );
+    });
+
+    it("opens the worktrees dialog from the branch popup action", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitBranchPopupAction({
+            action: "worktrees",
+            root: "/repo-a",
+        });
+        await waitForAsync();
+
+        expect(latestCommitGraphProvider!.setRepositoryWorktrees).toHaveBeenCalledWith(
+            "/repo-a",
+            [{ path: "/repo-a", head: "feed1234", branch: "main", detached: false }],
+        );
+        expect(latestCommitGraphProvider!.openWorktreesDialog).toHaveBeenCalledWith("/repo-a");
+    });
+
+    it("deletes a linked worktree with git worktree remove", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "worktree" && args[1] === "list") {
+                return [
+                    "worktree /repo-a",
+                    "HEAD feed1234",
+                    "branch refs/heads/main",
+                    "",
+                    "worktree /repo-a-feature",
+                    "HEAD a1b2c3d4",
+                    "branch refs/heads/feature-local",
+                    "",
+                ].join("\n");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitDeleteWorktree({
+            repoRoot: "/repo-a",
+            path: "/repo-a-feature",
+        });
+        await waitForAsync();
+
+        expect(executorRun).toHaveBeenCalledWith([
+            "worktree",
+            "remove",
+            "/repo-a-feature",
+        ]);
+        expect(latestCommitGraphProvider!.setWorktreeDeleteResult).toHaveBeenCalledWith({
+            success: true,
+            path: "/repo-a-feature",
+        });
+    });
+
+    it("blocks deleting the current worktree", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitDeleteWorktree({
+            repoRoot: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+
+        expect(executorRun).not.toHaveBeenCalledWith(["worktree", "remove", "/repo-a"]);
+        expect(latestCommitGraphProvider!.setWorktreeDeleteResult).toHaveBeenCalledWith({
+            success: false,
+            message: "The current worktree cannot be deleted from this window.",
+        });
+    });
+
+    it("selects a worktree location through the VS Code folder picker", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitChooseWorktreeLocation({ currentLocation: "/repos" });
+        await waitForAsync();
+
+        expect(showOpenDialog).toHaveBeenCalledWith(
+            expect.objectContaining({
+                canSelectFolders: true,
+                defaultUri: expect.objectContaining({ fsPath: "/repos" }),
+            }),
+        );
+        expect(latestCommitGraphProvider!.setWorktreeLocationSelected).toHaveBeenCalledWith("/tmp");
+    });
+
+    it("creates a new-branch worktree and opens it in a new VS Code window", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        executeCommandFallback.mockClear();
+
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-worktree-"));
+        const target = path.join(parent, "repo-a-feature-worktree");
+        await latestCommitGraphProvider!.emitCreateWorktree({
+            repoRoot: "/repo-a",
+            branchName: "main",
+            createBranch: true,
+            newBranchName: "feature/worktree",
+            projectName: "repo-a-feature-worktree",
+            location: parent,
+        });
+        await waitForAsync();
+
+        expect(executorRun).toHaveBeenCalledWith([
+            "worktree",
+            "add",
+            "-b",
+            "feature/worktree",
+            target,
+            "main",
+        ]);
+        expect(latestCommitGraphProvider!.setWorktreeCreateResult).toHaveBeenCalledWith({
+            success: true,
+            path: target,
+        });
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.openFolder",
+            expect.objectContaining({ fsPath: target }),
+            true,
+        );
+    });
+
+    it("creates a worktree from an unchecked-out local branch without -b", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-worktree-"));
+        const target = path.join(parent, "repo-a-feature-local");
+        await latestCommitGraphProvider!.emitCreateWorktree({
+            repoRoot: "/repo-a",
+            branchName: "feature-local",
+            createBranch: false,
+            projectName: "repo-a-feature-local",
+            location: parent,
+        });
+        await waitForAsync();
+
+        expect(executorRun).toHaveBeenCalledWith([
+            "worktree",
+            "add",
+            target,
+            "feature-local",
+        ]);
+    });
+
+    it("fetches a selected remote branch before creating its worktree", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-worktree-"));
+        const target = path.join(parent, "repo-a-remote-main");
+        await latestCommitGraphProvider!.emitCreateWorktree({
+            repoRoot: "/repo-a",
+            branchName: "origin/main",
+            createBranch: true,
+            newBranchName: "remote/main-worktree",
+            projectName: "repo-a-remote-main",
+            location: parent,
+        });
+        await waitForAsync();
+
+        expect(executorRun).toHaveBeenCalledWith([
+            "fetch",
+            "origin",
+            "main",
+            "--recurse-submodules=no",
+            "--progress",
+            "--prune",
+        ]);
+        expect(executorRun).toHaveBeenCalledWith([
+            "worktree",
+            "add",
+            "-b",
+            "remote/main-worktree",
+            target,
+            "origin/main",
+        ]);
+    });
+
+    it("keeps the worktree dialog open when creation fails", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "worktree" && args[1] === "add") {
+                throw new Error("worktree failed");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+        executeCommandFallback.mockClear();
+
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-worktree-"));
+        await latestCommitGraphProvider!.emitCreateWorktree({
+            repoRoot: "/repo-a",
+            branchName: "feature-local",
+            createBranch: false,
+            projectName: "repo-a-fail",
+            location: parent,
+        });
+        await waitForAsync();
+
+        expect(latestCommitGraphProvider!.setWorktreeCreateResult).toHaveBeenCalledWith({
+            success: false,
+            message: "worktree failed",
+        });
+        expect(executeCommandFallback).not.toHaveBeenCalledWith(
+            "vscode.openFolder",
+            expect.anything(),
+            true,
+        );
     });
 
     it("opens the built-in merge editor by default for conflict files", async () => {
@@ -1577,7 +1930,7 @@ describe("extension integration", () => {
             action: "interactiveRebaseFromHere",
             hash: "a1b2c3d4",
         });
-        latestCommitGraphProvider!.emitBranchAction({
+        await latestCommitGraphProvider!.emitBranchAction({
             action: "checkout",
             branchName: "main",
         });
@@ -2227,7 +2580,7 @@ describe("extension integration", () => {
                 expect.stringContaining("Reset failed: reset failed"),
             );
 
-            latestCommitGraphProvider!.emitBranchAction({
+            await latestCommitGraphProvider!.emitBranchAction({
                 action: "checkout",
                 branchName: "missing-branch",
             });

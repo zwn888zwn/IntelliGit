@@ -9,7 +9,7 @@ import {
     LuPlus,
     LuSearch,
 } from "react-icons/lu";
-import type { Branch, GitTag, RepositoryContextInfo } from "../../../../types";
+import type { Branch, GitTag, GitWorktree, RepositoryContextInfo } from "../../../../types";
 import type { BranchPopupAction } from "../../commitGraphTypes";
 import { GitBranchIcon, StarIcon, TagRightIcon } from "../icons";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
@@ -39,6 +39,7 @@ interface Props {
     repository: RepositoryContextInfo | null;
     repositoryBranches: Record<string, Branch[]>;
     repositoryTags: Record<string, GitTag[]>;
+    repositoryWorktrees: Record<string, GitWorktree[]>;
     onTopAction: (
         action: BranchPopupAction,
         root?: string,
@@ -60,6 +61,7 @@ export function BranchPopupOverlay({
     repository,
     repositoryBranches,
     repositoryTags,
+    repositoryWorktrees,
     onTopAction,
     onOpenBranchMenu,
     onClose,
@@ -262,6 +264,11 @@ export function BranchPopupOverlay({
                 alignWithIconLabel
                 onClick={() => onTopAction("checkoutRevision", repository?.root)}
             />
+            <TopActionRow
+                icon={<GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />}
+                label="Worktrees..."
+                onClick={() => onTopAction("worktrees", repository?.root)}
+            />
 
             {hasMultipleRepositories && (
                 <>
@@ -449,6 +456,7 @@ export function BranchPopupOverlay({
                     repository={repositorySubmenu.repository}
                     branches={repositoryBranches[repositorySubmenu.repository.root] ?? []}
                     tags={repositoryTags[repositorySubmenu.repository.root] ?? []}
+                    worktrees={repositoryWorktrees[repositorySubmenu.repository.root] ?? []}
                     x={repositorySubmenu.x}
                     y={repositorySubmenu.y}
                     onTopAction={onTopAction}
@@ -669,6 +677,7 @@ const RepositorySubmenu = React.forwardRef<
         repository: RepositoryContextInfo;
         branches: Branch[];
         tags: GitTag[];
+        worktrees: GitWorktree[];
         x: number;
         y: number;
         onTopAction: (
@@ -680,7 +689,7 @@ const RepositorySubmenu = React.forwardRef<
         onOpenBranchMenu: (branch: Branch, repoRoot: string, anchor: { x: number; y: number }) => void;
     }
 >(function RepositorySubmenu(
-    { repository, branches, tags, x, y, onTopAction, onOpenBranchMenu },
+    { repository, branches, tags, worktrees, x, y, onTopAction, onOpenBranchMenu },
     ref,
 ): React.ReactElement {
     const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
@@ -760,6 +769,11 @@ const RepositorySubmenu = React.forwardRef<
                 label="Checkout Tag or Revision..."
                 alignWithIconLabel
                 onClick={() => onTopAction("checkoutRevision", repository.root)}
+            />
+            <TopActionRow
+                icon={<GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />}
+                label={`Worktrees...${worktrees.length ? ` (${worktrees.length})` : ""}`}
+                onClick={() => onTopAction("worktrees", repository.root)}
             />
             <Separator />
             <SectionTitle label={`Recent Branches in ${repository.name}`} />

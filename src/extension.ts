@@ -12,7 +12,7 @@ import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
 import { MergeEditorPanel } from "./views/MergeEditorPanel";
 import { NoWorkspaceViewProvider } from "./views/NoWorkspaceViewProvider";
 import { ProjectBranchComparisonPanel } from "./views/ProjectBranchComparisonPanel";
-import type { Branch, CommitDetail } from "./types";
+import type { Branch, CommitDetail, GitWorktree } from "./types";
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
@@ -45,13 +45,27 @@ import {
     RepositoryContextService,
     createRepositoryScopedExecutor,
     createRepositoryScopedGitOps,
+    type RepositoryEntry,
 } from "./services/RepositoryContextService";
 import { checkoutBranch, isValidBranchName } from "./services/gitHelpers";
+import {
+    buildWorktreeAddArgs,
+    buildWorktreeRemoveArgs,
+    findWorktreeForBranch,
+    getDefaultWorktreeLocation,
+    getDefaultWorktreeProjectName,
+    isLocalBranchCheckedOut,
+    isCurrentWorktreePath,
+    parseWorktreeListPorcelain,
+    resolveAndValidateWorktreeTarget,
+    resolveRemoteBranchTarget,
+} from "./services/worktreeService";
 import {
     hasAdjacentHunk,
     parseChangedNewFileHunks,
     type DiffHunkRange,
 } from "./services/diffNavigation";
+import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
@@ -684,15 +698,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     ? repositoryService.listRepositories().find((entry) => entry.root === repoRoot)
                     : null) ?? getCurrentRepository();
             if (!targetRepository) return;
-            const branches =
-                targetRepository.root === getCurrentRepository()?.root
-                    ? currentBranches
-                    : await targetRepository.gitOps.getBranches();
+            const branches = await getBranchesForRepository(targetRepository);
             const branch = branches.find((b) => b.name === branchName);
             if (!branch) return;
+            if (action === "openWorktree") {
+                await openWorktreeForBranch(targetRepository, branch);
+                return;
+            }
             if (targetRepository.root !== getCurrentRepository()?.root) {
                 repositoryService.switchRepository(targetRepository.root);
                 await applyCurrentRepositoryContext({ resetGraph: true });
+            }
+            if (action === "newWorktreeFrom") {
+                await openNewWorktreeDialog(targetRepository, branch);
+                return;
             }
             const item: { branch: Branch } = { branch };
             await vscode.commands.executeCommand(`intelligit.${action}`, item);
@@ -757,9 +776,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 case "newBranch":
                     await createBranchFromPopup(targetRepository);
                     return;
+                case "worktrees":
+                    if (targetRepository) {
+                        await openWorktreesDialog(targetRepository);
+                    }
+                    return;
             }
         }),
     );
+
+    context.subscriptions.push(
+        commitGraph.onChooseWorktreeLocation(async ({ currentLocation }) => {
+            const picked = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                openLabel: "Select",
+                defaultUri: currentLocation ? vscode.Uri.file(currentLocation) : undefined,
+            });
+            const selected = picked?.[0]?.fsPath;
+            if (selected) {
+                commitGraph.setWorktreeLocationSelected(selected);
+            }
+        }),
+    );
+
+    context.subscriptions.push(commitGraph.onCreateWorktree(handleCreateWorktreeRequest));
+    context.subscriptions.push(commitGraph.onOpenWorktree(handleOpenWorktreeRequest));
+    context.subscriptions.push(commitGraph.onDeleteWorktree(handleDeleteWorktreeRequest));
 
     context.subscriptions.push(
         commitGraph.onCommitAction(async (payload) => {
@@ -838,6 +882,199 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         commitInfo.clear();
         currentCommitDetail = null;
     };
+
+    async function getBranchesForRepository(repository: RepositoryEntry): Promise<Branch[]> {
+        return repository.root === getCurrentRepository()?.root
+            ? currentBranches
+            : await repository.gitOps.getBranches();
+    }
+
+    async function listWorktrees(repository: RepositoryEntry): Promise<GitWorktree[]> {
+        return parseWorktreeListPorcelain(
+            await repository.executor.run(["worktree", "list", "--porcelain"]),
+        );
+    }
+
+    async function refreshRepositoryWorktrees(repository: RepositoryEntry): Promise<GitWorktree[]> {
+        const worktrees = await listWorktrees(repository);
+        commitGraph.setRepositoryWorktrees(repository.root, worktrees);
+        return worktrees;
+    }
+
+    async function openWorktreesDialog(repository: RepositoryEntry): Promise<void> {
+        try {
+            await refreshRepositoryWorktrees(repository);
+            commitGraph.openWorktreesDialog(repository.root);
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to load worktrees: ${message}`);
+        }
+    }
+
+    async function openWorktreeForBranch(
+        repository: RepositoryEntry,
+        branch: Branch,
+    ): Promise<void> {
+        try {
+            const worktrees = await refreshRepositoryWorktrees(repository);
+            const worktree = findWorktreeForBranch(branch, worktrees);
+            if (!worktree) {
+                vscode.window.showWarningMessage(
+                    `No worktree is checked out for '${branch.name}'.`,
+                );
+                return;
+            }
+            await openWorktreePath(worktree.path);
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to open worktree: ${message}`);
+        }
+    }
+
+    async function handleOpenWorktreeRequest(payload: { repoRoot: string; path: string }): Promise<void> {
+        try {
+            const repository = repositoryService
+                .listRepositories()
+                .find((entry) => entry.root === payload.repoRoot);
+            if (!repository) throw new Error("Repository was not found for the requested worktree.");
+
+            const worktrees = await refreshRepositoryWorktrees(repository);
+            const worktree = findWorktreeByPath(worktrees, payload.path);
+            if (!worktree) throw new Error(`Worktree was not found: ${payload.path}`);
+
+            await openWorktreePath(worktree.path);
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to open worktree: ${message}`);
+        }
+    }
+
+    async function handleDeleteWorktreeRequest(payload: { repoRoot: string; path: string }): Promise<void> {
+        try {
+            const repository = repositoryService
+                .listRepositories()
+                .find((entry) => entry.root === payload.repoRoot);
+            if (!repository) throw new Error("Repository was not found for the requested worktree.");
+
+            const worktrees = await listWorktrees(repository);
+            const worktree = findWorktreeByPath(worktrees, payload.path);
+            if (!worktree) throw new Error(`Worktree was not found: ${payload.path}`);
+            if (isCurrentWorktreePath(repository.root, worktree.path)) {
+                throw new Error("The current worktree cannot be deleted from this window.");
+            }
+
+            await runWithNotificationProgress(`Deleting worktree ${path.basename(worktree.path)}...`, async () => {
+                await repository.executor.run(buildWorktreeRemoveArgs(worktree.path));
+            });
+            commitGraph.setWorktreeDeleteResult({ success: true, path: worktree.path });
+            await refreshRepositoryWorktrees(repository);
+            vscode.window.showInformationMessage(`Deleted worktree at ${worktree.path}.`);
+        } catch (error) {
+            const message = getErrorMessage(error);
+            commitGraph.setWorktreeDeleteResult({ success: false, message });
+            vscode.window.showErrorMessage(`Failed to delete worktree: ${message}`);
+        }
+    }
+
+    async function openWorktreePath(worktreePath: string): Promise<void> {
+        await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(worktreePath), true);
+    }
+
+    function findWorktreeByPath(worktrees: GitWorktree[], worktreePath: string): GitWorktree | null {
+        return worktrees.find((worktree) => sameFsPath(worktree.path, worktreePath)) ?? null;
+    }
+
+    function sameFsPath(left: string, right: string): boolean {
+        const normalizedLeft = path.resolve(left);
+        const normalizedRight = path.resolve(right);
+        return process.platform === "win32"
+            ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+            : normalizedLeft === normalizedRight;
+    }
+
+    async function openNewWorktreeDialog(
+        repository: RepositoryEntry,
+        branch: Branch,
+    ): Promise<void> {
+        try {
+            const worktrees = await refreshRepositoryWorktrees(repository);
+            commitGraph.openWorktreeDialog({
+                repository: repository.info,
+                branch,
+                defaultLocation: getDefaultWorktreeLocation(repository.root),
+                defaultProjectName: getDefaultWorktreeProjectName(repository.root, branch.name),
+                worktrees,
+            });
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to open New Worktree dialog: ${message}`);
+        }
+    }
+
+    async function handleCreateWorktreeRequest(payload: CreateWorktreePayload): Promise<void> {
+        try {
+            const repository = repositoryService
+                .listRepositories()
+                .find((entry) => entry.root === payload.repoRoot);
+            if (!repository) {
+                throw new Error("Repository was not found for the requested worktree.");
+            }
+
+            const branches = await getBranchesForRepository(repository);
+            const branch = branches.find((item) => item.name === payload.branchName);
+            if (!branch) {
+                throw new Error(`Branch '${payload.branchName}' was not found.`);
+            }
+
+            const newBranchName = payload.createBranch ? payload.newBranchName?.trim() ?? "" : undefined;
+            if (payload.createBranch && (!newBranchName || !isValidBranchName(newBranchName))) {
+                throw new Error(`Invalid branch name '${newBranchName}'.`);
+            }
+
+            const targetPath = await resolveAndValidateWorktreeTarget(
+                payload.location,
+                payload.projectName,
+            );
+            const worktrees = parseWorktreeListPorcelain(
+                await repository.executor.run(["worktree", "list", "--porcelain"]),
+            );
+            if (!payload.createBranch && isLocalBranchCheckedOut(branch, worktrees)) {
+                throw new Error(
+                    `Local branch '${branch.name}' is already checked out. Enable New branch to create a worktree.`,
+                );
+            }
+
+            const remoteTarget = resolveRemoteBranchTarget(branch);
+            await runWithNotificationProgress(`Creating worktree ${payload.projectName.trim()}...`, async () => {
+                if (remoteTarget) {
+                    await repository.executor.run([
+                        "fetch",
+                        remoteTarget.remote,
+                        remoteTarget.remoteBranch,
+                        "--recurse-submodules=no",
+                        "--progress",
+                        "--prune",
+                    ]);
+                }
+                await repository.executor.run(
+                    buildWorktreeAddArgs({
+                        targetPath,
+                        fromBranch: branch.name,
+                        newBranchName,
+                    }),
+                );
+            });
+
+            commitGraph.setWorktreeCreateResult({ success: true, path: targetPath });
+            await refreshRepositoryWorktrees(repository);
+            vscode.window.showInformationMessage(`Created worktree at ${targetPath}.`);
+            await openWorktreePath(targetPath);
+        } catch (error) {
+            const message = getErrorMessage(error);
+            commitGraph.setWorktreeCreateResult({ success: false, message });
+            vscode.window.showErrorMessage(`Failed to create worktree: ${message}`);
+        }
+    }
 
     const checkoutBranchInAllRepositories = async (branchName: string): Promise<void> => {
         const repositories = repositoryService.listRepositories();

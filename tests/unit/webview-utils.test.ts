@@ -1,7 +1,8 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Branch, Commit } from "../../src/types";
+import type { Branch, Commit, GitWorktree } from "../../src/types";
+import { getAllRepositoriesBranchMenuItems } from "../../src/webviews/react/BranchColumn";
 import { renderHighlightedLabel } from "../../src/webviews/react/branch-column/highlight";
 import { getBranchMenuItems } from "../../src/webviews/react/branch-column/menu";
 import { buildPrefixTree, buildRemoteGroups } from "../../src/webviews/react/branch-column/treeModel";
@@ -46,10 +47,37 @@ describe("branch menu", () => {
         const items = getBranchMenuItems(makeBranch({ isCurrent: true, name: "main" }), "main");
         const actions = items.filter((item) => !item.separator).map((item) => item.action);
         expect(actions).toContain("newBranchFrom");
+        expect(actions).toContain("newWorktreeFrom");
+        expect(actions.indexOf("newWorktreeFrom")).toBe(actions.indexOf("newBranchFrom") + 1);
         expect(actions).toContain("updateBranch");
         expect(actions).toContain("pushBranch");
         expect(actions).toContain("renameBranch");
         expect(actions).not.toContain("deleteBranch");
+    });
+
+    it("builds non-current local branch menu with worktree action next to new branch", () => {
+        const items = getBranchMenuItems(makeBranch({ name: "feature/demo" }), "main");
+        const actions = items.filter((item) => !item.separator).map((item) => item.action);
+        expect(actions).toContain("newBranchFrom");
+        expect(actions).toContain("newWorktreeFrom");
+        expect(actions.indexOf("newWorktreeFrom")).toBe(actions.indexOf("newBranchFrom") + 1);
+    });
+
+    it("replaces checkout-only actions with open worktree for checked-out local branches", () => {
+        const checkedOutWorktree: GitWorktree = {
+            path: "/repo-feature",
+            branch: "feature/demo",
+            detached: false,
+        };
+        const items = getBranchMenuItems(makeBranch({ name: "feature/demo" }), "main", {
+            checkedOutWorktree,
+        });
+        const actions = items.filter((item) => !item.separator).map((item) => item.action);
+        expect(actions[0]).toBe("openWorktree");
+        expect(actions).toContain("newWorktreeFrom");
+        expect(actions).not.toContain("checkout");
+        expect(actions).not.toContain("checkoutAndRebase");
+        expect(actions).not.toContain("updateBranch");
     });
 
     it("builds remote-branch menu with delete and without rename/push", () => {
@@ -58,6 +86,7 @@ describe("branch menu", () => {
             "main",
         );
         const actions = items.filter((item) => !item.separator).map((item) => item.action);
+        expect(actions).toContain("newWorktreeFrom");
         expect(actions).toContain("deleteBranch");
         expect(actions).not.toContain("pushBranch");
         expect(actions).not.toContain("renameBranch");
@@ -70,6 +99,14 @@ describe("branch menu", () => {
         expect(newBranchFrom?.label).not.toContain(veryLong);
         const untrimmedLabel = `New Branch from '${veryLong}'...`;
         expect((newBranchFrom?.label ?? "").length).toBeLessThan(untrimmedLabel.length);
+    });
+
+    it("omits worktree creation from all-repositories branch menus", () => {
+        const items = getAllRepositoriesBranchMenuItems(makeBranch({ name: "feature/demo" }), "main");
+        const actions = items.filter((item) => !item.separator).map((item) => item.action);
+        expect(actions).toContain("checkout");
+        expect(actions).not.toContain("openWorktree");
+        expect(actions).not.toContain("newWorktreeFrom");
     });
 });
 

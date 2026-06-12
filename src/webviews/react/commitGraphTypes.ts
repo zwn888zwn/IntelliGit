@@ -6,6 +6,7 @@ import type {
     Commit,
     CommitDetail,
     GitTag,
+    GitWorktree,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -14,7 +15,9 @@ import type {
 
 export const BRANCH_ACTION_VALUES = [
     "checkout",
+    "openWorktree",
     "newBranchFrom",
+    "newWorktreeFrom",
     "checkoutAndRebase",
     "rebaseCurrentOnto",
     "mergeIntoCurrent",
@@ -30,6 +33,7 @@ export const BRANCH_POPUP_ACTION_VALUES = [
     "push",
     "newBranch",
     "checkoutRevision",
+    "worktrees",
     "switchRepository",
 ] as const;
 
@@ -52,6 +56,28 @@ export const COMMIT_ACTION_VALUES = [
 export type BranchAction = (typeof BRANCH_ACTION_VALUES)[number];
 export type BranchPopupAction = (typeof BRANCH_POPUP_ACTION_VALUES)[number];
 export type CommitAction = (typeof COMMIT_ACTION_VALUES)[number];
+
+export interface OpenWorktreeDialogPayload {
+    repository: RepositoryContextInfo;
+    branch: Branch;
+    defaultLocation: string;
+    defaultProjectName: string;
+    worktrees: GitWorktree[];
+}
+
+export interface CreateWorktreePayload {
+    repoRoot: string;
+    branchName: string;
+    createBranch: boolean;
+    newBranchName?: string;
+    projectName: string;
+    location: string;
+}
+
+export interface WorktreePathPayload {
+    repoRoot: string;
+    path: string;
+}
 
 export function isBranchAction(value: string): value is BranchAction {
     return BRANCH_ACTION_VALUES.includes(value as BranchAction);
@@ -76,6 +102,10 @@ export type CommitGraphOutbound =
           repoRoot?: string;
           allRepositories?: boolean;
       }
+    | { type: "chooseWorktreeLocation"; currentLocation?: string }
+    | { type: "createWorktree"; payload: CreateWorktreePayload }
+    | { type: "openWorktree"; payload: WorktreePathPayload }
+    | { type: "deleteWorktree"; payload: WorktreePathPayload }
     | {
           type: "branchPopupAction";
           action: BranchPopupAction;
@@ -106,10 +136,18 @@ export type CommitGraphInbound =
     | { type: "setRepositories"; repositories: RepositoryContextInfo[] }
     | { type: "setRepositoryBranches"; branchesByRoot: Record<string, Branch[]> }
     | { type: "setRepositoryTags"; tagsByRoot: Record<string, GitTag[]> }
+    | { type: "setRepositoryWorktrees"; worktreesByRoot: Record<string, GitWorktree[]> }
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "setSelectedBranch"; branch: string | null }
     | { type: "setFilterText"; text: string }
     | { type: "openBranchPopup" }
+    | { type: "openWorktreesDialog"; repoRoot: string }
+    | { type: "openWorktreeDialog"; payload: OpenWorktreeDialogPayload }
+    | { type: "worktreeLocationSelected"; location: string }
+    | { type: "worktreeCreateResult"; success: true; path: string }
+    | { type: "worktreeCreateResult"; success: false; message: string }
+    | { type: "worktreeDeleteResult"; success: true; path: string }
+    | { type: "worktreeDeleteResult"; success: false; message: string }
     | {
           type: "setCommitDetail";
           detail: CommitDetail;

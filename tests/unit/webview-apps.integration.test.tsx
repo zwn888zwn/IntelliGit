@@ -319,6 +319,203 @@ describe("CommitPanelApp integration", () => {
 });
 
 describe("CommitGraphApp integration", () => {
+    it("renders worktrees and sends open/delete messages", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        const rootHost = createRootHost();
+        void rootHost;
+
+        await import("../../src/webviews/react/CommitGraphApp");
+        await flush();
+
+        const repository = { repoId: ".", name: "repo", root: "/repo", color: "#4CAF50" };
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setRepositoryContext", repository },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setRepositories", repositories: [repository] },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setRepositoryWorktrees",
+                        worktreesByRoot: {
+                            "/repo": [
+                                { path: "/repo", branch: "main", detached: false },
+                                {
+                                    path: "/repo-feature",
+                                    branch: "feature/demo",
+                                    detached: false,
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "openWorktreesDialog", repoRoot: "/repo" },
+                }),
+            );
+        });
+        await flush();
+
+        expect(document.body.textContent).toContain("Worktrees");
+        expect(document.body.textContent).toContain("/repo-feature");
+        const linkedRow = Array.from(document.querySelectorAll('[role="row"]')).find((row) =>
+            row.textContent?.includes("/repo-feature"),
+        ) as HTMLElement;
+        expect(linkedRow).toBeTruthy();
+
+        const linkedButtons = Array.from(linkedRow.querySelectorAll("button"));
+        fireClick(linkedButtons.find((button) => button.textContent?.trim() === "Open") ?? null);
+        await flush();
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "openWorktree",
+            payload: { repoRoot: "/repo", path: "/repo-feature" },
+        });
+
+        fireClick(
+            linkedButtons.find((button) => button.textContent?.trim() === "Delete...") ?? null,
+        );
+        await flush();
+        const deleteButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Delete Worktree",
+        );
+        fireClick(deleteButton ?? null);
+        await flush();
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "deleteWorktree",
+            payload: { repoRoot: "/repo", path: "/repo-feature" },
+        });
+    });
+
+    it("renders the new worktree dialog and submits a new-branch payload", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        const rootHost = createRootHost();
+        void rootHost;
+
+        await import("../../src/webviews/react/CommitGraphApp");
+        await flush();
+
+        const branches = [
+            {
+                name: "main",
+                hash: "a1",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "feature/demo",
+                hash: "b2",
+                isRemote: false,
+                isCurrent: false,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "origin/main",
+                hash: "c3",
+                isRemote: true,
+                isCurrent: false,
+                remote: "origin",
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const repository = { repoId: ".", name: "repo", root: "/repo", color: "#4CAF50" };
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setRepositoryContext", repository },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setBranches", branches },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setRepositoryBranches", branchesByRoot: { "/repo": branches } },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "openWorktreeDialog",
+                        payload: {
+                            repository,
+                            branch: branches[0],
+                            defaultLocation: "/Users/me/projects",
+                            defaultProjectName: "repo-main",
+                            worktrees: [{ path: "/repo", branch: "main", detached: false }],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        expect(document.body.textContent).toContain("New Worktree");
+        expect(document.body.textContent).toContain("This local branch is already checked out");
+        const createButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Create Worktree"),
+        ) as HTMLButtonElement;
+        expect(createButton.disabled).toBe(true);
+
+        fireClick(document.querySelector('button[aria-label="Choose location"]'));
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "chooseWorktreeLocation",
+            currentLocation: "/Users/me/projects",
+        });
+
+        fireClick(document.querySelector('input[aria-label="New branch"]'));
+        fireInput(
+            document.querySelector('input[aria-label="New branch name"]') as HTMLInputElement,
+            "feature/worktree",
+        );
+        await flush();
+
+        const projectName = document.querySelector(
+            'input[aria-label="Project name"]',
+        ) as HTMLInputElement;
+        expect(projectName.value).toBe("repo-feature-worktree");
+        expect(createButton.disabled).toBe(false);
+        fireClick(createButton);
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "createWorktree",
+            payload: {
+                repoRoot: "/repo",
+                branchName: "main",
+                createBranch: true,
+                newBranchName: "feature/worktree",
+                projectName: "repo-feature-worktree",
+                location: "/Users/me/projects",
+            },
+        });
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "worktreeCreateResult", success: false, message: "failed" },
+                }),
+            );
+        });
+        await flush();
+        expect(document.body.textContent).toContain("failed");
+        expect(document.body.textContent).toContain("New Worktree");
+    });
+
     it("handles host messages, filtering, branch actions, and commit actions", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();

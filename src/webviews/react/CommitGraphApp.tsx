@@ -12,6 +12,7 @@ import type {
     Commit,
     CommitDetail,
     GitTag,
+    GitWorktree,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -23,6 +24,9 @@ import type {
     CommitAction,
     CommitGraphOutbound,
     CommitGraphInbound,
+    CreateWorktreePayload,
+    OpenWorktreeDialogPayload,
+    WorktreePathPayload,
 } from "./commitGraphTypes";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import theme from "./commit-panel/theme";
@@ -101,6 +105,7 @@ function App(): React.ReactElement {
     const [branches, setBranches] = useState<Branch[]>([]);
     const [repositoryBranches, setRepositoryBranches] = useState<Record<string, Branch[]>>({});
     const [repositoryTags, setRepositoryTags] = useState<Record<string, GitTag[]>>({});
+    const [repositoryWorktrees, setRepositoryWorktrees] = useState<Record<string, GitWorktree[]>>({});
     const [repositories, setRepositories] = useState<RepositoryContextInfo[]>([]);
     const [repository, setRepository] = useState<RepositoryContextInfo | null>(null);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
@@ -124,6 +129,21 @@ function App(): React.ReactElement {
         ThemeFolderIconMap | undefined
     >(undefined);
     const [branchPopupRequest, setBranchPopupRequest] = useState<{ seq: number } | null>(null);
+    const [worktreeDialog, setWorktreeDialog] = useState<OpenWorktreeDialogPayload | null>(null);
+    const [worktreesDialogRepoRoot, setWorktreesDialogRepoRoot] = useState<string | null>(null);
+    const [worktreeLocationSelection, setWorktreeLocationSelection] = useState<{
+        seq: number;
+        location: string;
+    } | null>(null);
+    const [worktreeCreateError, setWorktreeCreateError] = useState<{
+        success: false;
+        message: string;
+    } | null>(null);
+    const [worktreeDeleteResult, setWorktreeDeleteResult] = useState<
+        | { seq: number; success: true; path: string }
+        | { seq: number; success: false; message: string }
+        | null
+    >(null);
     const [iconFonts, setIconFonts] = useState<ThemeIconFont[]>([]);
     const [branchWidth, setBranchWidth] = useState(() => {
         try {
@@ -222,6 +242,9 @@ function App(): React.ReactElement {
                 case "setRepositoryTags":
                     setRepositoryTags(data.tagsByRoot);
                     break;
+                case "setRepositoryWorktrees":
+                    setRepositoryWorktrees(data.worktreesByRoot);
+                    break;
                 case "setSelectedBranch":
                     setSelectedBranch(data.branch ?? null);
                     break;
@@ -230,6 +253,44 @@ function App(): React.ReactElement {
                     break;
                 case "openBranchPopup":
                     setBranchPopupRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1 }));
+                    break;
+                case "openWorktreesDialog":
+                    setWorktreesDialogRepoRoot(data.repoRoot);
+                    setWorktreeDeleteResult(null);
+                    break;
+                case "openWorktreeDialog":
+                    setWorktreeDialog(data.payload);
+                    setWorktreeLocationSelection(null);
+                    setWorktreeCreateError(null);
+                    break;
+                case "worktreeLocationSelected":
+                    setWorktreeLocationSelection((prev) => ({
+                        seq: (prev?.seq ?? 0) + 1,
+                        location: data.location,
+                    }));
+                    break;
+                case "worktreeCreateResult":
+                    if (data.success) {
+                        setWorktreeDialog(null);
+                        setWorktreeCreateError(null);
+                    } else {
+                        setWorktreeCreateError(data);
+                    }
+                    break;
+                case "worktreeDeleteResult":
+                    setWorktreeDeleteResult((prev) =>
+                        data.success
+                            ? {
+                                  seq: (prev?.seq ?? 0) + 1,
+                                  success: true,
+                                  path: data.path,
+                              }
+                            : {
+                                  seq: (prev?.seq ?? 0) + 1,
+                                  success: false,
+                                  message: data.message,
+                              },
+                    );
                     break;
                 case "setCommitDetail":
                     setSelectedDetail(data.detail);
@@ -331,6 +392,23 @@ function App(): React.ReactElement {
         [],
     );
 
+    const handleChooseWorktreeLocation = useCallback((currentLocation: string) => {
+        vscode.postMessage({ type: "chooseWorktreeLocation", currentLocation });
+    }, []);
+
+    const handleCreateWorktree = useCallback((payload: CreateWorktreePayload) => {
+        setWorktreeCreateError(null);
+        vscode.postMessage({ type: "createWorktree", payload });
+    }, []);
+
+    const handleOpenWorktree = useCallback((payload: WorktreePathPayload) => {
+        vscode.postMessage({ type: "openWorktree", payload });
+    }, []);
+
+    const handleDeleteWorktree = useCallback((payload: WorktreePathPayload) => {
+        vscode.postMessage({ type: "deleteWorktree", payload });
+    }, []);
+
     const handleCommitAction = useCallback((action: CommitAction, hash: string) => {
         const commit = commits.find((item) => item.hash === hash);
         if (!commit) return;
@@ -356,13 +434,31 @@ function App(): React.ReactElement {
                         branches={branches}
                         repositoryBranches={repositoryBranches}
                         repositoryTags={repositoryTags}
+                        repositoryWorktrees={repositoryWorktrees}
                         repositories={repositories}
                         repository={repository}
                         selectedBranch={selectedBranch}
                         openPopupRequest={branchPopupRequest}
+                        worktreeDialog={worktreeDialog}
+                        worktreesDialogRepoRoot={worktreesDialogRepoRoot}
+                        worktreeLocationSelection={worktreeLocationSelection}
+                        worktreeCreateError={worktreeCreateError}
+                        worktreeDeleteResult={worktreeDeleteResult}
                         onSelectBranch={handleSelectBranch}
                         onBranchAction={handleBranchAction}
                         onBranchPopupAction={handleBranchPopupAction}
+                        onChooseWorktreeLocation={handleChooseWorktreeLocation}
+                        onCreateWorktree={handleCreateWorktree}
+                        onOpenWorktree={handleOpenWorktree}
+                        onDeleteWorktree={handleDeleteWorktree}
+                        onCloseWorktreeDialog={() => {
+                            setWorktreeDialog(null);
+                            setWorktreeCreateError(null);
+                        }}
+                        onCloseWorktreesDialog={() => {
+                            setWorktreesDialogRepoRoot(null);
+                            setWorktreeDeleteResult(null);
+                        }}
                         folderIcon={branchFolderIcon}
                         folderExpandedIcon={branchFolderExpandedIcon}
                         folderIconsByName={branchFolderIconsByName}

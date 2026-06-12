@@ -478,12 +478,20 @@ describe("view providers integration", () => {
         const selected = vi.fn();
         const branchFilter = vi.fn();
         const branchAction = vi.fn();
+        const chooseWorktreeLocation = vi.fn();
+        const createWorktree = vi.fn();
+        const openWorktree = vi.fn();
+        const deleteWorktree = vi.fn();
         const commitAction = vi.fn();
         const openCommitFileDiff = vi.fn();
 
         provider.onCommitSelected(selected);
         provider.onBranchFilterChanged(branchFilter);
         provider.onBranchAction(branchAction);
+        provider.onChooseWorktreeLocation(chooseWorktreeLocation);
+        provider.onCreateWorktree(createWorktree);
+        provider.onOpenWorktree(openWorktree);
+        provider.onDeleteWorktree(deleteWorktree);
         provider.onCommitAction(commitAction);
         provider.onOpenCommitFileDiff(openCommitFileDiff);
 
@@ -517,6 +525,100 @@ describe("view providers integration", () => {
 
         await webview.send({ type: "branchAction", action: "checkout", branchName: "main" });
         expect(branchAction).toHaveBeenCalledWith({ action: "checkout", branchName: "main" });
+
+        await webview.send({ type: "chooseWorktreeLocation", currentLocation: "/repos" });
+        expect(chooseWorktreeLocation).toHaveBeenCalledWith({ currentLocation: "/repos" });
+
+        await webview.send({
+            type: "createWorktree",
+            payload: {
+                repoRoot: "/repo",
+                branchName: "main",
+                createBranch: true,
+                newBranchName: "feature/worktree",
+                projectName: "repo-feature-worktree",
+                location: "/repos",
+            },
+        });
+        expect(createWorktree).toHaveBeenCalledWith({
+            repoRoot: "/repo",
+            branchName: "main",
+            createBranch: true,
+            newBranchName: "feature/worktree",
+            projectName: "repo-feature-worktree",
+            location: "/repos",
+        });
+
+        await webview.send({
+            type: "openWorktree",
+            payload: { repoRoot: "/repo", path: "/repo-feature" },
+        });
+        expect(openWorktree).toHaveBeenCalledWith({
+            repoRoot: "/repo",
+            path: "/repo-feature",
+        });
+
+        await webview.send({
+            type: "deleteWorktree",
+            payload: { repoRoot: "/repo", path: "/repo-feature" },
+        });
+        expect(deleteWorktree).toHaveBeenCalledWith({
+            repoRoot: "/repo",
+            path: "/repo-feature",
+        });
+
+        provider.openWorktreeDialog({
+            repository: { repoId: ".", name: "repo", root: "/repo", color: "#4CAF50" },
+            branch: {
+                name: "main",
+                hash: "abc",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+            defaultLocation: "/repos",
+            defaultProjectName: "repo-main",
+            worktrees: [{ path: "/repo", branch: "main", detached: false }],
+        });
+        expect(postMessageSpy).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "openWorktreeDialog" }),
+        );
+        provider.setWorktreeLocationSelected("/next");
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "worktreeLocationSelected",
+            location: "/next",
+        });
+        provider.setWorktreeCreateResult({ success: false, message: "failed" });
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "worktreeCreateResult",
+            success: false,
+            message: "failed",
+        });
+        provider.setRepositoryWorktrees("/repo", [
+            { path: "/repo", branch: "main", detached: false },
+            { path: "/repo-feature", branch: "feature/demo", detached: false },
+        ]);
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "setRepositoryWorktrees",
+            worktreesByRoot: {
+                "/repo": [
+                    { path: "/repo", branch: "main", detached: false },
+                    { path: "/repo-feature", branch: "feature/demo", detached: false },
+                ],
+            },
+        });
+        provider.openWorktreesDialog("/repo");
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "openWorktreesDialog",
+            repoRoot: "/repo",
+        });
+        provider.setWorktreeDeleteResult({ success: false, message: "dirty worktree" });
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "worktreeDeleteResult",
+            success: false,
+            message: "dirty worktree",
+        });
 
         await webview.send({ type: "commitAction", action: "copyRevision", hash: "abc1234" });
         expect(commitAction).toHaveBeenCalledWith({
