@@ -241,19 +241,26 @@ export function BranchColumn({
         [setExpandedFolders],
     );
 
-    const handleBranchContextMenu = useCallback((event: React.MouseEvent, branch: Branch) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const row = event.currentTarget as HTMLElement;
-        const { anchorX, anchorY } = computeAnchorPosition(row, event.clientX + 2);
-        setContextMenu({ x: anchorX, y: anchorY, branch });
-    }, []);
+    const currentRepositoryRoot = repository?.root;
+    const handleBranchContextMenu = useCallback(
+        (event: React.MouseEvent, branch: Branch) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const row = event.currentTarget as HTMLElement;
+            const { anchorX, anchorY } = computeAnchorPosition(row, event.clientX + 2);
+            setContextMenu({ x: anchorX, y: anchorY, branch, repoRoot: currentRepositoryRoot });
+        },
+        [currentRepositoryRoot],
+    );
 
-    const openBranchContextMenuFromRow = useCallback((row: HTMLElement, branch: Branch): void => {
-        const rowRect = row.getBoundingClientRect();
-        const { anchorX, anchorY } = computeAnchorPosition(row, rowRect.left + 22);
-        setContextMenu({ x: anchorX, y: anchorY, branch });
-    }, []);
+    const openBranchContextMenuFromRow = useCallback(
+        (row: HTMLElement, branch: Branch): void => {
+            const rowRect = row.getBoundingClientRect();
+            const { anchorX, anchorY } = computeAnchorPosition(row, rowRect.left + 22);
+            setContextMenu({ x: anchorX, y: anchorY, branch, repoRoot: currentRepositoryRoot });
+        },
+        [currentRepositoryRoot],
+    );
 
     const handleContextMenuAction = useCallback(
         (action: string) => {
@@ -444,6 +451,7 @@ export function BranchColumn({
                         onBranchPopupAction(action, root, refName, allRepositories);
                     }}
                     onOpenBranchMenu={(branch, repoRoot, anchor, options) => {
+                        setBranchPopupOpen(false);
                         setContextMenu({
                             branch,
                             repoRoot,

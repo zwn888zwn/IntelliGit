@@ -39,7 +39,7 @@ interface Props {
     repository: RepositoryContextInfo | null;
     repositoryBranches: Record<string, Branch[]>;
     repositoryTags: Record<string, GitTag[]>;
-    repositoryWorktrees: Record<string, GitWorktree[]>;
+    repositoryWorktrees?: Record<string, GitWorktree[]>;
     onTopAction: (
         action: BranchPopupAction,
         root?: string,
@@ -61,7 +61,7 @@ export function BranchPopupOverlay({
     repository,
     repositoryBranches,
     repositoryTags,
-    repositoryWorktrees,
+    repositoryWorktrees = {},
     onTopAction,
     onOpenBranchMenu,
     onClose,

@@ -2,7 +2,7 @@
 
 import React, { act } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { Branch, Commit } from "../../src/types";
+import type { Branch, Commit, RepositoryContextInfo } from "../../src/types";
 import { BranchColumn } from "../../src/webviews/react/BranchColumn";
 import { CommitList } from "../../src/webviews/react/CommitList";
 import { ContextMenu } from "../../src/webviews/react/shared/components/ContextMenu";
@@ -81,11 +81,19 @@ describe("BranchColumn integration", () => {
                 behind: 0,
             },
         ];
+        const repository: RepositoryContextInfo = {
+            repoId: "repo-a",
+            name: "repo-a",
+            root: "/repo-a",
+            relativePath: "repo-a",
+            color: "#4CAF50",
+        };
         const onSelectBranch = vi.fn();
         const onBranchAction = vi.fn();
         const { root, container } = mount(
             <BranchColumn
                 branches={branches}
+                repository={repository}
                 selectedBranch={null}
                 onSelectBranch={onSelectBranch}
                 onBranchAction={onBranchAction}
@@ -120,7 +128,7 @@ describe("BranchColumn integration", () => {
         act(() => {
             renameItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main", undefined, undefined);
+        expect(onBranchAction).toHaveBeenCalledWith("renameBranch", "main", "/repo-a", undefined);
 
         unmount(root, container);
     });

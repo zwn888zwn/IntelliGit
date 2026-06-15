@@ -510,10 +510,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // --- Refresh service ---
 
-    let openConflictSession: (labels?: {
+    type MergeConflictSessionOptions = {
         sourceBranch?: string;
         targetBranch?: string;
-    }) => Promise<void> = async () => undefined;
+        repository?: RepositoryEntry;
+    };
+
+    let openConflictSession: (options?: MergeConflictSessionOptions) => Promise<void> =
+        async () => undefined;
 
     const refreshService = new RefreshService(
         {
@@ -529,8 +533,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 });
             },
             onMergeConflictsDetected: async (count) => {
-                if (MergeConflictSessionPanel.isOpen()) return;
+                const repository = getCurrentRepository();
+                if (repository && MergeConflictSessionPanel.isOpen(repository.root)) return;
                 await openConflictSession({
+                    repository: repository ?? undefined,
                     targetBranch: currentBranches.find((branch) => branch.isCurrent)?.name,
                 });
                 vscode.window.showWarningMessage(
@@ -545,17 +551,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     let isFinalizingMerge = false;
 
-    const finalizeMergeIfReady = async (): Promise<boolean> => {
+    const ensureRepositoryContextActive = async (repository: RepositoryEntry): Promise<void> => {
+        if (repository.root === getCurrentRepository()?.root) return;
+        if (repositoryService.switchRepository(repository.root)) {
+            await applyCurrentRepositoryContext({ resetGraph: true });
+        }
+    };
+
+    const finalizeMergeIfReady = async (
+        repository: RepositoryEntry = requireCurrentRepository(),
+    ): Promise<boolean> => {
         if (isFinalizingMerge) return false;
-        const conflicts = await gitOps.getConflictFilesDetailed();
+        const conflicts = await repository.gitOps.getConflictFilesDetailed();
         if (conflicts.length > 0) return false;
-        if (!(await gitOps.isMergeInProgress())) return false;
+        if (!(await repository.gitOps.isMergeInProgress())) return false;
 
         isFinalizingMerge = true;
         try {
-            const message = (await gitOps.getPendingCommitMessage()) || "Merge commit";
+            await ensureRepositoryContextActive(repository);
+            const message = (await repository.gitOps.getPendingCommitMessage()) || "Merge commit";
             await runWithNotificationProgress("Committing merge...", async () => {
-                await gitOps.commit(message, false);
+                await repository.gitOps.commit(message, false);
             });
             vscode.window.showInformationMessage("Merge committed successfully.");
             await vscode.commands.executeCommand("intelligit.refresh");
@@ -566,19 +582,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
 
     const handleConflictStateChanged = async (
+        repository: RepositoryEntry,
         resolvedPath?: string,
         refreshSession: boolean = true,
     ): Promise<void> => {
+        await ensureRepositoryContextActive(repository);
         await refreshService.refreshConflictUi();
         if (resolvedPath && refreshSession) {
-            await MergeConflictSessionPanel.refreshIfOpen({ resolvedPath });
+            await MergeConflictSessionPanel.refreshIfOpen({
+                resolvedPath,
+                repoRoot: repository.root,
+            });
         }
-        await finalizeMergeIfReady();
+        await finalizeMergeIfReady(repository);
     };
 
-    const openBuiltInMergeEditorForFile = async (filePath: string): Promise<void> => {
+    const openBuiltInMergeEditorForFile = async (
+        repository: RepositoryEntry,
+        filePath: string,
+    ): Promise<void> => {
         const fileUri = vscode.Uri.file(
-            path.join(requireCurrentRepository().root, assertRepoRelativePath(filePath)),
+            path.join(repository.root, assertRepoRelativePath(filePath)),
         );
         try {
             await vscode.commands.executeCommand("git.openMergeEditor", fileUri);
@@ -597,9 +621,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             sourceBranch?: string;
             targetBranch?: string;
         },
+        repository: RepositoryEntry = requireCurrentRepository(),
     ): Promise<void> => {
         const safePath = assertRepoRelativePath(filePath);
-        const repository = requireCurrentRepository();
+        await ensureRepositoryContextActive(repository);
         const preferExternal = getPreferExternalMergeTool();
 
         if (preferExternal && getJetBrainsMergeToolPath()) {
@@ -607,8 +632,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 safePath,
                 repository.root,
                 repository.gitOps,
-                () => refreshService.refreshConflictUi(),
-                openBuiltInMergeEditorForFile,
+                async () => {
+                    await ensureRepositoryContextActive(repository);
+                    await refreshService.refreshConflictUi();
+                },
+                (pathToOpen) => openBuiltInMergeEditorForFile(repository, pathToOpen),
             );
             if (opened) return;
         }
@@ -625,23 +653,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 theirsSourceLabel: labels?.sourceBranch,
             },
             async () => {
-                await handleConflictStateChanged(safePath);
+                await handleConflictStateChanged(repository, safePath);
             },
         );
     };
 
-    openConflictSession = async (labels?: {
-        sourceBranch?: string;
-        targetBranch?: string;
-    }): Promise<void> => {
-        await MergeConflictSessionPanel.open(context.extensionUri, gitOps, labels ?? {}, {
-            onOpenMergeConflict: async (filePath) => {
-                await openMergeConflictForFile(filePath, labels);
+    openConflictSession = async (options: MergeConflictSessionOptions = {}): Promise<void> => {
+        const repository = options.repository ?? getCurrentRepository();
+        if (!repository) return;
+        await ensureRepositoryContextActive(repository);
+        const labels = {
+            sourceBranch: options.sourceBranch,
+            targetBranch: options.targetBranch,
+        };
+        await MergeConflictSessionPanel.open(
+            context.extensionUri,
+            repository.gitOps,
+            labels,
+            {
+                onOpenMergeConflict: async (filePath) => {
+                    await openMergeConflictForFile(filePath, labels, repository);
+                },
+                onConflictStateChanged: async (resolvedPath) => {
+                    await handleConflictStateChanged(repository, resolvedPath, false);
+                },
             },
-            onConflictStateChanged: async (resolvedPath) => {
-                await handleConflictStateChanged(resolvedPath, false);
-            },
-        });
+            { repoRoot: repository.root },
+        );
     };
 
     // --- Register view providers ---
@@ -1405,14 +1443,38 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
     };
 
+    const getUriFromUnknown = (value: unknown): vscode.Uri | null => {
+        if (!value || typeof value !== "object") return null;
+        const maybe = value as { scheme?: unknown; fsPath?: unknown };
+        return typeof maybe.scheme === "string" && typeof maybe.fsPath === "string"
+            ? (value as vscode.Uri)
+            : null;
+    };
+
     const resolveConflictPath = (ctx: unknown): string | null =>
         isFilePathContext(ctx) ? ctx.filePath : null;
+
+    const resolveConflictRepository = (ctx: unknown): RepositoryEntry | null => {
+        if (!ctx || typeof ctx !== "object") return getCurrentRepository();
+        const maybe = ctx as { uri?: unknown; repoRoot?: unknown };
+        const repoRoot = typeof maybe.repoRoot === "string" ? maybe.repoRoot : undefined;
+        if (repoRoot) {
+            const repository = repositoryService
+                .listRepositories()
+                .find((entry) => entry.root === repoRoot);
+            if (repository) return repository;
+        }
+        const uri = getUriFromUnknown(maybe.uri);
+        return repositoryService.getRepositoryForUri(uri ?? undefined) ?? getCurrentRepository();
+    };
 
     context.subscriptions.push(
         vscode.commands.registerCommand("intelligit.openMergeConflict", async (ctx: unknown) => {
             const filePath = resolveConflictPath(ctx);
             if (!filePath) return;
-            await openMergeConflictForFile(filePath);
+            const repository = resolveConflictRepository(ctx);
+            if (!repository) return;
+            await openMergeConflictForFile(filePath, undefined, repository);
         }),
         vscode.commands.registerCommand("intelligit.compareWithRevision", async (ctx?: unknown) => {
             const repository = resolveRepositoryForEditorContext(ctx);
@@ -1489,12 +1551,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             },
         ),
         vscode.commands.registerCommand("intelligit.openConflictSession", async () => {
-            const conflicts = await gitOps.getConflictFilesDetailed();
+            const repository = getCurrentRepository();
+            if (!repository) {
+                vscode.window.showInformationMessage("No unresolved merge conflicts found.");
+                return;
+            }
+            const conflicts = await repository.gitOps.getConflictFilesDetailed();
             if (conflicts.length === 0) {
                 vscode.window.showInformationMessage("No unresolved merge conflicts found.");
                 return;
             }
-            await openConflictSession();
+            await openConflictSession({ repository });
         }),
         vscode.commands.registerCommand("intelligit.detectJetBrainsMergeTool", async () => {
             await detectAndPickJetBrainsMergeToolPath();
@@ -1504,27 +1571,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             async (ctx: unknown) => {
                 const filePath = resolveConflictPath(ctx);
                 if (!filePath) return;
+                const repository = resolveConflictRepository(ctx);
+                if (!repository) return;
+                await ensureRepositoryContextActive(repository);
                 await openJetBrainsMergeToolForFile(
                     filePath,
-                    requireCurrentRepository().root,
-                    gitOps,
-                    () => refreshService.refreshConflictUi(),
-                    openBuiltInMergeEditorForFile,
+                    repository.root,
+                    repository.gitOps,
+                    async () => {
+                        await ensureRepositoryContextActive(repository);
+                        await refreshService.refreshConflictUi();
+                    },
+                    (pathToOpen) => openBuiltInMergeEditorForFile(repository, pathToOpen),
                 );
             },
         ),
         vscode.commands.registerCommand("intelligit.conflictAcceptYours", async (ctx: unknown) => {
             const filePath = resolveConflictPath(ctx);
             if (!filePath) return;
+            const repository = resolveConflictRepository(ctx);
+            if (!repository) return;
             try {
                 await runWithNotificationProgress(
                     `Accepting yours for ${filePath}...`,
                     async () => {
-                        await gitOps.acceptConflictSide(filePath, "ours");
+                        await repository.gitOps.acceptConflictSide(filePath, "ours");
                     },
                 );
                 vscode.window.showInformationMessage(`Accepted yours for ${filePath}`);
-                await refreshService.refreshConflictUi();
+                await handleConflictStateChanged(repository, filePath);
             } catch (error) {
                 const message = getErrorMessage(error);
                 vscode.window.showErrorMessage(`Accept yours failed: ${message}`);
@@ -1533,15 +1608,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("intelligit.conflictAcceptTheirs", async (ctx: unknown) => {
             const filePath = resolveConflictPath(ctx);
             if (!filePath) return;
+            const repository = resolveConflictRepository(ctx);
+            if (!repository) return;
             try {
                 await runWithNotificationProgress(
                     `Accepting theirs for ${filePath}...`,
                     async () => {
-                        await gitOps.acceptConflictSide(filePath, "theirs");
+                        await repository.gitOps.acceptConflictSide(filePath, "theirs");
                     },
                 );
                 vscode.window.showInformationMessage(`Accepted theirs for ${filePath}`);
-                await refreshService.refreshConflictUi();
+                await handleConflictStateChanged(repository, filePath);
             } catch (error) {
                 const message = getErrorMessage(error);
                 vscode.window.showErrorMessage(`Accept theirs failed: ${message}`);

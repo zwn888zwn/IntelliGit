@@ -1598,6 +1598,38 @@ describe("extension integration", () => {
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
+    it("opens conflict files in the repository from the command context uri", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/repo-b-conflicted.ts",
+            uri: {
+                scheme: "file",
+                fsPath: "/repo-b/src/repo-b-conflicted.ts",
+                path: "/repo-b/src/repo-b-conflicted.ts",
+            },
+        });
+
+        const vscode = await import("vscode");
+        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
+        expect(currentRepositoryRoot).toBe("/repo-b");
+        expect(createWebviewPanelMock).toHaveBeenCalledWith(
+            "intelligit.mergeEditor",
+            "Merge: src/repo-b-conflicted.ts",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(latestCommitGraphProvider!.setRepositoryContext).toHaveBeenCalledWith(
+            expect.objectContaining({ root: "/repo-b" }),
+        );
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
     it("opens conflict session when refresh detects new unresolved conflicts", async () => {
         const { activate } = await import("../../src/extension");
         const context = {

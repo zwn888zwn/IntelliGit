@@ -138,6 +138,97 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
+    it("BranchColumn opens branch actions from multi-repository popup submenus", async () => {
+        const repositories: RepositoryContextInfo[] = [
+            {
+                repoId: "pic",
+                name: "PicMath",
+                root: "/repos/PicMath",
+                color: "#ff5722",
+            },
+            {
+                repoId: "ios",
+                name: "IosLatex",
+                root: "/repos/IosLatex",
+                color: "#8bc34a",
+            },
+        ];
+        const picBranches: Branch[] = [
+            {
+                name: "pic-current",
+                hash: "abc1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const iosBranches: Branch[] = [
+            {
+                name: "ios-current",
+                hash: "def5678",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const onBranchAction = vi.fn();
+        const { root, container } = mount(
+            <BranchColumn
+                branches={picBranches}
+                repositories={repositories}
+                repository={repositories[0]}
+                repositoryBranches={{
+                    [repositories[0].root]: picBranches,
+                    [repositories[1].root]: iosBranches,
+                }}
+                repositoryTags={{
+                    [repositories[0].root]: [],
+                    [repositories[1].root]: [],
+                }}
+                selectedBranch={null}
+                openPopupRequest={{ seq: 1 }}
+                onSelectBranch={vi.fn()}
+                onBranchAction={onBranchAction}
+            />,
+        );
+        await flush();
+
+        const iosRow = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("IosLatex"),
+        ) as HTMLElement;
+        act(() => {
+            iosRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        await flush();
+
+        const iosCurrent = Array.from(document.querySelectorAll("button"))
+            .filter((button) => button.textContent?.includes("ios-current"))
+            .at(-1) as HTMLElement;
+        act(() => {
+            iosCurrent.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        await flush();
+
+        expect(document.body.textContent).not.toContain("Recent Branches in IosLatex");
+        const pushItem = Array.from(document.querySelectorAll(".intelligit-context-item")).find(
+            (item) => item.textContent?.includes("Push"),
+        ) as HTMLElement;
+        expect(pushItem).toBeTruthy();
+        act(() => {
+            pushItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onBranchAction).toHaveBeenCalledWith(
+            "pushBranch",
+            "ios-current",
+            "/repos/IosLatex",
+            undefined,
+        );
+
+        unmount(root, container);
+    });
+
     it("BranchPopupOverlay recent branches prefer local branches before remote branches", async () => {
         const repository: RepositoryContextInfo = {
             repoId: "repo",

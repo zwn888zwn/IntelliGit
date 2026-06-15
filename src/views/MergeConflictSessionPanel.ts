@@ -16,6 +16,10 @@ interface MergeConflictSessionCallbacks {
     onConflictStateChanged: (resolvedPath?: string) => Promise<void>;
 }
 
+interface MergeConflictSessionContext {
+    repoRoot?: string;
+}
+
 export class MergeConflictSessionPanel {
     private static currentPanel: MergeConflictSessionPanel | undefined;
 
@@ -28,9 +32,10 @@ export class MergeConflictSessionPanel {
     private constructor(
         panel: vscode.WebviewPanel,
         private readonly extensionUri: vscode.Uri,
-        private readonly gitOps: GitOps,
+        private gitOps: GitOps,
         labels: MergeConflictSessionLabels,
         private callbacks: MergeConflictSessionCallbacks,
+        private repoRoot?: string,
     ) {
         this.panel = panel;
         this.updateLabels(labels);
@@ -66,11 +71,11 @@ export class MergeConflictSessionPanel {
         gitOps: GitOps,
         labels: MergeConflictSessionLabels,
         callbacks: MergeConflictSessionCallbacks,
+        sessionContext: MergeConflictSessionContext = {},
     ): Promise<void> {
         const existing = MergeConflictSessionPanel.currentPanel;
         if (existing && !existing.disposed) {
-            existing.updateLabels(labels);
-            existing.updateCallbacks(callbacks);
+            existing.updateSession(gitOps, labels, callbacks, sessionContext);
             existing.panel.reveal(vscode.ViewColumn.Active);
             await existing.postSessionData({ closeWhenResolved: false });
             return;
@@ -93,23 +98,28 @@ export class MergeConflictSessionPanel {
             gitOps,
             labels,
             callbacks,
+            sessionContext.repoRoot,
         );
         MergeConflictSessionPanel.currentPanel = instance;
         await instance.postSessionData({ closeWhenResolved: false });
     }
 
-    static async refreshIfOpen(options: { resolvedPath?: string } = {}): Promise<void> {
+    static async refreshIfOpen(
+        options: { resolvedPath?: string; repoRoot?: string } = {},
+    ): Promise<void> {
         const existing = MergeConflictSessionPanel.currentPanel;
         if (!existing || existing.disposed) return;
+        if (options.repoRoot && existing.repoRoot && existing.repoRoot !== options.repoRoot) return;
         await existing.postSessionData({
             closeWhenResolved: true,
             resolvedPath: options.resolvedPath,
         });
     }
 
-    static isOpen(): boolean {
+    static isOpen(repoRoot?: string): boolean {
         const panel = MergeConflictSessionPanel.currentPanel;
-        return !!panel && !panel.disposed;
+        if (!panel || panel.disposed) return false;
+        return !repoRoot || !panel.repoRoot || panel.repoRoot === repoRoot;
     }
 
     private updateLabels(labels: MergeConflictSessionLabels): void {
@@ -121,6 +131,21 @@ export class MergeConflictSessionPanel {
 
     private updateCallbacks(callbacks: MergeConflictSessionCallbacks): void {
         this.callbacks = callbacks;
+    }
+
+    private updateSession(
+        gitOps: GitOps,
+        labels: MergeConflictSessionLabels,
+        callbacks: MergeConflictSessionCallbacks,
+        sessionContext: MergeConflictSessionContext,
+    ): void {
+        this.gitOps = gitOps;
+        this.repoRoot = sessionContext.repoRoot;
+        this.sourceBranch = "incoming branch";
+        this.targetBranch = "current branch";
+        this.updateLabels(labels);
+        this.updateCallbacks(callbacks);
+        this.lastFiles = [];
     }
 
     private async handleMessage(msg: { type?: unknown; filePath?: unknown }): Promise<void> {
