@@ -1349,6 +1349,64 @@ describe("extension integration", () => {
         expect(latestCommitGraphProvider!.openWorktreesDialog).toHaveBeenCalledWith("/repo-a");
     });
 
+    it("opens the new worktree dialog from the worktrees dialog create action", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitBranchPopupAction({
+            action: "newWorktree",
+            root: "/repo-b",
+        });
+        await waitForAsync();
+
+        expect(latestCommitGraphProvider!.openWorktreeDialog).toHaveBeenCalledWith(
+            expect.objectContaining({
+                repository: expect.objectContaining({ root: "/repo-b" }),
+                branch: expect.objectContaining({ name: "main" }),
+                defaultProjectName: "repo-b-main",
+            }),
+        );
+    });
+
+    it("opens all repository worktrees from the top-level branch popup action", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        let worktreeListCall = 0;
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "worktree" && args[1] === "list") {
+                worktreeListCall += 1;
+                const root = worktreeListCall === 1 ? "/repo-a" : "/repo-b";
+                return ["worktree " + root, "HEAD feed1234", "branch refs/heads/main", ""].join(
+                    "\n",
+                );
+            }
+            return defaultExecutorRunImpl(args);
+        });
+        await activate(context);
+
+        await latestCommitGraphProvider!.emitBranchPopupAction({
+            action: "worktrees",
+        });
+        await waitForAsync();
+
+        expect(latestCommitGraphProvider!.setRepositoryWorktrees).toHaveBeenCalledWith(
+            "/repo-a",
+            [{ path: "/repo-a", head: "feed1234", branch: "main", detached: false }],
+        );
+        expect(latestCommitGraphProvider!.setRepositoryWorktrees).toHaveBeenCalledWith(
+            "/repo-b",
+            [{ path: "/repo-b", head: "feed1234", branch: "main", detached: false }],
+        );
+        expect(latestCommitGraphProvider!.openWorktreesDialog).toHaveBeenCalledWith();
+    });
+
     it("deletes a linked worktree with git worktree remove", async () => {
         const { activate } = await import("../../src/extension");
         const context = {

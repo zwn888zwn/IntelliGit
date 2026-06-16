@@ -758,6 +758,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     context.subscriptions.push(
         commitGraph.onBranchPopupAction(async ({ action, root, refName, allRepositories }) => {
+            if (
+                action === "worktrees" &&
+                !root &&
+                repositoryService.listRepositories().length > 1
+            ) {
+                await openAllWorktreesDialog();
+                return;
+            }
             const targetRepository =
                 (root
                     ? repositoryService.listRepositories().find((entry) => entry.root === root)
@@ -766,7 +774,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 repositoryService.switchRepository(targetRepository.root);
                 await applyCurrentRepositoryContext({ resetGraph: true });
             }
-            const currentBranch = currentBranches.find((branch) => branch.isCurrent && !branch.isRemote);
+            const currentBranch = currentBranches.find(
+                (branch) => branch.isCurrent && !branch.isRemote,
+            );
             switch (action) {
                 case "switchRepository":
                     return;
@@ -814,6 +824,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 case "newBranch":
                     await createBranchFromPopup(targetRepository);
                     return;
+                case "newWorktree": {
+                    if (!targetRepository) return;
+                    const branches = await getBranchesForRepository(targetRepository);
+                    const branch =
+                        branches.find((item) => item.isCurrent && !item.isRemote) ??
+                        branches.find((item) => !item.isRemote) ??
+                        branches[0];
+                    if (!branch) {
+                        vscode.window.showWarningMessage(
+                            `No branch was found in ${targetRepository.info.name}.`,
+                        );
+                        return;
+                    }
+                    await openNewWorktreeDialog(targetRepository, branch);
+                    return;
+                }
                 case "worktrees":
                     if (targetRepository) {
                         await openWorktreesDialog(targetRepository);
@@ -943,6 +969,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         try {
             await refreshRepositoryWorktrees(repository);
             commitGraph.openWorktreesDialog(repository.root);
+        } catch (error) {
+            const message = getErrorMessage(error);
+            vscode.window.showErrorMessage(`Failed to load worktrees: ${message}`);
+        }
+    }
+
+    async function openAllWorktreesDialog(): Promise<void> {
+        try {
+            await Promise.all(
+                repositoryService
+                    .listRepositories()
+                    .map((repository) => refreshRepositoryWorktrees(repository)),
+            );
+            commitGraph.openWorktreesDialog();
         } catch (error) {
             const message = getErrorMessage(error);
             vscode.window.showErrorMessage(`Failed to load worktrees: ${message}`);

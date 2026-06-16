@@ -302,8 +302,12 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         });
     }
 
-    openWorktreesDialog(root: string): void {
-        this.postToWebview({ type: "openWorktreesDialog", repoRoot: root });
+    openWorktreesDialog(root?: string): void {
+        this.postToWebview(
+            root
+                ? { type: "openWorktreesDialog", repoRoot: root }
+                : { type: "openWorktreesDialog" },
+        );
     }
 
     setWorktreeDeleteResult(result: { success: true; path: string } | { success: false; message: string }): void {

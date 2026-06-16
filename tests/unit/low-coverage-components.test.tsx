@@ -6,6 +6,7 @@ import type { Branch, Commit, RepositoryContextInfo } from "../../src/types";
 import { BranchColumn } from "../../src/webviews/react/BranchColumn";
 import { CommitList } from "../../src/webviews/react/CommitList";
 import { BranchPopupOverlay } from "../../src/webviews/react/branch-column/components/BranchPopupOverlay";
+import { WorktreesDialog } from "../../src/webviews/react/branch-column/components/WorktreesDialog";
 import { CommitRow } from "../../src/webviews/react/commit-list/CommitRow";
 import { useDragResize } from "../../src/webviews/react/commit-panel/hooks/useDragResize";
 import { ContextMenu } from "../../src/webviews/react/shared/components/ContextMenu";
@@ -24,6 +25,116 @@ vi.mock("../../src/webviews/react/shared/vscodeApi", () => ({
 initReactDomTestEnvironment();
 
 describe("low coverage components", () => {
+    it("WorktreesDialog creates worktrees for the selected repository", async () => {
+        const onCreate = vi.fn();
+        const onOpen = vi.fn();
+        const onDelete = vi.fn();
+        const repositories: RepositoryContextInfo[] = [
+            {
+                repoId: "server",
+                name: "xndmwaterServer",
+                root: "/repos/xndmwaterServer",
+                color: "#00bcd4",
+            },
+            {
+                repoId: "web",
+                name: "xnmdwaterWeb",
+                root: "/repos/xnmdwaterWeb",
+                color: "#4caf50",
+            },
+        ];
+
+        const { root, container } = mount(
+            <WorktreesDialog
+                repository={repositories[0]}
+                repositories={repositories}
+                allRepositories={true}
+                repositoryCount={repositories.length}
+                items={[
+                    {
+                        repoRoot: repositories[0].root,
+                        repositoryName: repositories[0].name,
+                        repositoryRoot: repositories[0].root,
+                        repositoryColor: repositories[0].color,
+                        worktree: {
+                            path: repositories[0].root,
+                            branch: "main",
+                            detached: false,
+                        },
+                    },
+                    {
+                        repoRoot: repositories[1].root,
+                        repositoryName: repositories[1].name,
+                        repositoryRoot: repositories[1].root,
+                        repositoryColor: repositories[1].color,
+                        worktree: {
+                            path: "/repos/xnmdwaterWeb-feature",
+                            branch: "feature/demo",
+                            detached: false,
+                        },
+                    },
+                ]}
+                onCreate={onCreate}
+                onOpen={onOpen}
+                onDelete={onDelete}
+                onClose={vi.fn()}
+            />,
+        );
+
+        const repoSelect = document.querySelector(
+            'select[aria-label="Repository for new worktree"]',
+        ) as HTMLSelectElement;
+        expect(repoSelect).toBeTruthy();
+        expect(document.body.textContent).toContain("2 repositories");
+        expect(document.body.textContent).toContain("xnmdwaterWeb");
+
+        act(() => {
+            repoSelect.value = repositories[1].root;
+            repoSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await flush();
+
+        const newWorktreeButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "New Worktree...",
+        ) as HTMLButtonElement;
+        expect(newWorktreeButton).toBeTruthy();
+        act(() => {
+            newWorktreeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onCreate).toHaveBeenCalledWith(repositories[1].root);
+
+        const webRow = Array.from(document.querySelectorAll('[role="row"]')).find((row) =>
+            row.textContent?.includes("/repos/xnmdwaterWeb-feature"),
+        ) as HTMLElement;
+        expect(webRow).toBeTruthy();
+        const rowButtons = Array.from(webRow.querySelectorAll("button"));
+        act(() => {
+            rowButtons
+                .find((button) => button.textContent?.trim() === "Open")
+                ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onOpen).toHaveBeenCalledWith(repositories[1].root, "/repos/xnmdwaterWeb-feature");
+
+        act(() => {
+            rowButtons
+                .find((button) => button.textContent?.trim() === "Delete...")
+                ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        await flush();
+        const deleteButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Delete Worktree",
+        ) as HTMLButtonElement;
+        act(() => {
+            deleteButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onDelete).toHaveBeenCalledWith(
+            repositories[1].root,
+            "/repos/xnmdwaterWeb-feature",
+        );
+
+        unmount(root, container);
+    });
+
     it("BranchPopupOverlay opens repository submenus with repository branch state", async () => {
         const repositories: RepositoryContextInfo[] = [
             {

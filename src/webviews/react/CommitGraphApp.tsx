@@ -130,7 +130,9 @@ function App(): React.ReactElement {
     >(undefined);
     const [branchPopupRequest, setBranchPopupRequest] = useState<{ seq: number } | null>(null);
     const [worktreeDialog, setWorktreeDialog] = useState<OpenWorktreeDialogPayload | null>(null);
-    const [worktreesDialogRepoRoot, setWorktreesDialogRepoRoot] = useState<string | null>(null);
+    const [worktreesDialogScope, setWorktreesDialogScope] = useState<{ repoRoot?: string } | null>(
+        null,
+    );
     const [worktreeLocationSelection, setWorktreeLocationSelection] = useState<{
         seq: number;
         location: string;
@@ -255,11 +257,13 @@ function App(): React.ReactElement {
                     setBranchPopupRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1 }));
                     break;
                 case "openWorktreesDialog":
-                    setWorktreesDialogRepoRoot(data.repoRoot);
+                    setWorktreesDialogScope({ repoRoot: data.repoRoot });
                     setWorktreeDeleteResult(null);
                     break;
                 case "openWorktreeDialog":
                     setWorktreeDialog(data.payload);
+                    setWorktreesDialogScope(null);
+                    setWorktreeDeleteResult(null);
                     setWorktreeLocationSelection(null);
                     setWorktreeCreateError(null);
                     break;
@@ -440,7 +444,7 @@ function App(): React.ReactElement {
                         selectedBranch={selectedBranch}
                         openPopupRequest={branchPopupRequest}
                         worktreeDialog={worktreeDialog}
-                        worktreesDialogRepoRoot={worktreesDialogRepoRoot}
+                        worktreesDialogScope={worktreesDialogScope}
                         worktreeLocationSelection={worktreeLocationSelection}
                         worktreeCreateError={worktreeCreateError}
                         worktreeDeleteResult={worktreeDeleteResult}
@@ -456,7 +460,7 @@ function App(): React.ReactElement {
                             setWorktreeCreateError(null);
                         }}
                         onCloseWorktreesDialog={() => {
-                            setWorktreesDialogRepoRoot(null);
+                            setWorktreesDialogScope(null);
                             setWorktreeDeleteResult(null);
                         }}
                         folderIcon={branchFolderIcon}

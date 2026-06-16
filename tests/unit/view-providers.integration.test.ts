@@ -613,6 +613,10 @@ describe("view providers integration", () => {
             type: "openWorktreesDialog",
             repoRoot: "/repo",
         });
+        provider.openWorktreesDialog();
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "openWorktreesDialog",
+        });
         provider.setWorktreeDeleteResult({ success: false, message: "dirty worktree" });
         expect(postMessageSpy).toHaveBeenCalledWith({
             type: "worktreeDeleteResult",

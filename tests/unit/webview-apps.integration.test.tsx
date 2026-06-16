@@ -4,6 +4,25 @@ import { act } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { flush } from "./utils/reactDomTestUtils";
 
+const mountedAppRoots = vi.hoisted(
+    () => new Set<{ root: { unmount: () => void }; container: Element | DocumentFragment }>(),
+);
+
+vi.mock("react-dom/client", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("react-dom/client")>();
+    return {
+        ...actual,
+        createRoot: (
+            container: Element | DocumentFragment,
+            options?: Parameters<typeof actual.createRoot>[1],
+        ) => {
+            const root = actual.createRoot(container, options);
+            mountedAppRoots.add({ root, container });
+            return root;
+        },
+    };
+});
+
 interface MockVsCodeApi {
     postMessage: ReturnType<typeof vi.fn>;
     getState: ReturnType<typeof vi.fn>;
@@ -102,6 +121,12 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+    act(() => {
+        for (const entry of Array.from(mountedAppRoots)) {
+            entry.root.unmount();
+            mountedAppRoots.delete(entry);
+        }
+    });
     document.body.innerHTML = "";
     vi.clearAllMocks();
 });
@@ -393,6 +418,85 @@ describe("CommitGraphApp integration", () => {
             type: "deleteWorktree",
             payload: { repoRoot: "/repo", path: "/repo-feature" },
         });
+
+        const closeButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Close",
+        );
+        fireClick(closeButton ?? null);
+        await flush();
+    });
+
+    it("renders all repository worktrees and keeps row actions repository-scoped", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        const rootHost = createRootHost();
+        void rootHost;
+
+        await import("../../src/webviews/react/CommitGraphApp");
+        await flush();
+
+        const repoA = { repoId: "a", name: "repo-a", root: "/repo-a", color: "#4CAF50" };
+        const repoB = { repoId: "b", name: "repo-b", root: "/repo-b", color: "#2196F3" };
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setRepositoryContext", repository: repoA },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setRepositories", repositories: [repoA, repoB] },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setRepositoryWorktrees",
+                        worktreesByRoot: {
+                            "/repo-a": [{ path: "/repo-a", branch: "main", detached: false }],
+                            "/repo-b": [
+                                { path: "/repo-b", branch: "main", detached: false },
+                                {
+                                    path: "/repo-b-feature",
+                                    branch: "feature/demo",
+                                    detached: false,
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "openWorktreesDialog" },
+                }),
+            );
+        });
+        await flush();
+
+        expect(document.body.textContent).toContain("repo-a");
+        expect(document.body.textContent).toContain("repo-b");
+        expect(document.body.textContent).toContain("/repo-b-feature");
+
+        const repoSelect = document.querySelector(
+            'select[aria-label="Repository for new worktree"]',
+        ) as HTMLSelectElement;
+        expect(repoSelect).toBeTruthy();
+        const newWorktreeButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "New Worktree...",
+        );
+        expect(newWorktreeButton).toBeTruthy();
+
+        const linkedRow = Array.from(document.querySelectorAll('[role="row"]')).find((row) =>
+            row.textContent?.includes("/repo-b-feature"),
+        ) as HTMLElement;
+        expect(linkedRow).toBeTruthy();
+
+        const closeButton = Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Close",
+        );
+        fireClick(closeButton ?? null);
+        await flush();
     });
 
     it("renders the new worktree dialog and submits a new-branch payload", async () => {

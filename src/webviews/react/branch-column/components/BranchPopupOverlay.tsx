@@ -110,6 +110,18 @@ export function BranchPopupOverlay({
         [commonRemoteBranches],
     );
     const commonTagTree = useMemo(() => buildTagTree(commonTags), [commonTags]);
+    const totalWorktreeCount = useMemo(
+        () =>
+            repositories.reduce(
+                (total, repo) => total + (repositoryWorktrees[repo.root]?.length ?? 0),
+                0,
+            ),
+        [repositories, repositoryWorktrees],
+    );
+    const worktreesActionLabel =
+        hasMultipleRepositories && totalWorktreeCount
+            ? `Worktrees... (${totalWorktreeCount})`
+            : "Worktrees...";
 
     const locals = useMemo(
         () =>
@@ -266,8 +278,10 @@ export function BranchPopupOverlay({
             />
             <TopActionRow
                 icon={<GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />}
-                label="Worktrees..."
-                onClick={() => onTopAction("worktrees", repository?.root)}
+                label={worktreesActionLabel}
+                onClick={() =>
+                    onTopAction("worktrees", hasMultipleRepositories ? undefined : repository?.root)
+                }
             />
 
             {hasMultipleRepositories && (

@@ -32,6 +32,7 @@ export const BRANCH_POPUP_ACTION_VALUES = [
     "commit",
     "push",
     "newBranch",
+    "newWorktree",
     "checkoutRevision",
     "worktrees",
     "switchRepository",
@@ -141,7 +142,7 @@ export type CommitGraphInbound =
     | { type: "setSelectedBranch"; branch: string | null }
     | { type: "setFilterText"; text: string }
     | { type: "openBranchPopup" }
-    | { type: "openWorktreesDialog"; repoRoot: string }
+    | { type: "openWorktreesDialog"; repoRoot?: string }
     | { type: "openWorktreeDialog"; payload: OpenWorktreeDialogPayload }
     | { type: "worktreeLocationSelected"; location: string }
     | { type: "worktreeCreateResult"; success: true; path: string }

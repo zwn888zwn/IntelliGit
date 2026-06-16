@@ -27,7 +27,11 @@ import { BranchSectionHeader } from "./branch-column/components/BranchSectionHea
 import { BranchSearchBar } from "./branch-column/components/BranchSearchBar";
 import { BranchPopupOverlay } from "./branch-column/components/BranchPopupOverlay";
 import { NewWorktreeDialog } from "./branch-column/components/NewWorktreeDialog";
-import { WorktreesDialog } from "./branch-column/components/WorktreesDialog";
+import {
+    WorktreesDialog,
+    type WorktreeDialogItem,
+    type WorktreeDialogRepository,
+} from "./branch-column/components/WorktreesDialog";
 import { RepoIcon, TagRightIcon } from "./branch-column/icons";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import {
@@ -51,7 +55,7 @@ interface Props {
     selectedBranch: string | null;
     openPopupRequest?: { seq: number } | null;
     worktreeDialog?: OpenWorktreeDialogPayload | null;
-    worktreesDialogRepoRoot?: string | null;
+    worktreesDialogScope?: { repoRoot?: string } | null;
     worktreeLocationSelection?: { seq: number; location: string } | null;
     worktreeCreateError?: { success: false; message: string } | null;
     worktreeDeleteResult?: { seq: number; success: true; path: string } | { seq: number; success: false; message: string } | null;
@@ -170,7 +174,7 @@ export function BranchColumn({
     selectedBranch,
     openPopupRequest,
     worktreeDialog,
-    worktreesDialogRepoRoot,
+    worktreesDialogScope,
     worktreeLocationSelection,
     worktreeCreateError,
     worktreeDeleteResult,
@@ -290,6 +294,51 @@ export function BranchColumn({
         if (!openPopupRequest) return;
         setBranchPopupOpen(true);
     }, [openPopupRequest]);
+
+    const worktreesDialogRepository = useMemo(() => {
+        const repoRoot = worktreesDialogScope?.repoRoot;
+        if (!repoRoot) return null;
+        return (
+            repositories.find((repo) => repo.root === repoRoot) ??
+            (repository?.root === repoRoot ? repository : null)
+        );
+    }, [repositories, repository, worktreesDialogScope?.repoRoot]);
+
+    const worktreesDialogItems = useMemo<WorktreeDialogItem[]>(() => {
+        if (!worktreesDialogScope) return [];
+        const repoRoots = worktreesDialogScope.repoRoot
+            ? [worktreesDialogScope.repoRoot]
+            : repositories.map((repo) => repo.root);
+        return repoRoots.flatMap((repoRoot) => {
+            const repoInfo =
+                repositories.find((repo) => repo.root === repoRoot) ??
+                (repository?.root === repoRoot ? repository : null);
+            return (repositoryWorktrees[repoRoot] ?? []).map((worktree) => ({
+                repoRoot,
+                repositoryName: repoInfo?.name ?? getPathName(repoRoot),
+                repositoryRoot: repoInfo?.root ?? repoRoot,
+                repositoryColor: repoInfo?.color,
+                worktree,
+            }));
+        });
+    }, [repositories, repository, repositoryWorktrees, worktreesDialogScope]);
+
+    const worktreesDialogRepositories = useMemo<WorktreeDialogRepository[]>(() => {
+        if (!worktreesDialogScope) return [];
+        const repoRoots = worktreesDialogScope.repoRoot
+            ? [worktreesDialogScope.repoRoot]
+            : repositories.map((repo) => repo.root);
+        return repoRoots.map((repoRoot) => {
+            const repoInfo =
+                repositories.find((repo) => repo.root === repoRoot) ??
+                (repository?.root === repoRoot ? repository : null);
+            return {
+                root: repoRoot,
+                name: repoInfo?.name ?? getPathName(repoRoot),
+                color: repoInfo?.color,
+            };
+        });
+    }, [repositories, repository, worktreesDialogScope]);
 
     return (
         <div style={PANEL_STYLE}>
@@ -482,20 +531,17 @@ export function BranchColumn({
                 />
             )}
 
-            {worktreesDialogRepoRoot && (
+            {worktreesDialogScope && (
                 <WorktreesDialog
-                    repository={
-                        repositories.find((repo) => repo.root === worktreesDialogRepoRoot) ??
-                        (repository?.root === worktreesDialogRepoRoot ? repository : null)
-                    }
-                    worktrees={repositoryWorktrees[worktreesDialogRepoRoot] ?? []}
+                    repository={worktreesDialogRepository}
+                    items={worktreesDialogItems}
+                    repositories={worktreesDialogRepositories}
+                    allRepositories={!worktreesDialogScope.repoRoot}
+                    repositoryCount={repositories.length}
                     deleteResult={worktreeDeleteResult}
-                    onOpen={(path) =>
-                        onOpenWorktree({ repoRoot: worktreesDialogRepoRoot, path })
-                    }
-                    onDelete={(path) =>
-                        onDeleteWorktree({ repoRoot: worktreesDialogRepoRoot, path })
-                    }
+                    onCreate={(repoRoot) => onBranchPopupAction("newWorktree", repoRoot)}
+                    onOpen={(repoRoot, path) => onOpenWorktree({ repoRoot, path })}
+                    onDelete={(repoRoot, path) => onDeleteWorktree({ repoRoot, path })}
                     onClose={onCloseWorktreesDialog}
                 />
             )}
@@ -506,4 +552,10 @@ export function BranchColumn({
 function getCheckedOutWorktree(branch: Branch, worktrees: GitWorktree[]): GitWorktree | null {
     if (branch.isRemote) return null;
     return worktrees.find((worktree) => worktree.branch === branch.name) ?? null;
+}
+
+function getPathName(value: string): string {
+    const trimmed = value.replace(/[\\/]+$/g, "");
+    const parts = trimmed.split(/[\\/]+/);
+    return parts[parts.length - 1] || trimmed || "Repository";
 }
