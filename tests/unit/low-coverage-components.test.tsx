@@ -211,7 +211,7 @@ describe("low coverage components", () => {
         });
         await flush();
 
-        expect(document.body.textContent).not.toContain("Recent Branches in IosLatex");
+        expect(document.body.textContent).toContain("Recent Branches in IosLatex");
         const pushItem = Array.from(document.querySelectorAll(".intelligit-context-item")).find(
             (item) => item.textContent?.includes("Push"),
         ) as HTMLElement;

@@ -451,7 +451,6 @@ export function BranchColumn({
                         onBranchPopupAction(action, root, refName, allRepositories);
                     }}
                     onOpenBranchMenu={(branch, repoRoot, anchor, options) => {
-                        setBranchPopupOpen(false);
                         setContextMenu({
                             branch,
                             repoRoot,
