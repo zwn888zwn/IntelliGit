@@ -153,8 +153,11 @@ function computeAnchorPosition(
 }
 
 export function getAllRepositoriesBranchMenuItems(branch: Branch, currentBranchName: string) {
+    const allowedActions = branch.isRemote
+        ? ALL_REPOSITORIES_BRANCH_ACTIONS
+        : new Set([...ALL_REPOSITORIES_BRANCH_ACTIONS, "updateBranch", "pushBranch"]);
     const items = getBranchMenuItems(branch, currentBranchName).filter(
-        (item) => item.separator || ALL_REPOSITORIES_BRANCH_ACTIONS.has(item.action),
+        (item) => item.separator || allowedActions.has(item.action),
     );
     return items.filter((item, index) => {
         if (!item.separator) return true;

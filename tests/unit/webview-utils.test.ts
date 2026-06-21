@@ -101,10 +101,25 @@ describe("branch menu", () => {
         expect((newBranchFrom?.label ?? "").length).toBeLessThan(untrimmedLabel.length);
     });
 
-    it("omits worktree creation from all-repositories branch menus", () => {
+    it("keeps update and push in all-repositories local branch menus", () => {
         const items = getAllRepositoriesBranchMenuItems(makeBranch({ name: "feature/demo" }), "main");
         const actions = items.filter((item) => !item.separator).map((item) => item.action);
         expect(actions).toContain("checkout");
+        expect(actions).toContain("updateBranch");
+        expect(actions).toContain("pushBranch");
+        expect(actions).not.toContain("openWorktree");
+        expect(actions).not.toContain("newWorktreeFrom");
+    });
+
+    it("omits local-only push/update actions from all-repositories remote branch menus", () => {
+        const items = getAllRepositoriesBranchMenuItems(
+            makeBranch({ name: "origin/feature/demo", isRemote: true, remote: "origin" }),
+            "main",
+        );
+        const actions = items.filter((item) => !item.separator).map((item) => item.action);
+        expect(actions).toContain("checkout");
+        expect(actions).not.toContain("updateBranch");
+        expect(actions).not.toContain("pushBranch");
         expect(actions).not.toContain("openWorktree");
         expect(actions).not.toContain("newWorktreeFrom");
     });

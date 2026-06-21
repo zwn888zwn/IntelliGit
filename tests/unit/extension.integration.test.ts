@@ -298,7 +298,12 @@ class MockCommitGraphViewProvider {
     static readonly viewType = "intelligit.commitGraph";
     private commitSelectedEmitter = new MockEventEmitter<string>();
     private branchFilterEmitter = new MockEventEmitter<string | null>();
-    private branchActionEmitter = new MockEventEmitter<{ action: string; branchName: string }>();
+    private branchActionEmitter = new MockEventEmitter<{
+        action: string;
+        branchName: string;
+        repoRoot?: string;
+        allRepositories?: boolean;
+    }>();
     private branchPopupActionEmitter = new MockEventEmitter<{
         action: string;
         root?: string;
@@ -352,7 +357,12 @@ class MockCommitGraphViewProvider {
     emitBranchFilterChanged(value: string | null): void {
         this.branchFilterEmitter.fire(value);
     }
-    async emitBranchAction(payload: { action: string; branchName: string }): Promise<void> {
+    async emitBranchAction(payload: {
+        action: string;
+        branchName: string;
+        repoRoot?: string;
+        allRepositories?: boolean;
+    }): Promise<void> {
         await this.branchActionEmitter.fireAsync(payload);
     }
     async emitBranchPopupAction(payload: { action: string; root?: string }): Promise<void> {
@@ -1326,6 +1336,63 @@ describe("extension integration", () => {
             expect.objectContaining({ fsPath: "/repo-a-feature" }),
             true,
         );
+    });
+
+    it("updates and pushes common local branches in all repositories", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        executorRun.mockClear();
+        showInformationMessage.mockClear();
+        showErrorMessage.mockClear();
+        await latestCommitGraphProvider!.emitBranchAction({
+            action: "updateBranch",
+            branchName: "main",
+            allRepositories: true,
+        });
+
+        expect(
+            executorRun.mock.calls.filter(
+                ([args]) =>
+                    args[0] === "fetch" &&
+                    args[1] === "origin" &&
+                    args[2] === "main" &&
+                    args.includes("--recurse-submodules=no"),
+            ),
+        ).toHaveLength(2);
+        expect(
+            executorRun.mock.calls.filter(
+                ([args]) =>
+                    args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD",
+            ),
+        ).toHaveLength(2);
+        expect(showInformationMessage).toHaveBeenCalledWith(
+            "Updated main in 2 repositories.",
+        );
+        expect(showErrorMessage).not.toHaveBeenCalled();
+
+        executorRun.mockClear();
+        showInformationMessage.mockClear();
+        showErrorMessage.mockClear();
+        await latestCommitGraphProvider!.emitBranchAction({
+            action: "pushBranch",
+            branchName: "main",
+            allRepositories: true,
+        });
+
+        expect(
+            executorRun.mock.calls.filter(
+                ([args]) => args[0] === "push" && args[1] === "origin" && args[2] === "main:main",
+            ),
+        ).toHaveLength(2);
+        expect(showInformationMessage).toHaveBeenCalledWith(
+            "Pushed main in 2 repositories.",
+        );
+        expect(showErrorMessage).not.toHaveBeenCalled();
     });
 
     it("opens the worktrees dialog from the branch popup action", async () => {

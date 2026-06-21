@@ -340,6 +340,102 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
+    it("BranchColumn shows update and push actions for common local branches", async () => {
+        const repositories: RepositoryContextInfo[] = [
+            {
+                repoId: "pic",
+                name: "PicMath",
+                root: "/repos/PicMath",
+                color: "#ff5722",
+            },
+            {
+                repoId: "ios",
+                name: "IosLatex",
+                root: "/repos/IosLatex",
+                color: "#8bc34a",
+            },
+        ];
+        const commonBranches: Branch[] = [
+            {
+                name: "main",
+                upstream: "origin/main",
+                hash: "abc1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "origin/main",
+                hash: "abc1234",
+                isRemote: true,
+                isCurrent: false,
+                remote: "origin",
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const onBranchAction = vi.fn();
+        const { root, container } = mount(
+            <BranchColumn
+                branches={commonBranches}
+                repositories={repositories}
+                repository={repositories[0]}
+                repositoryBranches={{
+                    [repositories[0].root]: commonBranches,
+                    [repositories[1].root]: commonBranches,
+                }}
+                repositoryTags={{
+                    [repositories[0].root]: [],
+                    [repositories[1].root]: [],
+                }}
+                selectedBranch={null}
+                openPopupRequest={{ seq: 1 }}
+                onSelectBranch={vi.fn()}
+                onBranchAction={onBranchAction}
+            />,
+        );
+        await flush();
+
+        const commonLocalTitle = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Common Local Branches"),
+        ) as HTMLElement;
+        expect(commonLocalTitle).toBeTruthy();
+        act(() => {
+            commonLocalTitle.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        await flush();
+
+        const commonMain = Array.from(document.querySelectorAll("button")).find(
+            (button) => (button as HTMLButtonElement).title === "main\norigin/main",
+        ) as HTMLElement;
+        expect(commonMain).toBeTruthy();
+        act(() => {
+            commonMain.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        await flush();
+
+        const updateItem = Array.from(document.querySelectorAll(".intelligit-context-item")).find(
+            (item) => item.textContent?.includes("Update"),
+        ) as HTMLElement;
+        const pushItem = Array.from(document.querySelectorAll(".intelligit-context-item")).find(
+            (item) => item.textContent?.includes("Push"),
+        ) as HTMLElement;
+        expect(updateItem).toBeTruthy();
+        expect(pushItem).toBeTruthy();
+        act(() => {
+            pushItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onBranchAction).toHaveBeenCalledWith(
+            "pushBranch",
+            "main",
+            "/repos/PicMath",
+            true,
+        );
+
+        unmount(root, container);
+    });
+
     it("BranchPopupOverlay recent branches prefer local branches before remote branches", async () => {
         const repository: RepositoryContextInfo = {
             repoId: "repo",
