@@ -16,6 +16,7 @@ import { buildWebviewShellHtml } from "./webviewHtml";
 import { getErrorMessage } from "../utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "../utils/fileOps";
 import { runWithNotificationProgress } from "../utils/notifications";
+import { showPushSuccessWithRequestLink } from "../utils/pushMergeRequest";
 import {
     getDiffOriginalFilePathFromUri,
     getRepoRelativeFilePathFromUri,
@@ -578,23 +579,30 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     return;
                 }
                 if (amend || targets.length === 0) {
+                    let pushOutput = "";
                     await runWithNotificationProgress(
                         push ? "Committing and pushing..." : "Committing...",
                         async () => {
                             if (push) {
-                                await this.gitOps.commitAndPush(message, amend);
+                                pushOutput = await this.gitOps.commitAndPush(message, amend);
                             } else {
                                 await this.gitOps.commit(message, amend);
                             }
                         },
                     );
-                    vscode.window.showInformationMessage(
-                        push ? "Committed and pushed successfully." : "Committed successfully.",
-                    );
+                    if (push) {
+                        await showPushSuccessWithRequestLink(
+                            "Committed and pushed successfully.",
+                            pushOutput,
+                        );
+                    } else {
+                        vscode.window.showInformationMessage("Committed successfully.");
+                    }
                 } else {
                     const grouped = this.groupTargetsByRepository(targets);
                     const successes: string[] = [];
                     const failures: string[] = [];
+                    const pushOutputs: string[] = [];
                     await runWithNotificationProgress(
                         push ? "Committing and pushing..." : "Committing...",
                         async () => {
@@ -603,7 +611,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                                 try {
                                     await repository.gitOps.stageFiles(paths);
                                     if (push) {
-                                        await repository.gitOps.commitAndPush(message, false, paths);
+                                        const pushOutput = await repository.gitOps.commitAndPush(
+                                            message,
+                                            false,
+                                            paths,
+                                        );
+                                        pushOutputs.push(pushOutput);
                                     } else {
                                         await repository.gitOps.commit(message, false, paths);
                                     }
@@ -621,9 +634,13 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                             `Committed ${successes.length} repos.\n${failures.join("\n")}`,
                         );
                     }
-                    vscode.window.showInformationMessage(
-                        `${push ? "Committed and pushed" : "Committed"} ${successes.length} repos: ${successes.join(", ")}`,
-                    );
+                    const successVerb = push ? "Committed and pushed" : "Committed";
+                    const successMessage = `${successVerb} ${successes.length} repos: ${successes.join(", ")}`;
+                    if (push) {
+                        await showPushSuccessWithRequestLink(successMessage, pushOutputs.join("\n"));
+                    } else {
+                        vscode.window.showInformationMessage(successMessage);
+                    }
                 }
                 this.postToWebview({ type: "committed" });
                 await this.refreshData();
@@ -653,10 +670,14 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     vscode.window.showWarningMessage("Enter a commit message.");
                     return;
                 }
+                let pushOutput = "";
                 await runWithNotificationProgress("Committing and pushing...", async () => {
-                    await this.gitOps.commitAndPush(message, amend);
+                    pushOutput = await this.gitOps.commitAndPush(message, amend);
                 });
-                vscode.window.showInformationMessage("Committed and pushed successfully.");
+                await showPushSuccessWithRequestLink(
+                    "Committed and pushed successfully.",
+                    pushOutput,
+                );
                 this.postToWebview({ type: "committed" });
                 await this.refreshData();
                 break;

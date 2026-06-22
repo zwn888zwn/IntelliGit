@@ -44,6 +44,116 @@ describe("core utilities", () => {
         ]);
     });
 
+    it("GitExecutor captures stderr for commands that print remote hints there", async () => {
+        const raw = vi.fn(async () => "ok");
+        const simpleGit = vi.fn(() => ({ raw }));
+        let stdoutData: ((chunk: string) => void) | undefined;
+        let stderrData: ((chunk: string) => void) | undefined;
+        const stdout = {
+            setEncoding: vi.fn(),
+            on: vi.fn((event: string, listener: (chunk: string) => void) => {
+                if (event === "data") stdoutData = listener;
+                return stdout;
+            }),
+        };
+        const stderr = {
+            setEncoding: vi.fn(),
+            on: vi.fn((event: string, listener: (chunk: string) => void) => {
+                if (event === "data") stderrData = listener;
+                return stderr;
+            }),
+        };
+        const child = {
+            stdout,
+            stderr,
+            on: vi.fn((event: string, listener: (value?: number) => void) => {
+                if (event === "close") {
+                    queueMicrotask(() => {
+                        stdoutData?.("stdout\n");
+                        stderrData?.("remote: create merge request\n");
+                        listener(0);
+                    });
+                }
+                return child;
+            }),
+        };
+        const spawn = vi.fn(() => child);
+        vi.doMock("simple-git", () => ({ default: simpleGit }));
+        vi.doMock("child_process", () => ({ spawn }));
+        const { GitExecutor } = await import("../../src/git/executor");
+
+        const executor = new GitExecutor("/repo");
+        const out = await executor.runWithStderr(["push", "origin", "main"]);
+
+        expect(out).toBe("stdout\nremote: create merge request\n");
+        expect(spawn).toHaveBeenCalledWith("git", [
+            "-c",
+            "core.quotepath=false",
+            "push",
+            "origin",
+            "main",
+        ], { cwd: "/repo" });
+    });
+
+    it("finds create-request links in git push output", async () => {
+        vi.doMock("vscode", () => ({}));
+        const { findPushRequestLink } = await import("../../src/utils/pushMergeRequest");
+
+        const gitlabUrl =
+            "https://gitlab.example.com/group/project/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fdemo";
+        const gitlabOutput = [
+            "remote:",
+            "remote: To create a merge request for feature/demo, visit:",
+            `remote:   ${gitlabUrl}.`,
+            "To gitlab.example.com:group/project.git",
+        ].join("\n");
+
+        expect(findPushRequestLink(gitlabOutput)).toEqual({
+            url: gitlabUrl,
+            kind: "mergeRequest",
+        });
+
+        const githubUrl = "https://github.com/acme/project/pull/new/feature-demo";
+        const githubOutput = [
+            "remote: Create a pull request for 'feature-demo' on GitHub by visiting:",
+            `remote:      ${githubUrl}`,
+        ].join("\n");
+
+        expect(findPushRequestLink(githubOutput)).toEqual({
+            url: githubUrl,
+            kind: "pullRequest",
+        });
+        expect(findPushRequestLink("Everything up-to-date")).toBeNull();
+    });
+
+    it("opens the create merge request link from push success notification", async () => {
+        const parsedUri = { toString: () => "https://gitlab.example.com/mr" };
+        const showInformationMessage = vi.fn(async (_message: string, action?: string) => action);
+        const openExternal = vi.fn(async () => true);
+        const parse = vi.fn(() => parsedUri);
+        vi.doMock("vscode", () => ({
+            window: { showInformationMessage },
+            env: { openExternal },
+            Uri: { parse },
+        }));
+        const { showPushSuccessWithRequestLink } = await import(
+            "../../src/utils/pushMergeRequest"
+        );
+
+        const url = "https://gitlab.example.com/group/project/-/merge_requests/new";
+        await showPushSuccessWithRequestLink(
+            "Pushed main",
+            `remote: To create a merge request, visit:\nremote:   ${url}`,
+        );
+
+        expect(showInformationMessage).toHaveBeenCalledWith(
+            "Pushed main",
+            "Create Merge Request",
+        );
+        expect(parse).toHaveBeenCalledWith(url);
+        expect(openExternal).toHaveBeenCalledWith(parsedUri);
+    });
+
     it("decodes git quoted UTF-8 paths", async () => {
         const { decodeGitQuotedPath } = await import("../../src/git/pathEncoding");
 

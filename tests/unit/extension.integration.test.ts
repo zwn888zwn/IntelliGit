@@ -271,14 +271,14 @@ const repositoryEntries = [
         root: "/repo-a",
         uri: { fsPath: "/repo-a", path: "/repo-a" },
         info: { name: "repo-a", root: "/repo-a", relativePath: "repo-a" },
-        executor: { run: executorRun },
+        executor: { run: executorRun, runWithStderr: executorRun },
         gitOps: gitOpsState,
     },
     {
         root: "/repo-b",
         uri: { fsPath: "/repo-b", path: "/repo-b" },
         info: { name: "repo-b", root: "/repo-b", relativePath: "repo-b" },
-        executor: { run: executorRun },
+        executor: { run: executorRun, runWithStderr: executorRun },
         gitOps: gitOpsState,
     },
 ] as const;
@@ -628,6 +628,7 @@ vi.mock("vscode", () => ({
 vi.mock("../../src/git/executor", () => ({
     GitExecutor: class {
         run = executorRun;
+        runWithStderr = executorRun;
     },
 }));
 
@@ -735,7 +736,10 @@ vi.mock("../../src/services/RepositoryContextService", () => ({
             return repository;
         }
     },
-    createRepositoryScopedExecutor: vi.fn(() => ({ run: executorRun })),
+    createRepositoryScopedExecutor: vi.fn(() => ({
+        run: executorRun,
+        runWithStderr: executorRun,
+    })),
     createRepositoryScopedGitOps: vi.fn(() => ({
         isRepository: gitOpsState.isRepository,
         getBranches: gitOpsState.getBranches,

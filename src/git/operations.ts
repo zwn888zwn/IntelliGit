@@ -788,7 +788,7 @@ export class GitOps {
 
     async push(): Promise<string> {
         try {
-            return await this.executor.run(["push"]);
+            return await this.executor.runWithStderr(["push"]);
         } catch (err) {
             if (!isNoUpstreamPushError(err)) throw err;
 
@@ -802,7 +802,7 @@ export class GitOps {
                 throw new UpstreamPushDeclinedError();
             }
 
-            return this.executor.run(["push", "--set-upstream", remote, branch]);
+            return this.executor.runWithStderr(["push", "--set-upstream", remote, branch]);
         }
     }
 

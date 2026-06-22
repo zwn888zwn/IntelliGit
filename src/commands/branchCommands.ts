@@ -8,6 +8,7 @@ import { GitOps, UpstreamPushDeclinedError } from "../git/operations";
 import type { Branch } from "../types";
 import { getErrorMessage, isBranchNotFullyMergedError } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
+import { showPushSuccessWithRequestLink } from "../utils/pushMergeRequest";
 import {
     checkoutBranch,
     getCheckedOutBranchName,
@@ -292,21 +293,22 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 const branch = item.branch;
                 if (!branch || branch.isRemote) return;
                 try {
+                    let pushOutput = "";
                     await runWithNotificationProgress(`Pushing ${branch.name}...`, async () => {
                         const tracked = resolveTrackedRemoteBranch(branch, getCurrentBranches());
                         if (branch.isCurrent) {
                             if (tracked) {
-                                await executor.run([
+                                pushOutput = await executor.runWithStderr([
                                     "push",
                                     tracked.remote,
                                     `${branch.name}:${tracked.remoteBranch}`,
                                 ]);
                             } else {
-                                await gitOps.push();
+                                pushOutput = await gitOps.push();
                             }
                         } else {
                             if (tracked) {
-                                await executor.run([
+                                pushOutput = await executor.runWithStderr([
                                     "push",
                                     tracked.remote,
                                     `${branch.name}:${tracked.remoteBranch}`,
@@ -318,11 +320,16 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                                         `No remote configured for branch ${branch.name}.`,
                                     );
                                 }
-                                await executor.run(["push", "-u", remote, branch.name]);
+                                pushOutput = await executor.runWithStderr([
+                                    "push",
+                                    "-u",
+                                    remote,
+                                    branch.name,
+                                ]);
                             }
                         }
                     });
-                    vscode.window.showInformationMessage(`Pushed ${branch.name}`);
+                    await showPushSuccessWithRequestLink(`Pushed ${branch.name}`, pushOutput);
                     await vscode.commands.executeCommand("intelligit.refresh");
                 } catch (err) {
                     if (err instanceof UpstreamPushDeclinedError) return;

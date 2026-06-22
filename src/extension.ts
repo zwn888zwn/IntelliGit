@@ -41,6 +41,7 @@ import {
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
 import { runWithNotificationProgress } from "./utils/notifications";
+import { showPushSuccessWithRequestLink } from "./utils/pushMergeRequest";
 import {
     RepositoryContextService,
     createRepositoryScopedExecutor,
@@ -1291,6 +1292,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                       ? "Pushed"
                       : "Checked out and rebased";
         try {
+            const pushOutputs: string[] = [];
             await runWithNotificationProgress(
                 `${actionLabel} ${branchName} in all repositories...`,
                 async () => {
@@ -1359,30 +1361,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                                 }
                                 break;
                             case "pushBranch":
+                                let pushOutput = "";
                                 if (target.tracked) {
-                                    await target.repository.executor.run([
+                                    pushOutput = await target.repository.executor.runWithStderr([
                                         "push",
                                         target.tracked.remote,
                                         `${target.branch.name}:${target.tracked.remoteBranch}`,
                                     ]);
                                 } else if (target.branch.isCurrent) {
-                                    await target.repository.gitOps.push();
+                                    pushOutput = await target.repository.gitOps.push();
                                 } else {
-                                    await target.repository.executor.run([
+                                    pushOutput = await target.repository.executor.runWithStderr([
                                         "push",
                                         "-u",
                                         target.pushRemote!,
                                         target.branch.name,
                                     ]);
                                 }
+                                pushOutputs.push(pushOutput);
                                 break;
                         }
                     }
                 },
             );
-            vscode.window.showInformationMessage(
-                `${successVerb} ${branchName} in ${targets.length} repositories.`,
-            );
+            const successMessage = `${successVerb} ${branchName} in ${targets.length} repositories.`;
+            if (action === "pushBranch") {
+                await showPushSuccessWithRequestLink(successMessage, pushOutputs.join("\n"));
+            } else {
+                vscode.window.showInformationMessage(successMessage);
+            }
             await vscode.commands.executeCommand("intelligit.refresh");
         } catch (error) {
             const message = getErrorMessage(error);

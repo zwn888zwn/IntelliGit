@@ -9,6 +9,7 @@ import { GitOps } from "../git/operations";
 import type { CommitAction } from "../webviews/react/commitGraphTypes";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
+import { showPushSuccessWithRequestLink } from "../utils/pushMergeRequest";
 import {
     isValidGitHash,
     isValidBranchName,
@@ -240,10 +241,11 @@ export async function handleCommitContextAction(params: {
             );
             if (confirm !== "Push") return;
 
+            let pushOutput = "";
             await runWithNotificationProgress(`Pushing commits up to ${short}...`, async () => {
                 const destinationRef = `refs/heads/${target.remoteBranch}`;
                 const refspec = `${validatedHash}:${destinationRef}`;
-                await executor.run([
+                pushOutput = await executor.runWithStderr([
                     "push",
                     ...(setUpstream ? ["-u"] : []),
                     target.remote,
@@ -251,7 +253,7 @@ export async function handleCommitContextAction(params: {
                 ]);
             });
 
-            vscode.window.showInformationMessage(`Pushed commits up to ${short}.`);
+            await showPushSuccessWithRequestLink(`Pushed commits up to ${short}.`, pushOutput);
             await refreshAll();
             return;
         }

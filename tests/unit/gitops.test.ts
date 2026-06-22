@@ -13,7 +13,7 @@ function createMockExecutor(responses: Record<string, string> = {}): GitExecutor
         }
         return "";
     });
-    return { run } as unknown as GitExecutor;
+    return { run, runWithStderr: run } as unknown as GitExecutor;
 }
 
 describe("GitOps", () => {
@@ -702,14 +702,13 @@ describe("GitOps", () => {
                     "    git push --set-upstream origin feature/no-upstream",
                 ].join("\n"),
             );
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    const key = args.join(" ");
-                    if (key === "push") throw noUpstreamError;
-                    if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                    return "";
-                }),
-            } as unknown as GitExecutor;
+            const run = vi.fn(async (args: string[]) => {
+                const key = args.join(" ");
+                if (key === "push") throw noUpstreamError;
+                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
+                return "";
+            });
+            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
             const confirmSetUpstream = vi.fn(async () => true);
             const ops = new GitOps(executor, confirmSetUpstream);
 
@@ -732,14 +731,13 @@ describe("GitOps", () => {
                     "    git push -u origin feature/no-upstream",
                 ].join("\n"),
             );
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    const key = args.join(" ");
-                    if (key === "push") throw noUpstreamError;
-                    if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                    return "";
-                }),
-            } as unknown as GitExecutor;
+            const run = vi.fn(async (args: string[]) => {
+                const key = args.join(" ");
+                if (key === "push") throw noUpstreamError;
+                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
+                return "";
+            });
+            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
             const confirmSetUpstream = vi.fn(async () => true);
             const ops = new GitOps(executor, confirmSetUpstream);
 
@@ -756,14 +754,13 @@ describe("GitOps", () => {
                     "    git push --set-upstream=origin feature/no-upstream",
                 ].join("\n"),
             );
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    const key = args.join(" ");
-                    if (key === "push") throw noUpstreamError;
-                    if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                    return "";
-                }),
-            } as unknown as GitExecutor;
+            const run = vi.fn(async (args: string[]) => {
+                const key = args.join(" ");
+                if (key === "push") throw noUpstreamError;
+                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
+                return "";
+            });
+            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
             const confirmSetUpstream = vi.fn(async () => true);
             const ops = new GitOps(executor, confirmSetUpstream);
 
@@ -780,14 +777,13 @@ describe("GitOps", () => {
                     "    git push --set-upstream origin feature/no-upstream",
                 ].join("\n"),
             );
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    const key = args.join(" ");
-                    if (key === "push") throw noUpstreamError;
-                    if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                    return "";
-                }),
-            } as unknown as GitExecutor;
+            const run = vi.fn(async (args: string[]) => {
+                const key = args.join(" ");
+                if (key === "push") throw noUpstreamError;
+                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
+                return "";
+            });
+            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
             const confirmSetUpstream = vi.fn(async () => true);
             const ops = new GitOps(executor, confirmSetUpstream);
 
@@ -804,12 +800,11 @@ describe("GitOps", () => {
                     "    git push --set-upstream origin feature/no-upstream",
                 ].join("\n"),
             );
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    if (args.join(" ") === "push") throw noUpstreamError;
-                    return "";
-                }),
-            } as unknown as GitExecutor;
+            const run = vi.fn(async (args: string[]) => {
+                if (args.join(" ") === "push") throw noUpstreamError;
+                return "";
+            });
+            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
             const confirmSetUpstream = vi.fn(async () => false);
             const ops = new GitOps(executor, confirmSetUpstream);
 
