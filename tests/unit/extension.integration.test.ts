@@ -1015,6 +1015,13 @@ describe("extension integration", () => {
         await getCommand("intelligit.newBranchFrom")({
             branch: { name: "feature-local", isRemote: false },
         });
+        expect(showInputBox).toHaveBeenCalledWith(
+            expect.objectContaining({
+                prompt: "New branch from feature-local",
+                value: "feature-local",
+                valueSelection: [0, "feature-local".length],
+            }),
+        );
         await getCommand("intelligit.checkoutAndRebase")({
             branch: { name: "feature-local", isRemote: false },
         });
@@ -1397,6 +1404,30 @@ describe("extension integration", () => {
             "Pushed main in 2 repositories.",
         );
         expect(showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it("prefills and selects the current branch when creating from the branch popup", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        showInputBox.mockClear();
+        await latestCommitGraphProvider!.emitBranchPopupAction({
+            action: "newBranch",
+            root: "/repo-a",
+        });
+        await waitForAsync();
+
+        expect(showInputBox).toHaveBeenCalledWith(
+            expect.objectContaining({
+                prompt: "New branch from current branch",
+                value: "main",
+                valueSelection: [0, "main".length],
+            }),
+        );
     });
 
     it("opens the worktrees dialog from the branch popup action", async () => {

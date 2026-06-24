@@ -97,6 +97,8 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 if (!base) return;
                 const newName = await vscode.window.showInputBox({
                     prompt: `New branch from ${base}`,
+                    value: base,
+                    valueSelection: [0, base.length],
                     placeHolder: "branch-name",
                 });
                 if (!newName) return;

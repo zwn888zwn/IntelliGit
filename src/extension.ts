@@ -1450,8 +1450,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selectedRoots = picked.roots;
         }
 
+        const currentBranchName = currentBranches.find(
+            (branch) => branch.isCurrent && !branch.isRemote,
+        )?.name;
         const branchName = await vscode.window.showInputBox({
             prompt: "New branch from current branch",
+            value: currentBranchName,
+            valueSelection: currentBranchName ? [0, currentBranchName.length] : undefined,
             placeHolder: "branch-name",
             ignoreFocusOut: true,
         });
