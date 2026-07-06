@@ -410,7 +410,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             ]);
             if (requestId !== this.requestSeq) return;
             const commits = loadResult.commits;
-            const foundCommit = commits.find((commit) => commit.hash === hash) ?? null;
+            const foundCommit = commits.find((commit) => this.matchesCommitHash(commit, hash)) ?? null;
             this.loadedCommits = commits;
             this.offset = commits.length;
             this.postToWebview({
@@ -429,15 +429,15 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 return;
             }
 
-            this.postToWebview({ type: "revealCommit", hash });
+            this.postToWebview({ type: "revealCommit", hash: foundCommit.hash });
             if (this.pendingRevealHash === hash) {
                 this.pendingRevealHash = null;
             }
 
             try {
                 const detail = foundCommit.repoRoot
-                    ? await this.getRepositoryEntry(foundCommit.repoRoot).gitOps.getCommitDetail(hash)
-                    : await this.gitOps.getCommitDetail(hash);
+                    ? await this.getRepositoryEntry(foundCommit.repoRoot).gitOps.getCommitDetail(foundCommit.hash)
+                    : await this.gitOps.getCommitDetail(foundCommit.hash);
                 if (requestId !== this.requestSeq) return;
                 this.setCommitDetail(detail);
             } catch (err) {
@@ -659,7 +659,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             const page = await this.loadPage(skip);
             if (requestId !== this.requestSeq) return { commits, hasMore: false };
             commits.push(...page);
-            if (page.some((commit) => commit.hash === hash)) {
+            if (page.some((commit) => this.matchesCommitHash(commit, hash))) {
                 return { commits, hasMore: page.length >= this.PAGE_SIZE };
             }
             if (page.length < this.PAGE_SIZE) {
@@ -707,6 +707,20 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             commits: this.decorateCommitsWithGraphRefs(merged.slice(0, limit)),
             hasMore: merged.length > limit,
         };
+    }
+
+    private matchesCommitHash(commit: Commit, hash: string): boolean {
+        const normalizedHash = hash.trim().toLowerCase();
+        if (!normalizedHash) return false;
+
+        const fullHash = commit.hash.toLowerCase();
+        const shortHash = commit.shortHash.toLowerCase();
+        return (
+            fullHash === normalizedHash ||
+            shortHash === normalizedHash ||
+            fullHash.startsWith(normalizedHash) ||
+            shortHash.startsWith(normalizedHash)
+        );
     }
 
     private async loadPage(skip: number): Promise<Commit[]> {

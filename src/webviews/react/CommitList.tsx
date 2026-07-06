@@ -3,7 +3,7 @@
 // Includes a text search filter bar. Branch filtering is handled by the sidebar.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
+import { LuLocateFixed, LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
 import type { Commit, RepositoryContextInfo } from "../../types";
 import { computeGraph, LANE_WIDTH, ROW_HEIGHT } from "./graph";
 import { ContextMenu } from "./shared/components/ContextMenu";
@@ -39,8 +39,8 @@ interface Props {
     repositories: RepositoryContextInfo[];
     repository: RepositoryContextInfo | null;
     selectedHash: string | null;
-    currentCommitRefs: Array<{ repoRoot: string; hash: string }>;
-    revealHash: string | null;
+    currentCommitRefs?: Array<{ repoRoot: string; hash: string }>;
+    revealHash?: string | null;
     filterText: string;
     hasMore: boolean;
     unpushedHashes: Set<string>;
@@ -48,7 +48,7 @@ interface Props {
     repoRailExpanded: boolean;
     onToggleRepoRail: () => void;
     onSelectCommit: (hash: string) => void;
-    onRevealCommit: (hash: string) => void;
+    onRevealCommit?: (hash: string) => void;
     onFilterText: (text: string) => void;
     onLoadMore: () => void | Promise<void>;
     onCommitAction: (action: CommitAction, hash: string) => void;
@@ -59,7 +59,7 @@ export function CommitList({
     repositories,
     repository,
     selectedHash,
-    currentCommitRefs,
+    currentCommitRefs = [],
     revealHash,
     filterText,
     hasMore,
@@ -107,6 +107,27 @@ export function CommitList({
         () => new Map(commits.map((commit) => [commit.hash, commit])),
         [commits],
     );
+    const currentCommitRef = useMemo(() => {
+        const repoRoot = repository?.root;
+        const candidate =
+            currentCommitRefs.find((ref) => ref.repoRoot === repoRoot) ?? currentCommitRefs[0];
+        if (!candidate) return null;
+
+        const normalizedHash = candidate.hash.toLowerCase();
+        const loadedCommit = commits.find((commit) => {
+            if (commit.repoRoot !== candidate.repoRoot) return false;
+            const fullHash = commit.hash.toLowerCase();
+            const shortHash = commit.shortHash.toLowerCase();
+            return (
+                fullHash === normalizedHash ||
+                shortHash === normalizedHash ||
+                fullHash.startsWith(normalizedHash) ||
+                shortHash.startsWith(normalizedHash)
+            );
+        });
+
+        return { ...candidate, hash: loadedCommit?.hash ?? candidate.hash };
+    }, [commits, currentCommitRefs, repository?.root]);
     const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
     const visibleArrowMarkers = graph.arrowMarkers;
 
@@ -180,6 +201,11 @@ export function CommitList({
         event.preventDefault();
         setContextMenu({ x: event.clientX, y: event.clientY, commit });
     }, []);
+
+    const handleLocateCurrentCommit = useCallback(() => {
+        if (!currentCommitRef) return;
+        onRevealCommit?.(currentCommitRef.hash);
+    }, [currentCommitRef, onRevealCommit]);
 
     const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -302,6 +328,35 @@ export function CommitList({
                 >
                     Branch: {selectedBranch ?? "All branches"}
                 </span>
+                <button
+                    type="button"
+                    aria-label="Locate current branch commit"
+                    title={
+                        currentCommitRef
+                            ? "Locate current branch commit"
+                            : "No current branch commit loaded"
+                    }
+                    disabled={!currentCommitRef}
+                    onClick={handleLocateCurrentCommit}
+                    style={{
+                        marginLeft: "auto",
+                        width: 24,
+                        height: 20,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                        border: "1px solid transparent",
+                        borderRadius: 3,
+                        background: "transparent",
+                        color: "var(--vscode-icon-foreground)",
+                        opacity: currentCommitRef ? 0.9 : 0.35,
+                        cursor: currentCommitRef ? "pointer" : "default",
+                        flexShrink: 0,
+                    }}
+                >
+                    <LuLocateFixed size={15} />
+                </button>
             </div>
 
             <div style={headerRowStyle(headerGraphWidth)}>
@@ -490,7 +545,7 @@ export function CommitList({
                                                     );
                                                     return;
                                                 }
-                                                onRevealCommit(arrow.targetHash);
+                                                onRevealCommit?.(arrow.targetHash);
                                             }}
                                             style={{
                                                 position: "absolute",

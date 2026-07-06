@@ -173,6 +173,7 @@ function App(): React.ReactElement {
     });
     const [unpushedHashes, setUnpushedHashes] = useState<Set<string>>(new Set());
     const loadingMore = useRef(false);
+    const pendingRevealHash = useRef<string | null>(null);
     const onDividerMouseDown = useColumnDrag(
         branchWidth,
         setBranchWidth,
@@ -201,6 +202,26 @@ function App(): React.ReactElement {
         return Array.from(refsByRepo, ([repoRoot, hash]) => ({ repoRoot, hash }));
     }, [branches, commits, repository?.root]);
 
+    const findCommitByHash = useCallback(
+        (items: Commit[], hash: string): Commit | null => {
+            const normalizedHash = hash.trim().toLowerCase();
+            if (!normalizedHash) return null;
+            return (
+                items.find((commit) => {
+                    const fullHash = commit.hash.toLowerCase();
+                    const shortHash = commit.shortHash.toLowerCase();
+                    return (
+                        fullHash === normalizedHash ||
+                        shortHash === normalizedHash ||
+                        fullHash.startsWith(normalizedHash) ||
+                        shortHash.startsWith(normalizedHash)
+                    );
+                }) ?? null
+            );
+        },
+        [],
+    );
+
     useEffect(() => {
         vscode.postMessage({ type: "ready" });
 
@@ -213,12 +234,16 @@ function App(): React.ReactElement {
                         setCommits((prev) => [...prev, ...data.commits]);
                     } else {
                         setCommits(data.commits);
-                        if (data.commits.length > 0) {
-                            setSelectedHash(data.commits[0].hash);
+                        const targetCommit = pendingRevealHash.current
+                            ? findCommitByHash(data.commits, pendingRevealHash.current)
+                            : null;
+                        const nextSelectedCommit = targetCommit ?? data.commits[0] ?? null;
+                        if (nextSelectedCommit) {
+                            setSelectedHash(nextSelectedCommit.hash);
                             vscode.postMessage({
                                 type: "selectCommit",
-                                hash: data.commits[0].hash,
-                                repoRoot: data.commits[0].repoRoot,
+                                hash: nextSelectedCommit.hash,
+                                repoRoot: nextSelectedCommit.repoRoot,
                             });
                         }
                     }
@@ -310,6 +335,7 @@ function App(): React.ReactElement {
                     setCommitFolderIconsByName(undefined);
                     break;
                 case "revealCommit":
+                    pendingRevealHash.current = null;
                     setSelectedHash(data.hash);
                     setRevealHash(data.hash);
                     break;
@@ -329,7 +355,7 @@ function App(): React.ReactElement {
 
         window.addEventListener("message", handler);
         return () => window.removeEventListener("message", handler);
-    }, []);
+    }, [findCommitByHash]);
 
     useEffect(() => {
         try {
@@ -349,10 +375,19 @@ function App(): React.ReactElement {
     }, [commits]);
 
     const handleRevealCommit = useCallback((hash: string) => {
+        pendingRevealHash.current = hash;
+        const selectedCommit = findCommitByHash(commits, hash);
+        if (selectedCommit) {
+            vscode.postMessage({
+                type: "selectCommit",
+                hash: selectedCommit.hash,
+                repoRoot: selectedCommit.repoRoot,
+            });
+        }
         setSelectedHash(hash);
         setRevealHash(hash);
         vscode.postMessage({ type: "revealCommit", hash });
-    }, []);
+    }, [commits, findCommitByHash]);
 
     const handleFilterText = useCallback((text: string) => {
         setFilterText(text);
