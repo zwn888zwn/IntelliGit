@@ -23,7 +23,7 @@ interface Props {
     depth: number;
     selectedBranch: string | null;
     expandedFolders: Set<string>;
-    onSelectBranch: (name: string | null) => void;
+    onSelectBranch: (name: string | null, hash?: string) => void;
     onToggleFolder: (key: string) => void;
     onContextMenu: (event: React.MouseEvent, branch: Branch) => void;
     filterNeedle: string;
@@ -187,7 +187,7 @@ export function BranchTreeNodeRow({
     const isSelected = selectedBranch === node.fullName;
     const handleSelectBranch = (): void => {
         if (!node.fullName) return;
-        onSelectBranch(node.fullName);
+        onSelectBranch(node.fullName, node.branch?.hash);
     };
 
     return (

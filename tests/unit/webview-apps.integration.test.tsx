@@ -428,7 +428,7 @@ describe("CommitGraphApp integration", () => {
 
     it("renders all repository worktrees and keeps row actions repository-scoped", async () => {
         vi.resetModules();
-        const vscode = installVsCodeMock();
+        installVsCodeMock();
         const rootHost = createRootHost();
         void rootHost;
 
@@ -746,7 +746,7 @@ describe("CommitGraphApp integration", () => {
             );
         });
         await flush();
-        expect(document.body.textContent).toContain("Branch: features/right-click-context");
+        expect(document.body.textContent).toContain("Branch: All branches");
         const viewport = document.querySelector(
             '[data-testid="commit-list-viewport"]',
         ) as HTMLDivElement | null;
@@ -756,7 +756,25 @@ describe("CommitGraphApp integration", () => {
                 value: 20,
                 configurable: true,
             });
+            Object.defineProperty(viewport, "scrollTop", {
+                value: 90,
+                writable: true,
+                configurable: true,
+            });
         }
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "revealCommit",
+                        hash: "cc33",
+                    },
+                }),
+            );
+        });
+        await flush();
+        expect(viewport?.scrollTop).toBeGreaterThan(0);
 
         const changedFileRow = document.querySelector(
             '[title="src/feature.ts"]',
@@ -770,6 +788,52 @@ describe("CommitGraphApp integration", () => {
             row.textContent?.includes("HEAD (main)"),
         ) as HTMLElement;
         fireClick(branchRow);
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "loadCommits",
+                        append: false,
+                        hasMore: true,
+                        unpushedHashes: ["aa11"],
+                        commits: [
+                            {
+                                hash: "aa11",
+                                shortHash: "aa11",
+                                message: "feat: first commit",
+                                author: "Mahesh",
+                                email: "m@example.com",
+                                date: "2026-02-19T00:00:00Z",
+                                parentHashes: ["p1"],
+                                refs: ["HEAD -> main"],
+                            },
+                            {
+                                hash: "bb22",
+                                shortHash: "bb22",
+                                message: "Merge pull request #4",
+                                author: "Mahesh",
+                                email: "m@example.com",
+                                date: "2026-02-18T00:00:00Z",
+                                parentHashes: ["p1", "p2"],
+                                refs: [],
+                            },
+                            {
+                                hash: "cc33",
+                                shortHash: "cc33",
+                                message: "feat: appended",
+                                author: "Mahesh",
+                                email: "m@example.com",
+                                date: "2026-02-19T01:00:00Z",
+                                parentHashes: ["bb22"],
+                                refs: [],
+                            },
+                        ],
+                    },
+                }),
+            );
+        });
+        await flush();
+        expect(viewport?.scrollTop).toBe(0);
         act(() => {
             branchRow.dispatchEvent(
                 new MouseEvent("contextmenu", {

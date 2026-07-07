@@ -163,11 +163,10 @@ describe("CommitList integration", () => {
             },
         ];
         const onSelectCommit = vi.fn();
-        const onRevealCommit = vi.fn();
         const onFilterText = vi.fn();
         const onLoadMore = vi.fn();
         const onCommitAction = vi.fn();
-        const { root, container } = mount(
+        const renderCommitList = (revealHash: string | null) => (
             <CommitList
                 commits={commits}
                 repositories={[
@@ -187,8 +186,7 @@ describe("CommitList integration", () => {
                     color: "#4CAF50",
                 }}
                 selectedHash={null}
-                currentCommitRefs={[{ repoRoot: "/repo-a", hash: "aaa1111" }]}
-                revealHash={null}
+                revealHash={revealHash}
                 filterText=""
                 hasMore={true}
                 unpushedHashes={new Set(["aaa1111"])}
@@ -196,12 +194,12 @@ describe("CommitList integration", () => {
                 repoRailExpanded={false}
                 onToggleRepoRail={vi.fn()}
                 onSelectCommit={onSelectCommit}
-                onRevealCommit={onRevealCommit}
                 onFilterText={onFilterText}
                 onLoadMore={onLoadMore}
                 onCommitAction={onCommitAction}
-            />,
+            />
         );
+        const { root, container } = mount(renderCommitList(null));
 
         const filterInput = container.querySelector(
             'input[placeholder="Text or hash"]',
@@ -209,13 +207,6 @@ describe("CommitList integration", () => {
         expect(filterInput).toBeTruthy();
         expect(container.textContent).toContain("Hash");
         expect(container.textContent).toContain("aaa1111");
-        const locateButton = container.querySelector(
-            'button[aria-label="Locate current branch commit"]',
-        ) as HTMLButtonElement;
-        act(() => {
-            locateButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        });
-        expect(onRevealCommit).toHaveBeenCalledWith("aaa1111");
         const valueSetter = Object.getOwnPropertyDescriptor(
             HTMLInputElement.prototype,
             "value",
@@ -266,6 +257,16 @@ describe("CommitList integration", () => {
             viewport.dispatchEvent(new Event("scroll", { bubbles: true }));
         });
         expect(onLoadMore).toHaveBeenCalled();
+
+        Object.defineProperty(viewport, "scrollTop", {
+            value: 90,
+            writable: true,
+            configurable: true,
+        });
+        act(() => {
+            root.render(renderCommitList("aaa1111"));
+        });
+        expect(viewport.scrollTop).toBe(0);
 
         unmount(root, container);
     });

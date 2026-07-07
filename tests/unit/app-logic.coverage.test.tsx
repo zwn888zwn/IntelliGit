@@ -47,7 +47,7 @@ describe("app logic coverage", () => {
     it("CommitGraphApp handles callback and drag branches", async () => {
         const postMessage = vi.fn();
         type BranchColumnMockProps = {
-            onSelectBranch: (branch: string | null) => void;
+            onSelectBranch: (branch: string | null, hash?: string) => void;
             onBranchAction: (action: BranchAction, branch: string) => void;
         };
         type CommitListMockProps = {
@@ -63,7 +63,10 @@ describe("app logic coverage", () => {
         vi.doMock("../../src/webviews/react/BranchColumn", () => ({
             BranchColumn: (props: BranchColumnMockProps) => (
                 <div>
-                    <button id="branch-main" onClick={() => props.onSelectBranch("main")} />
+                    <button
+                        id="branch-main"
+                        onClick={() => props.onSelectBranch("main", "abc1234")}
+                    />
                     <button id="branch-null" onClick={() => props.onSelectBranch(null)} />
                     <button
                         id="branch-action"
@@ -163,6 +166,7 @@ describe("app logic coverage", () => {
 
         const types = postMessage.mock.calls.map((c) => c[0]?.type);
         expect(types).toContain("ready");
+        expect(types).toContain("revealCommit");
         expect(types).toContain("filterBranch");
         expect(types).toContain("branchAction");
         expect(types).toContain("commitAction");

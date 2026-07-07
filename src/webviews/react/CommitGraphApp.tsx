@@ -110,6 +110,7 @@ function App(): React.ReactElement {
     const [repository, setRepository] = useState<RepositoryContextInfo | null>(null);
     const [selectedHash, setSelectedHash] = useState<string | null>(null);
     const [revealHash, setRevealHash] = useState<string | null>(null);
+    const [scrollToTopSignal, setScrollToTopSignal] = useState(0);
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const [filterText, setFilterText] = useState("");
@@ -174,6 +175,8 @@ function App(): React.ReactElement {
     const [unpushedHashes, setUnpushedHashes] = useState<Set<string>>(new Set());
     const loadingMore = useRef(false);
     const pendingRevealHash = useRef<string | null>(null);
+    const pendingScrollToTop = useRef(false);
+    const preserveSelectedBranchOnReveal = useRef(false);
     const onDividerMouseDown = useColumnDrag(
         branchWidth,
         setBranchWidth,
@@ -246,6 +249,10 @@ function App(): React.ReactElement {
                                 repoRoot: nextSelectedCommit.repoRoot,
                             });
                         }
+                        if (pendingScrollToTop.current) {
+                            setScrollToTopSignal((value) => value + 1);
+                            pendingScrollToTop.current = false;
+                        }
                     }
                     setHasMore(data.hasMore);
                     setUnpushedHashes(new Set(data.unpushedHashes ?? []));
@@ -273,6 +280,13 @@ function App(): React.ReactElement {
                     setRepositoryWorktrees(data.worktreesByRoot);
                     break;
                 case "setSelectedBranch":
+                    if (
+                        data.branch === null &&
+                        preserveSelectedBranchOnReveal.current &&
+                        pendingRevealHash.current
+                    ) {
+                        break;
+                    }
                     setSelectedBranch(data.branch ?? null);
                     break;
                 case "setFilterText":
@@ -335,11 +349,13 @@ function App(): React.ReactElement {
                     setCommitFolderIconsByName(undefined);
                     break;
                 case "revealCommit":
+                    preserveSelectedBranchOnReveal.current = false;
                     pendingRevealHash.current = null;
                     setSelectedHash(data.hash);
                     setRevealHash(data.hash);
                     break;
                 case "loadError":
+                    preserveSelectedBranchOnReveal.current = false;
                     if (!loadingMore.current) {
                         setCommits([]);
                     }
@@ -403,11 +419,23 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "loadMore" });
     }, []);
 
-    const handleSelectBranch = useCallback((name: string | null) => {
-        setSelectedBranch(name);
+    const handleSelectBranch = useCallback((name: string | null, hash?: string) => {
         loadingMore.current = false;
+        if (hash) {
+            setSelectedBranch(name);
+            preserveSelectedBranchOnReveal.current = true;
+            handleRevealCommit(hash);
+            return;
+        }
+        setSelectedBranch(name);
+        pendingRevealHash.current = null;
+        preserveSelectedBranchOnReveal.current = false;
+        setRevealHash(null);
+        if (name === null) {
+            pendingScrollToTop.current = true;
+        }
         vscode.postMessage({ type: "filterBranch", branch: name });
-    }, []);
+    }, [handleRevealCommit]);
 
     const handleBranchAction = useCallback((
         action: BranchAction,
@@ -528,10 +556,11 @@ function App(): React.ReactElement {
                             selectedHash={selectedHash}
                             currentCommitRefs={currentCommitRefs}
                             revealHash={revealHash}
+                            scrollToTopSignal={scrollToTopSignal}
                             filterText={filterText}
                             hasMore={hasMore}
                             unpushedHashes={unpushedHashes}
-                            selectedBranch={selectedBranch}
+                            selectedBranch={null}
                             repoRailExpanded={repoRailExpanded}
                             onToggleRepoRail={() => setRepoRailExpanded((value) => !value)}
                             onSelectCommit={handleSelectCommit}

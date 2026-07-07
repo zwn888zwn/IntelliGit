@@ -59,7 +59,7 @@ interface Props {
     worktreeLocationSelection?: { seq: number; location: string } | null;
     worktreeCreateError?: { success: false; message: string } | null;
     worktreeDeleteResult?: { seq: number; success: true; path: string } | { seq: number; success: false; message: string } | null;
-    onSelectBranch: (name: string | null) => void;
+    onSelectBranch: (name: string | null, hash?: string) => void;
     onBranchAction: (
         action: BranchAction,
         branchName: string,
