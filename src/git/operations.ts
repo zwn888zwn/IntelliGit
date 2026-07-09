@@ -782,6 +782,25 @@ export class GitOps {
         }
     }
 
+    async isRebaseInProgress(): Promise<boolean> {
+        const repoRoot = this.repoMetadata?.repoRoot?.trim();
+        if (!repoRoot) return false;
+        const gitDir = this.resolveGitDir(repoRoot);
+        for (const rebaseDir of ["rebase-merge", "rebase-apply"]) {
+            try {
+                await fs.promises.access(path.join(gitDir, rebaseDir));
+                return true;
+            } catch {
+                // Try the other rebase state directory.
+            }
+        }
+        return false;
+    }
+
+    async continueRebase(): Promise<string> {
+        return this.executor.run(["rebase", "--continue"]);
+    }
+
     async abortMerge(): Promise<string> {
         return this.executor.run(["merge", "--abort"]);
     }

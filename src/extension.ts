@@ -556,6 +556,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // --- Merge conflict helpers ---
 
     let isFinalizingMerge = false;
+    let isContinuingRebase = false;
 
     const ensureRepositoryContextActive = async (repository: RepositoryEntry): Promise<void> => {
         if (repository.root === getCurrentRepository()?.root) return;
@@ -587,6 +588,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
     };
 
+    const continueRebaseIfReady = async (
+        repository: RepositoryEntry = requireCurrentRepository(),
+    ): Promise<boolean> => {
+        if (isContinuingRebase) return false;
+        const conflicts = await repository.gitOps.getConflictFilesDetailed();
+        if (conflicts.length > 0) return false;
+        if (!(await repository.gitOps.isRebaseInProgress())) return false;
+
+        isContinuingRebase = true;
+        try {
+            await ensureRepositoryContextActive(repository);
+            await runWithNotificationProgress("Continuing rebase...", async () => {
+                await repository.gitOps.continueRebase();
+            });
+            vscode.window.showInformationMessage("Rebase continued successfully.");
+            await vscode.commands.executeCommand("intelligit.refresh");
+            return true;
+        } finally {
+            isContinuingRebase = false;
+        }
+    };
+
     const handleConflictStateChanged = async (
         repository: RepositoryEntry,
         resolvedPath?: string,
@@ -600,6 +623,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 repoRoot: repository.root,
             });
         }
+        if (await continueRebaseIfReady(repository)) return;
         await finalizeMergeIfReady(repository);
     };
 

@@ -526,11 +526,7 @@
     background: rgba(78, 161, 255, 0.32);
 }
 .result-editor-textarea:focus {
-    background: color-mix(
-        in srgb,
-        var(--vscode-editor-background) 96%,
-        transparent
-    );
+    background: transparent;
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--merge-accent) 45%, transparent);
 }
 .editable-code-shell.editing .code-scroll-preview {

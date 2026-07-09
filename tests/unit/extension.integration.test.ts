@@ -261,6 +261,8 @@ const gitOpsState = {
     commit: vi.fn(async () => "committed"),
     commitAndPush: vi.fn(async () => "committed and pushed"),
     isMergeInProgress: vi.fn(async () => false),
+    isRebaseInProgress: vi.fn(async () => false),
+    continueRebase: vi.fn(async () => "continued"),
     abortMerge: vi.fn(async () => ""),
     getPendingCommitMessage: vi.fn(async () => ""),
     push: vi.fn(async () => ""),
@@ -926,6 +928,8 @@ describe("extension integration", () => {
         gitOpsState.commit.mockResolvedValue("committed");
         gitOpsState.commitAndPush.mockResolvedValue("committed and pushed");
         gitOpsState.isMergeInProgress.mockResolvedValue(false);
+        gitOpsState.isRebaseInProgress.mockResolvedValue(false);
+        gitOpsState.continueRebase.mockResolvedValue("continued");
         gitOpsState.abortMerge.mockResolvedValue("");
         gitOpsState.getPendingCommitMessage.mockResolvedValue("");
         deleteFileWithFallback.mockResolvedValue(true);
@@ -1853,6 +1857,31 @@ describe("extension integration", () => {
             false,
         );
         expect(showInformationMessage).toHaveBeenCalledWith("Merge committed successfully.");
+    });
+
+    it("continues the rebase after the final conflict is resolved", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
+        gitOpsState.isRebaseInProgress.mockResolvedValue(true);
+
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/final-rebase-conflict.ts",
+        });
+        await latestWebviewPanel?.emitMessage({
+            type: "applyResolution",
+            content: "resolved\n",
+        });
+
+        expect(gitOpsState.stageFile).toHaveBeenCalledWith("src/final-rebase-conflict.ts");
+        expect(gitOpsState.continueRebase).toHaveBeenCalled();
+        expect(gitOpsState.commit).not.toHaveBeenCalled();
+        expect(showInformationMessage).toHaveBeenCalledWith("Rebase continued successfully.");
     });
 
     it("opens existing merge conflicts instead of starting another merge", async () => {
