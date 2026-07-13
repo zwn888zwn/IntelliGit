@@ -27,6 +27,7 @@ export type OutboundMessage =
     | { type: "getLastCommitMessage" }
     | { type: "rollback"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
+    | { type: "showStageDiff"; target: RepoPathRef; staged: boolean }
     | {
           type: "shelveSave";
           name?: string;

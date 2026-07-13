@@ -6,8 +6,8 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@chakra-ui/react";
 
 interface Props {
     stashCount: number;
-    repositoryLabel: string;
     commitContent: React.ReactNode;
+    stageContent: React.ReactNode;
     shelfContent: React.ReactNode;
 }
 
@@ -29,12 +29,13 @@ const sharedTabStyles = {
 
 export function TabBar({
     stashCount,
-    repositoryLabel,
     commitContent,
+    stageContent,
     shelfContent,
 }: Props): React.ReactElement {
     const tabs: Array<{ key: string; label: string; content: React.ReactNode }> = [
         { key: "commit", label: "Commit", content: commitContent },
+        { key: "stage", label: "Stage", content: stageContent },
         {
             key: "shelf",
             label: `Stash${stashCount > 0 ? ` (${stashCount})` : ""}`,
@@ -47,29 +48,13 @@ export function TabBar({
             <TabList
                 borderBottom="1px solid var(--vscode-panel-border, #444)"
                 flexShrink={0}
-                justifyContent="space-between"
                 alignItems="flex-end"
             >
-                <div style={{ display: "flex" }}>
-                    {tabs.map((tab) => (
-                        <Tab key={tab.key} {...sharedTabStyles}>
-                            {tab.label}
-                        </Tab>
-                    ))}
-                </div>
-                <div
-                    style={{
-                        padding: "0 12px 8px",
-                        fontSize: "11px",
-                        color: "var(--vscode-descriptionForeground)",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                    }}
-                    title={repositoryLabel}
-                >
-                    Repo: {repositoryLabel}
-                </div>
+                {tabs.map((tab) => (
+                    <Tab key={tab.key} {...sharedTabStyles}>
+                        {tab.label}
+                    </Tab>
+                ))}
             </TabList>
             <TabPanels flex={1} overflow="hidden" display="flex" flexDirection="column">
                 {tabs.map((tab) => (

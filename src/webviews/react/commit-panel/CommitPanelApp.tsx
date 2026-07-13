@@ -7,6 +7,7 @@ import { ChakraProvider, Box } from "@chakra-ui/react";
 import theme from "./theme";
 import { TabBar } from "./components/TabBar";
 import { CommitTab } from "./components/CommitTab";
+import { StageTab } from "./components/StageTab";
 import { ShelfTab } from "./components/ShelfTab";
 import { StashDialog } from "./components/StashDialog";
 import { useExtensionMessages } from "./hooks/useExtensionMessages";
@@ -20,8 +21,17 @@ const EMPTY_REPOSITORIES: RepositoryContextInfo[] = [];
 function App(): React.ReactElement {
     const [state, dispatch] = useExtensionMessages();
     const repositories = state.repositories ?? EMPTY_REPOSITORIES;
+    const commitFiles = useMemo(() => {
+        const byPath = new Map<string, (typeof state.files)[number]>();
+        for (const file of state.files) {
+            const key = getCheckedFileKey(file);
+            const current = byPath.get(key);
+            if (!current || !file.staged) byPath.set(key, file);
+        }
+        return Array.from(byPath.values());
+    }, [state.files]);
     const { checkedPaths, toggleFile, toggleFolder, toggleSection, isAllChecked, isSomeChecked } =
-        useCheckedFiles(state.files);
+        useCheckedFiles(commitFiles);
 
     const vscode = getVsCodeApi();
     const [groupByDir, setGroupByDir] = useState<boolean>(() => {
@@ -36,10 +46,10 @@ function App(): React.ReactElement {
 
     const checkedTargets = useMemo(
         () =>
-            state.files
+            commitFiles
                 .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
                 .map((file) => ({ repoRoot: file.repoRoot, path: file.path })),
-        [checkedPaths, state.files],
+        [checkedPaths, commitFiles],
     );
 
     const [isStashDialogOpen, setIsStashDialogOpen] = useState(false);
@@ -73,7 +83,7 @@ function App(): React.ReactElement {
     const stageCheckedAndCommit = useCallback(
         (push: boolean) => {
             const msg = state.commitMessage.trim();
-            const targets = state.files
+            const targets = commitFiles
                 .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
                 .map((file) => ({ repoRoot: file.repoRoot, path: file.path }));
             vscode.postMessage({
@@ -84,7 +94,7 @@ function App(): React.ReactElement {
                 push,
             });
         },
-        [vscode, state.commitMessage, state.isAmend, checkedPaths],
+        [vscode, state.commitMessage, state.isAmend, checkedPaths, commitFiles],
     );
 
     const handleCommit = useCallback(() => {
@@ -140,12 +150,19 @@ function App(): React.ReactElement {
                 />
                 <TabBar
                     stashCount={state.stashes.length}
-                    repositoryLabel={
-                        state.repository?.relativePath ?? state.repository?.name ?? "No repository"
+                    stageContent={
+                        <StageTab
+                            files={state.files}
+                            repositories={repositories}
+                            folderIcon={state.folderIcon}
+                            folderExpandedIcon={state.folderExpandedIcon}
+                            folderIconsByName={state.folderIconsByName}
+                            groupByDir={groupByDir}
+                        />
                     }
                     commitContent={
                         <CommitTab
-                            files={state.files}
+                            files={commitFiles}
                             repositories={repositories}
                             currentRepository={state.repository}
                             activeFile={state.activeFile}

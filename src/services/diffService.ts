@@ -1034,6 +1034,61 @@ export async function openWorkingTreeFileDiff(
     await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
 }
 
+export async function openStageFileDiff(
+    file: WorkingFile,
+    repoRoot: string,
+    gitOps: GitOps,
+): Promise<void> {
+    const safePath = assertRepoRelativePath(file.path);
+    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+    const isKnownBinary = isBinaryFilePath(safePath);
+    const readRef = async (ref: "HEAD" | ":0", missing: boolean): Promise<string> => {
+        if (missing) return "";
+        if (isKnownBinary) return binaryPlaceholder(safePath, ref === "HEAD" ? "HEAD" : "index");
+        return gitOps.getFileContentAtRef(safePath, ref).catch(() => "");
+    };
+
+    const leftLabel = file.staged ? "HEAD" : "index";
+    const rightLabel = file.staged ? "index" : "working tree";
+    const leftContent = file.staged
+        ? await readRef("HEAD", file.status === "A" || file.status === "?")
+        : await readRef(":0", file.status === "?");
+    const leftSnapshot = makeTextDiffSnapshot(safePath, leftContent, leftLabel);
+    const diffProvider = getDiffContentProvider();
+    const leftDoc = await vscode.workspace.openTextDocument(
+        diffProvider.createUri(safePath, leftLabel, leftSnapshot.content, {
+            forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+        }),
+    );
+
+    let rightUri: vscode.Uri;
+    if (file.staged) {
+        const rightContent = await readRef(":0", file.status === "D");
+        const rightSnapshot = makeTextDiffSnapshot(safePath, rightContent, rightLabel);
+        const rightDoc = await vscode.workspace.openTextDocument(
+            diffProvider.createUri(safePath, rightLabel, rightSnapshot.content, {
+                forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+            }),
+        );
+        rightUri = rightDoc.uri;
+    } else if (file.status !== "D" && !isKnownBinary && (await fileExists(workingTreeUri))) {
+        rightUri = workingTreeUri;
+    } else {
+        const rightContent =
+            file.status === "D" ? "" : await readWorkingTreeTextSnapshot(workingTreeUri);
+        const rightSnapshot = makeTextDiffSnapshot(safePath, rightContent, rightLabel);
+        const rightDoc = await vscode.workspace.openTextDocument(
+            diffProvider.createUri(safePath, rightLabel, rightSnapshot.content, {
+                forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+            }),
+        );
+        rightUri = rightDoc.uri;
+    }
+
+    const title = `${safePath} (${file.staged ? "HEAD ↔ Index" : "Index ↔ Working Tree"})`;
+    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
+}
+
 async function fileExists(uri: vscode.Uri): Promise<boolean> {
     try {
         await vscode.workspace.fs.stat(uri);

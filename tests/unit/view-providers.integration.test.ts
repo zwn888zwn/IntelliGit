@@ -793,6 +793,69 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("CommitPanelViewProvider warns for partially staged files and opens stage-specific diffs", async () => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        gitOps.getStatus.mockResolvedValue([
+            {
+                repoId: ".",
+                repoRoot: "/repo",
+                path: "src/a.ts",
+                status: "M",
+                staged: true,
+                additions: 1,
+                deletions: 0,
+            },
+            {
+                repoId: ".",
+                repoRoot: "/repo",
+                path: "src/a.ts",
+                status: "M",
+                staged: false,
+                additions: 1,
+                deletions: 1,
+            },
+        ]);
+        await webview.send({ type: "refresh" });
+        gitOps.stageFiles.mockClear();
+
+        await webview.send({
+            type: "commitSelected",
+            message: "feat: partial",
+            amend: false,
+            push: false,
+            paths: ["src/a.ts"],
+        });
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "该文件还有未暂存的新修改，继续提交会将最新工作区版本一并暂存和提交。",
+            { modal: true },
+            "继续提交",
+        );
+        expect(gitOps.stageFiles).not.toHaveBeenCalled();
+
+        showWarningMessage.mockResolvedValueOnce("继续提交");
+        await webview.send({
+            type: "commitSelected",
+            message: "feat: partial",
+            amend: false,
+            push: false,
+            paths: ["src/a.ts"],
+        });
+        expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
+
+        await webview.send({
+            type: "showStageDiff",
+            target: { repoRoot: "/repo", path: "src/a.ts" },
+            staged: true,
+        });
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.anything(),
+            expect.anything(),
+            "src/a.ts (HEAD ↔ Index)",
+        );
+        provider.dispose();
+    });
+
     it("CommitPanelViewProvider validates malformed commit payloads defensively", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
 

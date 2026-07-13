@@ -21,6 +21,7 @@ import {
     getDiffOriginalFilePathFromUri,
     getRepoRelativeFilePathFromUri,
     openShelvedFileDiff,
+    openStageFileDiff,
     openWorkingTreeFileDiff,
 } from "../services/diffService";
 import { buildFileTree, type TreeEntry } from "../webviews/react/shared/fileTree";
@@ -462,6 +463,20 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         await openWorkingTreeFileDiff(file, repository.root, repository.gitOps);
     }
 
+    async openStageDiff(target: RepoPathRef, staged: boolean): Promise<void> {
+        const repository = this.getRepositoryEntry(target.repoRoot);
+        const safePath = assertRepoRelativePath(target.path);
+        this.setActiveFile({ repoRoot: repository.root, path: safePath });
+        const file = this.files.find(
+            (item) =>
+                item.repoRoot === repository.root &&
+                item.path === safePath &&
+                item.staged === staged,
+        );
+        if (!file) throw new Error(`File status is no longer available: ${safePath}`);
+        await openStageFileDiff(file, repository.root, repository.gitOps);
+    }
+
     async canNavigateWorkingFileChange(direction: "next" | "previous"): Promise<boolean> {
         if (!this.activeFile) return false;
         const changeRanges = await this.getActiveFileChangeRanges();
@@ -481,6 +496,18 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
         }
         return grouped;
+    }
+
+    private hasPartiallyStagedTarget(targets: RepoPathRef[]): boolean {
+        return targets.some((target) => {
+            const matchingFiles = this.files.filter(
+                (file) => file.repoRoot === target.repoRoot && file.path === target.path,
+            );
+            return (
+                matchingFiles.some((file) => file.staged) &&
+                matchingFiles.some((file) => !file.staged)
+            );
+        });
     }
 
     private async runGroupedTargets(
@@ -577,6 +604,14 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 if (targets.length === 0 && !amend) {
                     vscode.window.showWarningMessage("Select files to commit.");
                     return;
+                }
+                if (!amend && this.hasPartiallyStagedTarget(targets)) {
+                    const choice = await vscode.window.showWarningMessage(
+                        "该文件还有未暂存的新修改，继续提交会将最新工作区版本一并暂存和提交。",
+                        { modal: true },
+                        "继续提交",
+                    );
+                    if (choice !== "继续提交") return;
                 }
                 if (amend || targets.length === 0) {
                     let pushOutput = "";
@@ -718,6 +753,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             case "showDiff": {
                 const target = this.getMessageTarget(msg);
                 await this.openWorkingFileDiff(target);
+                break;
+            }
+
+            case "showStageDiff": {
+                const target = this.getMessageTarget(msg);
+                await this.openStageDiff(target, msg.staged === true);
                 break;
             }
 
