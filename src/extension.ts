@@ -57,6 +57,7 @@ import {
 import {
     buildWorktreeAddArgs,
     buildWorktreeRemoveArgs,
+    copyWorktreeLocalFiles,
     findWorktreeForBranch,
     getDefaultWorktreeLocation,
     getDefaultWorktreeProjectName,
@@ -1172,6 +1173,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     }),
                 );
             });
+
+            try {
+                await copyWorktreeLocalFiles(repository.root, targetPath);
+            } catch (error) {
+                vscode.window.showWarningMessage(
+                    `Worktree created, but failed to copy .env or .vscode: ${getErrorMessage(error)}`,
+                );
+            }
 
             commitGraph.setWorktreeCreateResult({ success: true, path: targetPath });
             await refreshRepositoryWorktrees(repository);

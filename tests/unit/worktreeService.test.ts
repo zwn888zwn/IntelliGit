@@ -6,6 +6,7 @@ import type { Branch } from "../../src/types";
 import {
     buildWorktreeAddArgs,
     buildWorktreeRemoveArgs,
+    copyWorktreeLocalFiles,
     findWorktreeForBranch,
     getDefaultWorktreeLocation,
     getDefaultWorktreeProjectName,
@@ -55,6 +56,30 @@ describe("worktreeService", () => {
         await expect(resolveAndValidateWorktreeTarget(parent, "new-worktree")).rejects.toThrow(
             "already exists",
         );
+    });
+
+    it("copies local worktree files without overwriting checked out files", async () => {
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-worktree-copy-"));
+        const repoRoot = path.join(parent, "repo");
+        const target = path.join(parent, "target");
+        await fs.mkdir(path.join(repoRoot, ".vscode"), { recursive: true });
+        await fs.mkdir(path.join(target, ".vscode"), { recursive: true });
+        await fs.writeFile(path.join(repoRoot, ".env"), "TOKEN=local\n");
+        await fs.writeFile(path.join(repoRoot, ".vscode", "settings.json"), "local settings\n");
+        await fs.writeFile(path.join(repoRoot, ".vscode", "extensions.json"), "local extensions\n");
+        await fs.writeFile(path.join(target, ".vscode", "extensions.json"), "tracked extensions\n");
+
+        await copyWorktreeLocalFiles(repoRoot, target);
+
+        await expect(fs.readFile(path.join(target, ".env"), "utf8")).resolves.toBe(
+            "TOKEN=local\n",
+        );
+        await expect(
+            fs.readFile(path.join(target, ".vscode", "settings.json"), "utf8"),
+        ).resolves.toBe("local settings\n");
+        await expect(
+            fs.readFile(path.join(target, ".vscode", "extensions.json"), "utf8"),
+        ).resolves.toBe("tracked extensions\n");
     });
 
     it("parses worktree porcelain output and detects checked out local branches", () => {

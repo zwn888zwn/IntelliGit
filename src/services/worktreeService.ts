@@ -13,6 +13,8 @@ export interface RemoteBranchTarget {
     remoteBranch: string;
 }
 
+const WORKTREE_LOCAL_PATHS = [".env", ".vscode"] as const;
+
 export function sanitizeWorktreeNamePart(value: string): string {
     const sanitized = replaceControlCharsWithDash(value.trim())
         .replace(/[\\/]+/g, "-")
@@ -28,6 +30,28 @@ export function getDefaultWorktreeLocation(repoRoot: string): string {
 
 export function getDefaultWorktreeProjectName(repoRoot: string, branchName: string): string {
     return `${path.basename(repoRoot)}-${sanitizeWorktreeNamePart(branchName)}`;
+}
+
+export async function copyWorktreeLocalFiles(
+    repoRoot: string,
+    targetPath: string,
+): Promise<void> {
+    await Promise.all(
+        WORKTREE_LOCAL_PATHS.map(async (relativePath) => {
+            const source = path.join(repoRoot, relativePath);
+            const target = path.join(targetPath, relativePath);
+            try {
+                await fs.cp(source, target, {
+                    recursive: true,
+                    force: false,
+                    errorOnExist: false,
+                });
+            } catch (error) {
+                if (isNodeError(error) && error.code === "ENOENT") return;
+                throw error;
+            }
+        }),
+    );
 }
 
 export function validateWorktreeProjectName(projectName: string): string | null {
