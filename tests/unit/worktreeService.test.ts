@@ -64,15 +64,15 @@ describe("worktreeService", () => {
         const target = path.join(parent, "target");
         await fs.mkdir(path.join(repoRoot, ".vscode"), { recursive: true });
         await fs.mkdir(path.join(target, ".vscode"), { recursive: true });
-        await fs.writeFile(path.join(repoRoot, ".env"), "TOKEN=local\n");
+        await fs.writeFile(path.join(repoRoot, ".envrc"), "export TOKEN=local\n");
         await fs.writeFile(path.join(repoRoot, ".vscode", "settings.json"), "local settings\n");
         await fs.writeFile(path.join(repoRoot, ".vscode", "extensions.json"), "local extensions\n");
         await fs.writeFile(path.join(target, ".vscode", "extensions.json"), "tracked extensions\n");
 
         await copyWorktreeLocalFiles(repoRoot, target);
 
-        await expect(fs.readFile(path.join(target, ".env"), "utf8")).resolves.toBe(
-            "TOKEN=local\n",
+        await expect(fs.readFile(path.join(target, ".envrc"), "utf8")).resolves.toBe(
+            "export TOKEN=local\n",
         );
         await expect(
             fs.readFile(path.join(target, ".vscode", "settings.json"), "utf8"),

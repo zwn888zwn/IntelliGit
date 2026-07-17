@@ -13,7 +13,7 @@ export interface RemoteBranchTarget {
     remoteBranch: string;
 }
 
-const WORKTREE_LOCAL_PATHS = [".env", ".vscode"] as const;
+const WORKTREE_LOCAL_PATHS = [".envrc", ".vscode"] as const;
 
 export function sanitizeWorktreeNamePart(value: string): string {
     const sanitized = replaceControlCharsWithDash(value.trim())
