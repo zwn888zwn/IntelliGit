@@ -1349,6 +1349,46 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("openWorkingTreeFileDiff previews untracked images against an empty image", async () => {
+        const { openWorkingTreeFileDiff } = await import("../../src/services/diffService");
+        const gitOps = makeGitOpsMock();
+
+        await openWorkingTreeFileDiff(
+            {
+                repoId: ".",
+                repoRoot: "/repo",
+                path: "assets/new-photo.jpg",
+                status: "?",
+                staged: false,
+                additions: 0,
+                deletions: 0,
+            },
+            "/repo",
+            gitOps as unknown as object,
+        );
+
+        expect(writeFile).toHaveBeenCalledWith(
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            expect.any(Uint8Array),
+        );
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("new-photo.jpg-left.png"),
+            }),
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: "/repo/assets/new-photo.jpg",
+            }),
+            expect.stringContaining("assets/new-photo.jpg"),
+        );
+        expect(openTextDocument).not.toHaveBeenCalled();
+    });
+
     it("CommitPanelViewProvider avoids editable diffs for binary working tree content", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();

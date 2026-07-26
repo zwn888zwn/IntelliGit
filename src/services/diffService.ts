@@ -961,6 +961,20 @@ export async function openWorkingTreeFileDiff(
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
     if (
         isPreviewableImageFilePath(safePath) &&
+        (file.status === "?" || file.status === "A") &&
+        (await fileExists(workingTreeUri))
+    ) {
+        const title = `${safePath} (HEAD ↔ Working Tree)`;
+        await vscode.commands.executeCommand(
+            "vscode.diff",
+            await createTransparentImagePlaceholderUri(safePath, "left"),
+            workingTreeUri,
+            title,
+        );
+        return;
+    }
+    if (
+        isPreviewableImageFilePath(safePath) &&
         file.status !== "?" &&
         file.status !== "A" &&
         file.status !== "D" &&
