@@ -7,6 +7,7 @@ import { buildWebviewShellHtml } from "./webviewHtml";
 import { getErrorMessage } from "../utils/errors";
 import { parseConflictVersions } from "../mergeEditor/conflictParser";
 import type { MergeDiffOptions, MergeEditorData } from "../mergeEditor/conflictParser";
+import { findUniqueSourceLine } from "../mergeEditor/navigation";
 
 export class MergeEditorPanel {
     private static panels = new Map<string, MergeEditorPanel>();
@@ -164,6 +165,26 @@ export class MergeEditorPanel {
                 break;
             }
 
+            case "goToDefinition": {
+                if (
+                    (msg.pane !== "left" &&
+                        msg.pane !== "middle" &&
+                        msg.pane !== "right") ||
+                    typeof msg.lineNumber !== "number" ||
+                    !Number.isInteger(msg.lineNumber) ||
+                    msg.lineNumber < 1 ||
+                    typeof msg.character !== "number" ||
+                    !Number.isInteger(msg.character) ||
+                    msg.character < 0 ||
+                    typeof msg.lineText !== "string" ||
+                    msg.lineText.length > 100_000
+                ) {
+                    return;
+                }
+                await this.goToDefinition(msg.lineNumber, msg.character, msg.lineText);
+                break;
+            }
+
             case "close":
                 this.panel.dispose();
                 break;
@@ -244,6 +265,53 @@ export class MergeEditorPanel {
             `${this.filePath} changed on disk after the merge editor opened. Reopen it to avoid overwriting those changes.`,
         );
         return false;
+    }
+
+    private async goToDefinition(
+        displayedLineNumber: number,
+        displayedCharacter: number,
+        displayedLineText: string,
+    ): Promise<void> {
+        const fileUri = vscode.Uri.joinPath(this.workspaceRoot, this.filePath);
+        const document = await vscode.workspace.openTextDocument(fileUri);
+        const sourceLine = findUniqueSourceLine(
+            document,
+            displayedLineNumber,
+            displayedLineText,
+        );
+        if (sourceLine === undefined) {
+            vscode.window.showInformationMessage(
+                `Cannot reliably map this merge line in ${this.filePath}.`,
+            );
+            return;
+        }
+
+        const sourceText = document.lineAt(sourceLine).text;
+        const character = Math.min(displayedCharacter, sourceText.length);
+        const position = new vscode.Position(
+            sourceLine,
+            character === sourceText.length && character > 0 ? character - 1 : character,
+        );
+        const wordRange = document.getWordRangeAtPosition(position);
+        if (!wordRange) return;
+
+        const definitions = await vscode.commands.executeCommand<
+            Array<vscode.Location | vscode.LocationLink> | undefined
+        >("vscode.executeDefinitionProvider", fileUri, wordRange.start);
+        const target = definitions?.[0];
+        if (!target) return;
+
+        if ("targetUri" in target) {
+            await vscode.window.showTextDocument(target.targetUri, {
+                preview: true,
+                selection: target.targetSelectionRange ?? target.targetRange,
+            });
+            return;
+        }
+        await vscode.window.showTextDocument(target.uri, {
+            preview: true,
+            selection: target.range,
+        });
     }
 }
 

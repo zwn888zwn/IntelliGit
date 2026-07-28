@@ -12,6 +12,13 @@ export type OutboundMessage =
     | { type: "applyResolution"; content: string; mode?: "apply" | "applyNext" }
     | { type: "acceptYours" }
     | { type: "acceptTheirs" }
+    | {
+          type: "goToDefinition";
+          pane: "left" | "middle" | "right";
+          lineNumber: number;
+          character: number;
+          lineText: string;
+      }
     | { type: "confirm"; requestId: number; message: string; confirmLabel: string }
     | { type: "close" };
 

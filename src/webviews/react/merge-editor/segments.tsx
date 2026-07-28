@@ -15,6 +15,8 @@ import {
 } from "./wordDiff";
 import { getEffectiveResultLines, isConflictResolved, splitEditedText } from "./mergeState";
 import { tokenizeSyntaxLine, type SyntaxTokenKind } from "./syntaxHighlight";
+import { highlightLine } from "./shikiHighlighter";
+import { useSyntaxHighlightState, type SyntaxHighlightState } from "./syntaxHighlightContext";
 import type { LineNumberValue } from "./lineNumbers";
 import { LINE_HEIGHT_PX, type MergePane } from "./mergeScrollLayout";
 import { t } from "./i18n";
@@ -37,11 +39,35 @@ interface ColoredSpan {
     className?: string;
 }
 
+const FONT_STYLE_ITALIC = 1;
+const FONT_STYLE_BOLD = 2;
+const FONT_STYLE_UNDERLINE = 4;
+
 /**
- * Tokenizes one line with the merge editor's lightweight highlighter. Keeping
- * this local avoids pulling the upstream grammar runtime into the extension.
+ * Uses Shiki when its grammar runtime is ready, then falls back to the existing
+ * lightweight tokenizer for unsupported languages or initialization failures.
  */
-function coloredSpansForLine(line: string): ColoredSpan[] {
+function coloredSpansForLine(line: string, ctx: SyntaxHighlightState): ColoredSpan[] {
+    if (ctx.ready && ctx.lang) {
+        const shikiTokens = highlightLine(line, ctx.lang, ctx.theme);
+        if (shikiTokens) {
+            return shikiTokens.map((token) => {
+                const style: React.CSSProperties = {};
+                if (token.color) style.color = token.color;
+                if (token.fontStyle) {
+                    if (token.fontStyle & FONT_STYLE_ITALIC) style.fontStyle = "italic";
+                    if (token.fontStyle & FONT_STYLE_BOLD) style.fontWeight = "bold";
+                    if (token.fontStyle & FONT_STYLE_UNDERLINE) {
+                        style.textDecoration = "underline";
+                    }
+                }
+                return {
+                    text: token.text,
+                    style: Object.keys(style).length > 0 ? style : undefined,
+                };
+            });
+        }
+    }
     return tokenizeSyntaxLine(line).map((token) => ({
         text: token.text,
         className: TOKEN_CLASS[token.kind],
@@ -66,10 +92,11 @@ const HighlightedLine = React.memo(function HighlightedLine({
 }: {
     line: string;
 }): React.ReactElement {
-    if (!line) return <>{` `}</>;
+    const ctx = useSyntaxHighlightState();
+    if (!line) return <>{"\u00a0"}</>;
     // Pure syntax-token helper, not a component invocation.
     // react-doctor-disable-next-line react-doctor/no-render-in-render
-    return <>{renderColoredSpans(coloredSpansForLine(line), "line")}</>;
+    return <>{renderColoredSpans(coloredSpansForLine(line, ctx), "line")}</>;
 });
 
 /**
@@ -153,7 +180,8 @@ const WordDiffLine = React.memo(function WordDiffLine({
     line: string;
     compareLine: string;
 }): React.ReactElement {
-    if (!line) return <>{` `}</>;
+    const ctx = useSyntaxHighlightState();
+    if (!line) return <>{"\u00a0"}</>;
     if (line === compareLine) return <HighlightedLine line={line} />;
     if (!compareLine) return <HighlightedLine line={line} />;
 
@@ -162,8 +190,8 @@ const WordDiffLine = React.memo(function WordDiffLine({
         return <HighlightedLine line={line} />;
     }
 
-    const spans = coloredSpansForLine(line);
-    if (spans.length === 0) return <>{` `}</>;
+    const spans = coloredSpansForLine(line, ctx);
+    if (spans.length === 0) return <>{"\u00a0"}</>;
 
     const { changed, whitespace } = buildChangedCharMasks(line, compareLine);
 
@@ -306,6 +334,9 @@ const CodeBlock = React.memo(
                                 className={`code-line ${
                                     isReal ? "real-code-line" : "padding-code-line"
                                 }`}
+                                data-line-number={
+                                    isReal ? (lineNumbers.primary[i] ?? undefined) : undefined
+                                }
                             >
                                 <span className="code-line-content">
                                     {wordHighlight && paddedCompare ? (

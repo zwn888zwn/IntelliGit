@@ -992,6 +992,66 @@ describe("CommitInfoApp integration", () => {
 });
 
 describe("MergeEditorApp integration", () => {
+    it("requests native definition navigation on modifier-click", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/merge-editor/MergeEditorApp");
+        await flush();
+
+        const lineText = "const value = helper();";
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setConflictData",
+                        data: {
+                            filePath: "src/navigation.ts",
+                            oursLabel: "main",
+                            theirsLabel: "feature",
+                            segments: [{ type: "common", lines: [lineText] }],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        const content = document.querySelector(
+            ".col-left .real-code-line .code-line-content",
+        ) as HTMLElement;
+        const helperSpan = Array.from(content.querySelectorAll("span")).find(
+            (span) => span.textContent === "helper",
+        ) as HTMLSpanElement;
+        const helperText = helperSpan.firstChild as Text;
+        Object.defineProperty(document, "caretPositionFromPoint", {
+            configurable: true,
+            value: vi.fn(() => ({ offsetNode: helperText, offset: 1 })),
+        });
+
+        act(() => {
+            helperSpan.dispatchEvent(
+                new MouseEvent("click", {
+                    bubbles: true,
+                    cancelable: true,
+                    metaKey: true,
+                    clientX: 1,
+                    clientY: 1,
+                }),
+            );
+        });
+
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "goToDefinition",
+            pane: "left",
+            lineNumber: 1,
+            character: lineText.indexOf("helper") + 1,
+            lineText,
+        });
+        Reflect.deleteProperty(document, "caretPositionFromPoint");
+    });
+
     it("renders one-sided insertions as auto-resolved connector bands", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();

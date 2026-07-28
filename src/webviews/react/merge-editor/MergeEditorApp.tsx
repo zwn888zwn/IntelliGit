@@ -68,6 +68,8 @@ import {
     type SegmentPaneLines,
 } from "./mergeScrollLayout";
 import { buildLineNumberValues } from "./lineNumbers";
+import { initShiki, isShikiReady, langForPath, detectTheme } from "./shikiHighlighter";
+import { SyntaxHighlightProvider } from "./syntaxHighlightContext";
 import "./merge-editor.css";
 
 const EMPTY_SEGMENTS: MergeSegment[] = [];
@@ -239,6 +241,35 @@ function getVsCodeApi() {
     return getSharedVsCodeApi<OutboundMessage, unknown>();
 }
 
+type CaretPointDocument = Document & {
+    caretRangeFromPoint?: (x: number, y: number) => Range | null;
+};
+
+function textOffsetAtPoint(container: HTMLElement, x: number, y: number): number | undefined {
+    const ownerDocument = container.ownerDocument as CaretPointDocument;
+    const caretPosition = ownerDocument.caretPositionFromPoint?.(x, y);
+    const fallbackRange = caretPosition ? null : ownerDocument.caretRangeFromPoint?.(x, y);
+    const node = caretPosition?.offsetNode ?? fallbackRange?.startContainer;
+    const offset = caretPosition?.offset ?? fallbackRange?.startOffset;
+    if (!node || offset === undefined || !container.contains(node)) return undefined;
+
+    try {
+        const range = ownerDocument.createRange();
+        range.selectNodeContents(container);
+        range.setEnd(node, offset);
+        return range.toString().length;
+    } catch {
+        return undefined;
+    }
+}
+
+function paneForCodeLine(line: HTMLElement): "left" | "middle" | "right" | undefined {
+    if (line.closest(".col-left")) return "left";
+    if (line.closest(".col-middle")) return "middle";
+    if (line.closest(".col-right")) return "right";
+    return undefined;
+}
+
 // --- App ---
 
 /**
@@ -262,7 +293,18 @@ function App() {
     const [highlightWords, setHighlightWords] = useState(true);
     const [ignoreMode, setIgnoreMode] = useState<"none" | "whitespace">("none");
     const [activeConflictId, setActiveConflictId] = useState<number | null>(null);
+    const [shikiReady, setShikiReady] = useState(() => isShikiReady());
+    const [shikiTheme] = useState(() => detectTheme());
     const segments = state.data?.segments ?? EMPTY_SEGMENTS;
+    const filePath = state.data?.filePath;
+    const syntaxHighlightState = useMemo(
+        () => ({
+            ready: shikiReady,
+            lang: filePath ? langForPath(filePath) : null,
+            theme: shikiTheme,
+        }),
+        [filePath, shikiReady, shikiTheme],
+    );
     const hasLocalChanges =
         Object.keys(state.resolutions).length > 0 ||
         Object.keys(state.edits).length > 0 ||
@@ -283,6 +325,32 @@ function App() {
         },
         [],
     );
+
+    const handleCodeNavigation = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (!event.metaKey && !event.ctrlKey) return;
+        if (!(event.target instanceof Element)) return;
+        const line = event.target.closest<HTMLElement>(".real-code-line");
+        if (!line || !event.currentTarget.contains(line)) return;
+        const content = line.querySelector<HTMLElement>(".code-line-content");
+        if (!content || !content.contains(event.target)) return;
+
+        const lineNumber = Number(line.dataset.lineNumber);
+        const pane = paneForCodeLine(line);
+        const character = textOffsetAtPoint(content, event.clientX, event.clientY);
+        if (!Number.isInteger(lineNumber) || lineNumber < 1 || !pane || character === undefined) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        getVsCodeApi().postMessage({
+            type: "goToDefinition",
+            pane,
+            lineNumber,
+            character,
+            lineText: content.textContent ?? "",
+        });
+    }, []);
 
     const mergeContentRef = useRef<HTMLDivElement | null>(null);
     const columnRefs = useRef<Record<MergePane, HTMLDivElement | null>>({
@@ -839,6 +907,19 @@ function App() {
         return () => window.removeEventListener("message", handler);
     }, []);
 
+    useEffect(() => {
+        if (shikiReady) return;
+        const initialize = (): void => {
+            if (initShiki()) setShikiReady(true);
+        };
+        if (typeof window.requestIdleCallback === "function") {
+            const handle = window.requestIdleCallback(initialize);
+            return () => window.cancelIdleCallback(handle);
+        }
+        const timer = window.setTimeout(initialize, 0);
+        return () => window.clearTimeout(timer);
+    }, [shikiReady]);
+
 
     useEffect(() => {
         setActiveConflictId((prev) => {
@@ -1304,7 +1385,7 @@ function App() {
     } as React.CSSProperties;
 
     return (
-        <>
+        <SyntaxHighlightProvider value={syntaxHighlightState}>
             <div
                 style={rootStyle}
                 className={[
@@ -1313,6 +1394,7 @@ function App() {
                 ]
                     .filter(Boolean)
                     .join(" ")}
+                onClickCapture={handleCodeNavigation}
             >
                 <div className="merge-toolbar">
                     <div className="toolbar-left">
@@ -1702,7 +1784,7 @@ function App() {
                     </div>
                 </div>
             </div>
-        </>
+        </SyntaxHighlightProvider>
     );
 }
 

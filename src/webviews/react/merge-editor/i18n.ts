@@ -28,7 +28,7 @@ const STRINGS: Record<string, string> = {
     "merge.pane.result": "Result {path}",
     "merge.footer.useFileOurs": "Use File Ours",
     "merge.footer.useFileTheirs": "Use File Theirs",
-    "merge.footer.hint": "`N`/`P` navigate • `Ctrl+←`/`Ctrl+→` take side • `B` both • `X` drop • `Ctrl/Cmd+Enter` apply",
+    "merge.footer.hint": "`N`/`P` navigate • `Ctrl+←`/`Ctrl+→` take side • `B` both • `X` drop • `Cmd/Ctrl+click` definition • `Ctrl/Cmd+Enter` apply",
     "merge.header.autoResolved": "{count} auto-resolved",
     "merge.footer.apply": "Apply ({resolved}/{total})",
     "merge.kind.leftOnly": "Left only",
