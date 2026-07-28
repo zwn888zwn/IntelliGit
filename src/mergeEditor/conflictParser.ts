@@ -16,6 +16,8 @@ export interface ConflictSegment {
     oursLines: string[];
     theirsLines: string[];
     baseLines: string[];
+    /** Optional composed result for a hunk that can be merged without user input. */
+    autoResolvedLines?: string[];
 }
 
 export type MergeSegment = CommonSegment | ConflictSegment;
@@ -28,6 +30,7 @@ export interface MergeEditorData {
     eol?: "\n" | "\r\n";
     hasTrailingNewline?: boolean;
     diffOptions?: MergeDiffOptions;
+    editorFontSize?: number;
 }
 
 export interface MergeDiffOptions {

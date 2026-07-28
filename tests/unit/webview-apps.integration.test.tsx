@@ -992,7 +992,7 @@ describe("CommitInfoApp integration", () => {
 });
 
 describe("MergeEditorApp integration", () => {
-    it("applies non-conflicting changes only after the All action", async () => {
+    it("renders one-sided insertions as auto-resolved connector bands", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();
         createRootHost();
@@ -1012,12 +1012,21 @@ describe("MergeEditorApp integration", () => {
                             eol: "\n",
                             hasTrailingNewline: true,
                             segments: [
+                                { type: "common", lines: ["before"] },
                                 {
                                     type: "conflict",
                                     id: 0,
                                     changeKind: "theirs-only",
-                                    oursLines: ["base"],
+                                    oursLines: [],
                                     theirsLines: ["right"],
+                                    baseLines: [],
+                                },
+                                {
+                                    type: "conflict",
+                                    id: 1,
+                                    changeKind: "conflict",
+                                    oursLines: ["ours"],
+                                    theirsLines: ["theirs"],
                                     baseLines: ["base"],
                                 },
                             ],
@@ -1028,31 +1037,22 @@ describe("MergeEditorApp integration", () => {
         });
         await flush();
 
-        const resultEditor = document.querySelector(
-            ".result-editor-textarea",
-        ) as HTMLTextAreaElement;
-        expect(resultEditor.value).toBe("base");
-
-        const allButton = Array.from(document.querySelectorAll("button")).find(
-            (button) => button.textContent === "All",
-        ) as HTMLButtonElement;
-        expect(allButton.disabled).toBe(false);
-        fireClick(allButton);
-        await flush();
-        expect(resultEditor.value).toBe("right");
-        expect(allButton.disabled).toBe(true);
+        expect(document.querySelectorAll(".merge-col")).toHaveLength(3);
+        expect(document.querySelector(".merge-connectors")).not.toBeNull();
+        expect(document.querySelector(".merge-connector.variant-insertion")).not.toBeNull();
+        expect(
+            document.querySelector(".segment-conflict.variant-insertion.resolved"),
+        ).not.toBeNull();
+        expect(document.querySelector(".segment-conflict.change-conflict.unresolved")).not.toBeNull();
+        expect(document.querySelector(".col-middle")?.textContent).toContain("right");
 
         const applyButton = Array.from(document.querySelectorAll("button")).find((button) =>
-            button.textContent?.includes("Apply (0/0)"),
+            button.textContent?.includes("Apply (0/1)"),
         ) as HTMLButtonElement;
-        expect(applyButton.disabled).toBe(false);
-        fireClick(applyButton);
-
-        expect(vscode.postMessage).toHaveBeenCalledWith({
-            type: "applyResolution",
-            content: "right\n",
-            mode: "apply",
-        });
+        expect(applyButton.disabled).toBe(true);
+        expect(vscode.postMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "applyResolution" }),
+        );
     });
 
     it("allows editing the result pane and applying custom content", async () => {
@@ -1097,10 +1097,61 @@ describe("MergeEditorApp integration", () => {
         ) as HTMLButtonElement;
         expect(applyButton.disabled).toBe(true);
 
-        const resultEditor = document.querySelector(
-            ".result-editor-textarea",
-        ) as HTMLTextAreaElement;
+        const editableResult = document.querySelector(".result-editable") as HTMLDivElement;
+        act(() => {
+            editableResult.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        });
+        await flush();
+
+        const resultEditor = document.querySelector(".result-edit-textarea") as HTMLTextAreaElement;
         fireInput(resultEditor, "manual\nresult");
+        await flush();
+        act(() => {
+            resultEditor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+        });
+        await flush();
+
+        const discardLeft = document.querySelector(
+            'button[aria-label="Ignore left block"]',
+        ) as HTMLButtonElement;
+        fireClick(discardLeft);
+        await flush();
+        expect(document.querySelector(".col-left .conflict-column.dismissed")).not.toBeNull();
+        expect(document.querySelector('button[aria-label="Ignore left block"]')).toBeNull();
+        expect(document.querySelector(".col-middle")?.textContent).toContain("manual");
+
+        const discardRight = document.querySelector(
+            'button[aria-label="Ignore right block"]',
+        ) as HTMLButtonElement;
+        fireClick(discardRight);
+        await flush();
+        expect(document.querySelector(".col-right .conflict-column.dismissed")).not.toBeNull();
+        expect(document.querySelector(".col-middle")?.textContent).toContain("manual");
+
+        const undoManualEdit = document.querySelector(
+            'button[aria-label="Undo manual edit"]',
+        ) as HTMLButtonElement;
+        fireClick(undoManualEdit);
+        await flush();
+        expect(document.querySelector(".col-middle")?.textContent).toContain("base");
+        expect(document.querySelector(".col-middle")?.textContent).not.toContain("manual");
+        expect(document.querySelector('button[aria-label="Ignore left block"]')).not.toBeNull();
+        expect(document.querySelector('button[aria-label="Ignore right block"]')).not.toBeNull();
+        expect(applyButton.disabled).toBe(true);
+
+        const restoredResult = document.querySelector(".result-editable") as HTMLDivElement;
+        act(() => {
+            restoredResult.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+        });
+        await flush();
+        const restoredEditor = document.querySelector(
+            ".result-edit-textarea",
+        ) as HTMLTextAreaElement;
+        fireInput(restoredEditor, "manual\nresult");
+        await flush();
+        act(() => {
+            restoredEditor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+        });
         await flush();
 
         const enabledApplyButton = Array.from(document.querySelectorAll("button")).find((button) =>

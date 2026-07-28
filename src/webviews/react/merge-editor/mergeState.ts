@@ -1,21 +1,49 @@
 // State management and resolution helpers for the merge editor.
-// Contains the reducer, conflict resolution logic, and result builder.
+// Contains the reducer, conflict resolution logic, manual result edits,
+// and the final merged-content builder.
 
-import type { MergeEditorData, MergeSegment, ConflictSegment, HunkResolution } from "./types";
+import type {
+    MergeEditorData,
+    MergeSegment,
+    ConflictSegment,
+    HunkResolution,
+    HunkSideDismissal,
+} from "./types";
 
+/**
+ * Reducer state for the merge editor, keeping immutable conflict input separate
+ * from local hunk-resolution choices, manual result edits, and load errors.
+ *
+ * `edits` maps a conflict segment id to user-typed result lines. An empty array
+ * is a meaningful edit (the block was deleted), so presence is tested with
+ * `!== undefined` rather than truthiness. `dismissals` records sides the user
+ * rejected with the discard (X) control without accepting the opposite side;
+ * choosing a side resolution clears that hunk's dismissals.
+ */
 export interface State {
     data: MergeEditorData | null;
     error: string | null;
     resolutions: Record<number, HunkResolution>;
-    resultEdits: Record<string, string[]>;
+    edits: Record<number, string[]>;
+    dismissals: Record<number, HunkSideDismissal>;
 }
 
+/** Message-shaped reducer actions emitted by the merge editor app shell. */
 export type Action =
     | { type: "SET_DATA"; data: MergeEditorData }
     | { type: "SET_ERROR"; message: string }
     | { type: "RESOLVE_HUNK"; id: number; resolution: HunkResolution }
-    | { type: "EDIT_RESULT"; key: string; lines: string[]; conflictId?: number };
+    | { type: "EDIT_HUNK_RESULT"; id: number; lines: string[] }
+    | { type: "CLEAR_HUNK_EDIT"; id: number }
+    | { type: "DISMISS_SIDE"; id: number; side: "ours" | "theirs" };
 
+/**
+ * Applies merge-editor state transitions.
+ *
+ * Fresh conflict data resets both resolutions and manual edits because segment
+ * ids are only stable within one parse. Choosing a side for a hunk discards any
+ * manual edit on that hunk so the chosen side is what the result pane shows.
+ */
 export function reducer(state: State, action: Action): State {
     switch (action.type) {
         case "SET_DATA":
@@ -24,28 +52,41 @@ export function reducer(state: State, action: Action): State {
                 data: action.data,
                 error: null,
                 resolutions: {},
-                resultEdits: {},
+                edits: {},
+                dismissals: {},
             };
         case "SET_ERROR":
             return { ...state, error: action.message };
         case "RESOLVE_HUNK": {
-            const resultEdits = { ...state.resultEdits };
-            delete resultEdits[getConflictResultKey(action.id)];
+            // A side choice supersedes any prior discard on this hunk, so the
+            // opposite side becomes appendable again.
             return {
                 ...state,
                 resolutions: { ...state.resolutions, [action.id]: action.resolution },
-                resultEdits,
+                edits: removeKey(state.edits, action.id),
+                dismissals: removeKey(state.dismissals, action.id),
             };
         }
-        case "EDIT_RESULT": {
-            const resolutions =
-                action.conflictId === undefined
-                    ? state.resolutions
-                    : { ...state.resolutions, [action.conflictId]: "custom" as HunkResolution };
+        case "EDIT_HUNK_RESULT":
             return {
                 ...state,
-                resolutions,
-                resultEdits: { ...state.resultEdits, [action.key]: action.lines },
+                edits: { ...state.edits, [action.id]: action.lines },
+            };
+        case "CLEAR_HUNK_EDIT":
+            return {
+                ...state,
+                resolutions: removeKey(state.resolutions, action.id),
+                edits: removeKey(state.edits, action.id),
+                dismissals: removeKey(state.dismissals, action.id),
+            };
+        case "DISMISS_SIDE": {
+            const current = state.dismissals[action.id] ?? {};
+            return {
+                ...state,
+                dismissals: {
+                    ...state.dismissals,
+                    [action.id]: { ...current, [action.side]: true },
+                },
             };
         }
         default:
@@ -53,24 +94,34 @@ export function reducer(state: State, action: Action): State {
     }
 }
 
-export function getConflictResultKey(id: number): string {
-    return `conflict:${id}`;
+function removeKey<T>(map: Record<number, T>, id: number): Record<number, T> {
+    if (map[id] === undefined) return map;
+    const next = { ...map };
+    delete next[id];
+    return next;
 }
 
-export function getCommonResultKey(index: number): string {
-    return `common:${index}`;
+/**
+ * Returns whether a segment is a conflict that still needs a human decision.
+ * One-sided hunks and token-level auto-merged hunks resolve themselves, so
+ * only dual-sided hunks without an auto-merge count as true conflicts.
+ */
+export function isTrueConflict(segment: MergeSegment): segment is ConflictSegment {
+    return (
+        segment.type === "conflict" &&
+        segment.changeKind === "conflict" &&
+        segment.autoResolvedLines === undefined
+    );
 }
 
-export function getSegmentResultKey(segment: MergeSegment, index: number): string {
-    return segment.type === "conflict"
-        ? getConflictResultKey(segment.id)
-        : getCommonResultKey(index);
-}
-
+/**
+ * Resolves the lines displayed in the result pane for one conflict segment,
+ * including auto-resolution defaults for one-sided changes and token-level
+ * auto-merged hunks.
+ */
 export function getResultLines(
     segment: ConflictSegment,
     resolution: HunkResolution | undefined,
-    customLines?: string[],
 ): string[] {
     switch (resolution) {
         case "ours":
@@ -79,65 +130,103 @@ export function getResultLines(
             return segment.theirsLines;
         case "both":
             return [...segment.oursLines, ...segment.theirsLines];
+        case "both-reversed":
+            return [...segment.theirsLines, ...segment.oursLines];
         case "none":
-            return [];
-        case "custom":
-            return customLines ?? segment.baseLines;
+            return segment.baseLines;
         default:
+            // Non-conflicting changes auto-resolve to the changed side
+            if (segment.changeKind === "ours-only") return segment.oursLines;
+            if (segment.changeKind === "theirs-only") return segment.theirsLines;
+            // Token-level merged hunks default to the composed result
+            if (segment.autoResolvedLines !== undefined) return segment.autoResolvedLines;
             return segment.baseLines;
     }
 }
 
+/**
+ * Splits textarea text into result lines, treating fully empty text as an
+ * intentional block deletion rather than a single empty line.
+ */
+export function splitEditedText(text: string): string[] {
+    if (text === "") return [];
+    return text.split(/\r?\n/);
+}
+
+/**
+ * Resolves the result-pane lines for one hunk with manual edits taking priority
+ * over side resolutions. An empty edited array intentionally drops the block.
+ */
+export function getEffectiveResultLines(
+    segment: ConflictSegment,
+    resolution: HunkResolution | undefined,
+    editedLines: string[] | undefined,
+): string[] {
+    if (editedLines !== undefined) return editedLines;
+    return getResultLines(segment, resolution);
+}
+
+/**
+ * Builds the final file content from common segments, hunk resolutions, and
+ * manual result edits while preserving the source file's EOL and
+ * trailing-newline contract.
+ */
 export function buildResultContent(
     data: MergeEditorData,
     resolutions: Record<number, HunkResolution>,
-    resultEdits: Record<string, string[]> = {},
+    edits: Record<number, string[]> = {},
 ): string {
     const { segments } = data;
     const lines: string[] = [];
-    segments.forEach((seg, index) => {
-        const editedLines = resultEdits[getSegmentResultKey(seg, index)];
+    for (const seg of segments) {
         if (seg.type === "common") {
-            lines.push(...(editedLines ?? seg.lines));
+            lines.push(...seg.lines);
         } else {
-            lines.push(...getResultLines(seg, resolutions[seg.id], editedLines));
+            lines.push(...getEffectiveResultLines(seg, resolutions[seg.id], edits[seg.id]));
         }
-    });
+    }
     if (lines.length === 0) return "";
     const eol = data.eol ?? "\n";
     const joined = lines.join(eol);
     return data.hasTrailingNewline ? joined + eol : joined;
 }
 
+/**
+ * Returns whether every true conflict has an explicit resolution choice or a
+ * manual result edit.
+ */
 export function allResolved(
     segments: MergeSegment[],
     resolutions: Record<number, HunkResolution>,
+    edits: Record<number, string[]> = {},
 ): boolean {
     return segments.every(
         (seg) =>
-            seg.type === "common" ||
-            seg.changeKind !== "conflict" ||
-            resolutions[seg.id] !== undefined,
+            !isTrueConflict(seg) ||
+            resolutions[seg.id] !== undefined ||
+            edits[seg.id] !== undefined,
     );
 }
 
+/** Counts only hunks that still need a human decision (no auto-merge). */
 export function trueConflictCount(segments: MergeSegment[]): number {
-    return segments.filter((seg) => seg.type === "conflict" && seg.changeKind === "conflict")
-        .length;
+    return segments.filter(isTrueConflict).length;
 }
 
+/** Counts true conflicts resolved by a side choice or a manual result edit. */
 export function resolvedTrueConflictCount(
     segments: MergeSegment[],
     resolutions: Record<number, HunkResolution>,
+    edits: Record<number, string[]> = {},
 ): number {
     return segments.filter(
         (seg) =>
-            seg.type === "conflict" &&
-            seg.changeKind === "conflict" &&
-            resolutions[seg.id] !== undefined,
+            isTrueConflict(seg) &&
+            (resolutions[seg.id] !== undefined || edits[seg.id] !== undefined),
     ).length;
 }
 
+/** Counts merge-editor hunks that contribute changes to the requested side pane. */
 export function paneChangeCount(segments: MergeSegment[], side: "ours" | "theirs"): number {
     return segments.filter((seg) => {
         if (seg.type !== "conflict") return false;

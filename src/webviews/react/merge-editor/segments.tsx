@@ -1,196 +1,159 @@
 // Merge editor segment rendering components.
-// CommonSection renders unchanged code lines across all three panes.
-// ConflictSection renders conflict hunks with per-hunk resolution controls.
-// OverviewRail provides a minimap of conflict locations for quick navigation.
+// Each pane (ours/result/theirs) renders in its own column, so a segment is
+// split into per-pane blocks: CommonPaneBlock for unchanged code and the
+// Ours/Result/Theirs ConflictBlock trio for a hunk (with resolution controls and
+// an editable result). ConnectorLayer draws the ribbons linking a hunk across
+// panes; OverviewRail provides a minimap of conflict locations for navigation.
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
-import type { CommonSegment, ConflictSegment, HunkResolution } from "./types";
-import {
-    IconArrowRight,
-    IconArrowLeft,
-    IconClose,
-    IconSplitBoth,
-    IconWarning,
-    IconCheck,
-    IconDot,
-} from "./icons";
+import React, { useCallback, useMemo, useState } from "react";
+import type { CommonSegment, ConflictSegment, HunkResolution, HunkSideDismissal } from "./types";
 import {
     tokenSimilarityRatio,
     buildWordDiffMask,
     tokenizeWordDiff,
     alignCompareLinesForWordDiff,
 } from "./wordDiff";
+import { getEffectiveResultLines, splitEditedText } from "./mergeState";
+import { tokenizeSyntaxLine, type SyntaxTokenKind } from "./syntaxHighlight";
+import type { LineNumberValue } from "./lineNumbers";
+import { LINE_HEIGHT_PX, type MergePane } from "./mergeScrollLayout";
+import { t } from "./i18n";
 
 // --- Syntax highlighting ---
 
-const KEYWORDS = new Set([
-    "async",
-    "await",
-    "break",
-    "case",
-    "chan",
-    "class",
-    "const",
-    "continue",
-    "default",
-    "defer",
-    "else",
-    "export",
-    "fallthrough",
-    "for",
-    "from",
-    "func",
-    "function",
-    "go",
-    "goto",
-    "if",
-    "import",
-    "interface",
-    "let",
-    "map",
-    "new",
-    "package",
-    "private",
-    "protected",
-    "public",
-    "range",
-    "readonly",
-    "return",
-    "select",
-    "static",
-    "struct",
-    "switch",
-    "type",
-    "var",
-]);
-const BUILTIN_TYPES = new Set([
-    "any",
-    "bool",
-    "byte",
-    "complex64",
-    "complex128",
-    "error",
-    "float32",
-    "float64",
-    "int",
-    "int8",
-    "int16",
-    "int32",
-    "int64",
-    "rune",
-    "string",
-    "uint",
-    "uint8",
-    "uint16",
-    "uint32",
-    "uint64",
-    "uintptr",
-]);
-const CONSTANTS = new Set(["false", "iota", "nil", "null", "true", "undefined"]);
-const TOKEN_REGEX =
-    /(\/\/.*$|\/\*.*?\*\/|"([^"\\]|\\.)*"|'([^'\\]|\\.)*'|`([^`\\]|\\.)*`|\b[A-Za-z_][A-Za-z0-9_]*\b|\b\d+(\.\d+)?\b)/g;
-const EDITOR_LINE_HEIGHT_PX = 22;
+const TOKEN_CLASS: Record<SyntaxTokenKind, string | undefined> = {
+    plain: undefined,
+    comment: "tok-comment",
+    string: "tok-string",
+    keyword: "tok-keyword",
+    constant: "tok-constant",
+    number: "tok-number",
+};
 
-function renderTextWithVisibleWhitespace(
-    text: string,
+/** A single syntax-colored run of text. */
+interface ColoredSpan {
+    text: string;
+    style?: React.CSSProperties;
+    className?: string;
+}
+
+/**
+ * Tokenizes one line with the merge editor's lightweight highlighter. Keeping
+ * this local avoids pulling the upstream grammar runtime into the extension.
+ */
+function coloredSpansForLine(line: string): ColoredSpan[] {
+    return tokenizeSyntaxLine(line).map((token) => ({
+        text: token.text,
+        className: TOKEN_CLASS[token.kind],
+    }));
+}
+
+function renderColoredSpans(spans: ColoredSpan[], keyPrefix: string): React.ReactNode[] {
+    let offset = 0;
+    return spans.map((span) => {
+        const key = `${keyPrefix}-${offset}-${span.text}`;
+        offset += span.text.length;
+        return (
+            <span key={key} className={span.className} style={span.style}>
+                {span.text}
+            </span>
+        );
+    });
+}
+
+const HighlightedLine = React.memo(function HighlightedLine({
+    line,
+}: {
+    line: string;
+}): React.ReactElement {
+    if (!line) return <>{` `}</>;
+    // Pure syntax-token helper, not a component invocation.
+    // react-doctor-disable-next-line react-doctor/no-render-in-render
+    return <>{renderColoredSpans(coloredSpansForLine(line), "line")}</>;
+});
+
+/**
+ * Expands a token-level word-diff mask into per-character changed/whitespace
+ * masks aligned to `line`. This lets the change overlay be intersected with
+ * the full-line colored spans without losing surrounding syntax context.
+ */
+function buildChangedCharMasks(
+    line: string,
+    compareLine: string,
+): { changed: boolean[]; whitespace: boolean[] } {
+    const tokens = tokenizeWordDiff(line);
+    const changedMask = buildWordDiffMask(line, compareLine);
+    const changed: boolean[] = [];
+    const whitespace: boolean[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        const isChanged = changedMask[i];
+        const isWhitespace = /^\s+$/.test(token);
+        for (let c = 0; c < token.length; c++) {
+            changed.push(isChanged);
+            whitespace.push(isWhitespace);
+        }
+    }
+    return { changed, whitespace };
+}
+
+/**
+ * Renders colored spans with a word-diff overlay: each colored span is split
+ * at change-boundary offsets so the underlying grammar coloring is preserved
+ * beneath the `.word-diff-change` background instead of being replaced by it.
+ */
+function renderColoredSpansWithWordDiff(
+    spans: ColoredSpan[],
+    changed: boolean[],
+    whitespace: boolean[],
     keyPrefix: string,
-    className?: string,
 ): React.ReactNode[] {
-    if (!text) return [];
-
     const nodes: React.ReactNode[] = [];
-    const whitespaceRegex = /(\t| +)/g;
-    let last = 0;
-    let idx = 0;
-
-    for (const match of text.matchAll(whitespaceRegex)) {
-        const start = match.index ?? 0;
-        if (start > last) {
-            nodes.push(
-                <span key={`${keyPrefix}-txt-${idx++}`} className={className}>
-                    {text.slice(last, start)}
-                </span>,
+    let offset = 0;
+    for (const span of spans) {
+        const spanText = span.text;
+        let runStart = 0;
+        while (runStart < spanText.length) {
+            const runChanged = changed[offset + runStart];
+            let runEnd = runStart + 1;
+            while (runEnd < spanText.length && changed[offset + runEnd] === runChanged) {
+                runEnd++;
+            }
+            const runText = spanText.slice(runStart, runEnd);
+            const key = `${keyPrefix}-${offset + runStart}`;
+            const coloredNode = (
+                <span key={key} className={span.className} style={span.style}>
+                    {runText}
+                </span>
             );
+            if (runChanged) {
+                const runIsWhitespace = whitespace[offset + runStart];
+                nodes.push(
+                    <span
+                        key={`chg-${key}`}
+                        className={`word-diff-change ${runIsWhitespace ? "word-diff-whitespace" : ""}`}
+                    >
+                        {coloredNode}
+                    </span>,
+                );
+            } else {
+                nodes.push(coloredNode);
+            }
+            runStart = runEnd;
         }
-
-        const token = match[0];
-        const whitespaceClassName = [className, "editor-whitespace"].filter(Boolean).join(" ");
-        const renderedWhitespace =
-            token === "\t" ? "→\u00A0\u00A0\u00A0" : token.replace(/ /g, "·");
-        nodes.push(
-            <span key={`${keyPrefix}-ws-${idx++}`} className={whitespaceClassName}>
-                {renderedWhitespace}
-            </span>,
-        );
-        last = start + token.length;
-    }
-
-    if (last < text.length) {
-        nodes.push(
-            <span key={`${keyPrefix}-txt-${idx}`} className={className}>
-                {text.slice(last)}
-            </span>,
-        );
-    }
-
-    return nodes;
-}
-
-function renderSyntaxHighlightedNodes(line: string, keyPrefix: string): React.ReactNode[] {
-    if (!line) return [<React.Fragment key={`${keyPrefix}-nbsp`}>{`\u00A0`}</React.Fragment>];
-    if (line.trimStart().startsWith("//")) {
-        return renderTextWithVisibleWhitespace(line, `${keyPrefix}-comment`, "tok-comment");
-    }
-
-    const nodes: React.ReactNode[] = [];
-    let last = 0;
-    let idx = 0;
-
-    for (const match of line.matchAll(TOKEN_REGEX)) {
-        const start = match.index ?? 0;
-        if (start > last) {
-            nodes.push(
-                ...renderTextWithVisibleWhitespace(
-                    line.slice(last, start),
-                    `${keyPrefix}-raw-${idx++}`,
-                ),
-            );
-        }
-        const token = match[0];
-        let className = "tok-identifier";
-        if (token.startsWith("//") || token.startsWith("/*")) className = "tok-comment";
-        else if (token.startsWith("\"") || token.startsWith("'") || token.startsWith("`")) {
-            className = "tok-string";
-        } else if (/^\d/.test(token)) className = "tok-number";
-        else if (KEYWORDS.has(token)) className = "tok-keyword";
-        else if (BUILTIN_TYPES.has(token)) className = "tok-type";
-        else if (CONSTANTS.has(token)) className = "tok-constant";
-        nodes.push(
-            ...renderTextWithVisibleWhitespace(token, `${keyPrefix}-tok-${idx++}`, className),
-        );
-        last = start + token.length;
-    }
-    if (last < line.length) {
-        nodes.push(
-            ...renderTextWithVisibleWhitespace(line.slice(last), `${keyPrefix}-tail-${idx}`),
-        );
+        offset += spanText.length;
     }
     return nodes;
 }
 
-function HighlightedLine({ line }: { line: string }): React.ReactElement {
-    if (!line) return <>{`\u00A0`}</>;
-    return <>{renderSyntaxHighlightedNodes(line, "line")}</>;
-}
-
-function WordDiffLine({
+const WordDiffLine = React.memo(function WordDiffLine({
     line,
     compareLine,
 }: {
     line: string;
     compareLine: string;
 }): React.ReactElement {
-    if (!line) return <>{`\u00A0`}</>;
+    if (!line) return <>{` `}</>;
     if (line === compareLine) return <HighlightedLine line={line} />;
     if (!compareLine) return <HighlightedLine line={line} />;
 
@@ -199,54 +162,25 @@ function WordDiffLine({
         return <HighlightedLine line={line} />;
     }
 
-    const tokens = tokenizeWordDiff(line);
-    if (tokens.length === 0) return <>{`\u00A0`}</>;
+    const spans = coloredSpansForLine(line);
+    if (spans.length === 0) return <>{` `}</>;
 
-    const changedMask = buildWordDiffMask(line, compareLine);
-    const nodes: React.ReactNode[] = [];
+    const { changed, whitespace } = buildChangedCharMasks(line, compareLine);
 
-    for (let i = 0; i < tokens.length; i++) {
-        const token = tokens[i];
-        const changed = changedMask[i];
-        const syntaxNodes = renderSyntaxHighlightedNodes(token, `wd-${i}`);
-        if (!changed) {
-            nodes.push(<React.Fragment key={`same-${i}`}>{syntaxNodes}</React.Fragment>);
-            continue;
-        }
-
-        const isWhitespace = /^\s+$/.test(token);
-        nodes.push(
-            <span
-                key={`chg-${i}`}
-                className={`word-diff-change ${isWhitespace ? "word-diff-whitespace" : ""}`}
-            >
-                {syntaxNodes}
-            </span>,
-        );
-    }
-
-    return <>{nodes}</>;
-}
+    const wordDiffNodes = renderColoredSpansWithWordDiff(spans, changed, whitespace, "wd");
+    return <>{wordDiffNodes}</>;
+});
 
 // --- Line numbers ---
 
-export type LineNumberValue = number | null;
-
+/** Line-number values to render alongside a code block (optional secondary column). */
 export interface LineNumberSpec {
     primary: LineNumberValue[];
     secondary?: LineNumberValue[];
 }
 
-export function buildLineNumberValues(
-    startAt: number,
-    actualCount: number,
-    rowCount: number,
-): LineNumberValue[] {
-    const values: LineNumberValue[] = [];
-    for (let i = 0; i < rowCount; i++) {
-        values.push(i < actualCount ? startAt + i : null);
-    }
-    return values;
+interface LineNumbersProps extends LineNumberSpec {
+    rowIsReal?: boolean[];
 }
 
 function padLines(lines: string[], count: number): string[] {
@@ -255,40 +189,174 @@ function padLines(lines: string[], count: number): string[] {
     return padded;
 }
 
-function LineNumbers({ primary, secondary }: LineNumberSpec) {
-    const rowCount = Math.max(primary.length, secondary?.length ?? 0);
-    const hasSecondary = Boolean(secondary);
-
-    return (
-        <div className={`line-numbers ${hasSecondary ? "has-secondary" : ""}`}>
-            {Array.from({ length: rowCount }, (_, i) => (
-                <div key={i} className="line-number-row">
-                    {hasSecondary ? (
-                        <div className="line-number line-number-secondary">
-                            {secondary?.[i] ?? ""}
-                        </div>
-                    ) : null}
-                    <div className="line-number line-number-primary">{primary[i] ?? ""}</div>
-                </div>
-            ))}
-        </div>
-    );
+function lineNumberValuesEqual(a: LineNumberValue[], b: LineNumberValue[]): boolean {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
 }
+
+function lineNumberSpecEqual(a: LineNumberSpec, b: LineNumberSpec): boolean {
+    if (a === b) return true;
+    if (!lineNumberValuesEqual(a.primary, b.primary)) return false;
+    if (a.secondary === b.secondary) return true;
+    if (!a.secondary || !b.secondary) return false;
+    return lineNumberValuesEqual(a.secondary, b.secondary);
+}
+
+function rowPresenceEqual(a: boolean[] | undefined, b: boolean[] | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+    }
+    return true;
+}
+
+const LineNumbers = React.memo(
+    function LineNumbers({ primary, rowIsReal }: LineNumbersProps) {
+        return (
+            <div className="line-numbers">
+                {Array.from({ length: primary.length }, (_, i) => {
+                    const isReal = rowIsReal?.[i] ?? true;
+                    return (
+                        <div
+                            key={i}
+                            className={`line-number-row ${
+                                isReal ? "real-line-row" : "padding-line-row"
+                            }`}
+                        >
+                            <div className="line-number line-number-primary">
+                                {primary[i] ?? ""}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    },
+    (prev, next) =>
+        lineNumberSpecEqual(prev, next) && rowPresenceEqual(prev.rowIsReal, next.rowIsReal),
+);
 
 // --- Code block ---
 
-function CodeBlock({
+interface CodeBlockProps {
+    lines: string[];
+    lineCount: number;
+    lineNumbers: LineNumberSpec;
+    showLineNumbers?: boolean;
+    lineNumberSide?: "left" | "right";
+    className?: string;
+    wordHighlight?: boolean;
+    compareLines?: string[];
+}
+
+function rowKey(lineNumbers: LineNumberSpec, line: string, row: number): string {
+    const primary = lineNumbers.primary[row] ?? "gap";
+    const secondary = lineNumbers.secondary?.[row] ?? "gap";
+    return `${primary}-${secondary}-${row}-${line}`;
+}
+
+const CodeBlock = React.memo(
+    function CodeBlock({
+        lines,
+        lineCount,
+        lineNumbers,
+        showLineNumbers = true,
+        lineNumberSide = "left",
+        className,
+        wordHighlight,
+        compareLines,
+    }: CodeBlockProps) {
+        // Padding rows align panes to the tallest side; only source-backed rows
+        // should receive diff coloring.
+        const rowCount = Math.max(lineCount, lines.length);
+        const rowIsReal = useMemo(
+            () => Array.from({ length: rowCount }, (_, i) => i < lines.length),
+            [lines.length, rowCount],
+        );
+        const padded = useMemo(() => padLines(lines, rowCount), [lines, rowCount]);
+        const paddedCompare = useMemo(() => {
+            if (!compareLines) return undefined;
+            const alignedCompare = alignCompareLinesForWordDiff(lines, compareLines);
+            return padLines(alignedCompare, rowCount);
+        }, [compareLines, lines, rowCount]);
+
+        return (
+            <div
+                className={`code-block ${showLineNumbers ? `line-numbers-${lineNumberSide}` : "no-line-numbers"} ${className ?? ""} ${wordHighlight ? "word-highlight" : ""}`}
+            >
+                {showLineNumbers && lineNumberSide === "left" ? (
+                    <LineNumbers
+                        primary={lineNumbers.primary}
+                        secondary={lineNumbers.secondary}
+                        rowIsReal={rowIsReal}
+                    />
+                ) : null}
+                <div className="code-lines">
+                    {padded.map((line, i) => {
+                        const isReal = rowIsReal[i] ?? false;
+                        return (
+                            <div
+                                key={rowKey(lineNumbers, line, i)}
+                                className={`code-line ${
+                                    isReal ? "real-code-line" : "padding-code-line"
+                                }`}
+                            >
+                                <span className="code-line-content">
+                                    {wordHighlight && paddedCompare ? (
+                                        <WordDiffLine line={line} compareLine={paddedCompare[i]} />
+                                    ) : (
+                                        <HighlightedLine line={line} />
+                                    )}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+                {showLineNumbers && lineNumberSide === "right" ? (
+                    <LineNumbers
+                        primary={lineNumbers.primary}
+                        secondary={lineNumbers.secondary}
+                        rowIsReal={rowIsReal}
+                    />
+                ) : null}
+            </div>
+        );
+    },
+    (prev, next) =>
+        prev.lines === next.lines &&
+        prev.lineCount === next.lineCount &&
+        prev.showLineNumbers === next.showLineNumbers &&
+        prev.lineNumberSide === next.lineNumberSide &&
+        prev.className === next.className &&
+        prev.wordHighlight === next.wordHighlight &&
+        prev.compareLines === next.compareLines &&
+        lineNumberSpecEqual(prev.lineNumbers, next.lineNumbers),
+);
+
+// --- Editable result block ---
+
+/**
+ * Result-pane block that supports IntelliJ-style manual editing.
+ *
+ * Display mode renders the highlighted result; double-click switches to a
+ * textarea seeded with the current result text. Blur commits the draft through
+ * `onCommit` (no-op when the text is unchanged), and Escape cancels without
+ * committing. Committed edits mark the hunk resolved upstream.
+ */
+function EditableResultBlock({
     lines,
     lineCount,
     lineNumbers,
     className,
     wordHighlight,
     compareLines,
-    editable,
-    onEdit,
-    scrollElementRef,
-    previewScrollElementRef,
-    onHorizontalScroll,
+    onCommit,
 }: {
     lines: string[];
     lineCount: number;
@@ -296,429 +364,740 @@ function CodeBlock({
     className?: string;
     wordHighlight?: boolean;
     compareLines?: string[];
-    editable?: boolean;
-    onEdit?: (value: string) => void;
-    scrollElementRef?: React.RefObject<HTMLDivElement | HTMLTextAreaElement | null>;
-    previewScrollElementRef?: React.RefObject<HTMLDivElement | null>;
-    onHorizontalScroll?: (element: HTMLDivElement | HTMLTextAreaElement) => void;
+    onCommit: (lines: string[]) => void;
 }) {
-    const padded = useMemo(() => padLines(lines, lineCount), [lines, lineCount]);
-    const paddedCompare = useMemo(() => {
-        if (!compareLines) return undefined;
-        const alignedCompare = alignCompareLinesForWordDiff(lines, compareLines);
-        return padLines(alignedCompare, lineCount);
-    }, [compareLines, lineCount, lines]);
-    const contentHeight = `${Math.max(lineCount, 1) * EDITOR_LINE_HEIGHT_PX}px`;
-    const localPreviewRef = useRef<HTMLDivElement | null>(null);
-    const previewRef = previewScrollElementRef ?? localPreviewRef;
-    const [isEditing, setIsEditing] = useState(false);
+    const [draft, setDraft] = useState<string | null>(null);
+    const isEditing = draft !== null;
 
-    const renderLineNodes = useCallback(
-        (line: string, index: number) => (
-            <div key={index} className={`code-line ${line ? "" : "empty-line"}`}>
-                <span className="code-line-content">
-                    {wordHighlight && paddedCompare ? (
-                        <WordDiffLine line={line} compareLine={paddedCompare[index]} />
-                    ) : (
-                        <HighlightedLine line={line} />
-                    )}
-                </span>
+    const startEditing = useCallback(() => {
+        setDraft(lines.join("\n"));
+    }, [lines]);
+
+    const commitDraft = useCallback(() => {
+        if (draft === null) return;
+        setDraft(null);
+        const edited = splitEditedText(draft);
+        const unchanged = edited.length === lines.length && edited.every((l, i) => l === lines[i]);
+        if (!unchanged) onCommit(edited);
+    }, [draft, lines, onCommit]);
+
+    const cancelDraft = useCallback(() => {
+        setDraft(null);
+    }, []);
+
+    if (!isEditing) {
+        return (
+            <div
+                className="result-editable"
+                onDoubleClick={startEditing}
+                title={t("merge.result.editHint")}
+            >
+                <CodeBlock
+                    lines={lines}
+                    lineCount={lineCount}
+                    lineNumbers={lineNumbers}
+                    className={className}
+                    wordHighlight={wordHighlight}
+                    compareLines={compareLines}
+                />
             </div>
-        ),
-        [paddedCompare, wordHighlight],
-    );
+        );
+    }
 
+    const rowCount = Math.max(draft.split("\n").length, lineCount, 1);
     return (
-        <div className={`code-block ${className ?? ""} ${wordHighlight ? "word-highlight" : ""}`}>
+        <div className={`code-block ${className ?? ""} editing`}>
             <LineNumbers primary={lineNumbers.primary} secondary={lineNumbers.secondary} />
-            {editable ? (
-                <div className={`editable-code-shell ${isEditing ? "editing" : ""}`}>
-                    <div
-                        ref={previewRef as React.Ref<HTMLDivElement>}
-                        className="code-scroll code-scroll-preview"
-                        style={{ minHeight: contentHeight }}
-                    >
-                        <div className="code-lines" style={{ minHeight: contentHeight }}>
-                            {padded.map(renderLineNodes)}
-                        </div>
-                    </div>
-                    <textarea
-                        ref={scrollElementRef as React.RefObject<HTMLTextAreaElement>}
-                        className="result-editor-textarea"
-                        value={lines.join("\n")}
-                        rows={Math.max(lineCount, 1)}
-                        wrap="off"
-                        style={{ height: contentHeight }}
-                        spellCheck={false}
-                        onClick={(event) => event.stopPropagation()}
-                        onFocus={() => setIsEditing(true)}
-                        onBlur={() => setIsEditing(false)}
-                        onScroll={(event) => {
-                            if (previewRef.current) {
-                                previewRef.current.scrollLeft = event.currentTarget.scrollLeft;
-                            }
-                            onHorizontalScroll?.(event.currentTarget);
-                        }}
-                        onChange={(event) => onEdit?.(event.target.value)}
-                    />
-                </div>
-            ) : (
-                <div
-                    ref={scrollElementRef as React.RefObject<HTMLDivElement>}
-                    className="code-scroll"
-                    style={{ minHeight: contentHeight }}
-                    onScroll={(event) => onHorizontalScroll?.(event.currentTarget)}
-                >
-                    <div className="code-lines" style={{ minHeight: contentHeight }}>
-                        {padded.map(renderLineNodes)}
-                    </div>
-                </div>
-            )}
+            <textarea
+                className="result-edit-textarea"
+                aria-label={t("merge.result.editingAria")}
+                value={draft}
+                rows={rowCount}
+                // Deliberate: edit mode opens from a user action and should focus the draft textarea.
+                // react-doctor-disable-next-line react-doctor/no-autofocus
+                autoFocus
+                spellCheck={false}
+                onChange={(event) => setDraft(event.target.value)}
+                onBlur={commitDraft}
+                onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        cancelDraft();
+                    }
+                }}
+                onClick={(event) => event.stopPropagation()}
+            />
         </div>
     );
 }
 
 // --- Hunk helpers ---
 
+/** Line-number specifications for the left, result, and right merge panes. */
 export interface SegmentPaneLineNumbers {
     left: LineNumberSpec;
     middle: LineNumberSpec;
     right: LineNumberSpec;
 }
 
-function getHunkStatus(
-    segment: ConflictSegment,
-    resolution: HunkResolution | undefined,
-): {
-    label: string;
-    tone: "warn" | "ok" | "muted";
-} {
-    if (segment.changeKind === "ours-only") {
-        if (resolution === "ours") {
-            return { label: "Applied left-only change", tone: "ok" };
-        }
-        return resolution === "none"
-            ? { label: "Dropped left-only change", tone: "muted" }
-            : { label: "Left-only change not applied", tone: "muted" };
-    }
-    if (segment.changeKind === "theirs-only") {
-        if (resolution === "theirs") {
-            return { label: "Applied right-only change", tone: "ok" };
-        }
-        return resolution === "none"
-            ? { label: "Dropped right-only change", tone: "muted" }
-            : { label: "Right-only change not applied", tone: "muted" };
-    }
-
-    if (resolution === undefined) return { label: "Unresolved", tone: "warn" };
-    if (resolution === "ours") return { label: "Use left", tone: "ok" };
-    if (resolution === "theirs") return { label: "Use right", tone: "ok" };
-    if (resolution === "both") return { label: "Use both", tone: "ok" };
-    if (resolution === "custom") return { label: "Custom result", tone: "ok" };
-    return { label: "Remove block", tone: "muted" };
-}
-
-function getHunkKindLabel(segment: ConflictSegment): string {
-    if (segment.changeKind === "ours-only") return "Left only";
-    if (segment.changeKind === "theirs-only") return "Right only";
-    return "Conflict";
-}
-
 // --- Section components ---
 
-export function CommonSection({
-    segment,
-    resultLines,
-    lineCount,
-    lineNumbers,
-    highlightWords,
-    onEditResult,
-}: {
+/**
+ * Size hint that lets `content-visibility: auto` skip layout of offscreen
+ * segments while keeping the scrollbar geometry stable for large files. Every
+ * block — common or conflict — is exactly `lineCount * LINE_HEIGHT_PX` tall
+ * (conflict rules are drawn with a zero-height inset shadow), so this matches
+ * both the rendered content box and the scroll geometry.
+ */
+function intrinsicSizeStyle(lineCount: number): React.CSSProperties {
+    return { containIntrinsicSize: `auto ${lineCount * LINE_HEIGHT_PX}px` };
+}
+
+interface CommonPaneBlockProps {
+    pane: MergePane;
     segment: CommonSegment;
-    resultLines: string[];
     lineCount: number;
-    lineNumbers: SegmentPaneLineNumbers;
+    lineNumbers: LineNumberSpec;
     highlightWords: boolean;
-    onEditResult: (value: string) => void;
+}
+
+/**
+ * Renders one pane's slice of an unchanged segment. The three panes hold
+ * identical common lines but flow in separate columns (PyCharm-style), so each
+ * is its own block; the scroll driver keeps them vertically aligned. Memoized
+ * with value-compared line numbers so resolving one hunk does not re-render
+ * every other segment.
+ */
+export const CommonPaneBlock = React.memo(
+    function CommonPaneBlock({
+        pane,
+        segment,
+        lineCount,
+        lineNumbers,
+        highlightWords,
+    }: CommonPaneBlockProps) {
+        return (
+            <div className="segment segment-common" style={intrinsicSizeStyle(lineCount)}>
+                <CodeBlock
+                    lines={segment.lines}
+                    lineCount={lineCount}
+                    lineNumbers={lineNumbers}
+                    lineNumberSide={pane === "left" ? "right" : "left"}
+                    wordHighlight={highlightWords}
+                />
+            </div>
+        );
+    },
+    (prev, next) =>
+        prev.pane === next.pane &&
+        prev.segment === next.segment &&
+        prev.lineCount === next.lineCount &&
+        prev.highlightWords === next.highlightWords &&
+        lineNumberSpecEqual(prev.lineNumbers, next.lineNumbers),
+);
+
+/**
+ * Props shared by all three conflict-pane blocks: result-line computation
+ * inputs, selection, active-state styling, and word highlighting. `editedLines`
+ * overrides the side-resolution result when set. Side blocks add resolution
+ * callbacks; the result block adds the edit callback and ordinals.
+ */
+export interface ConflictPaneBaseProps {
+    segment: ConflictSegment;
+    resolution: HunkResolution | undefined;
+    editedLines: string[] | undefined;
+    dismissed: HunkSideDismissal | undefined;
+    lineCount: number;
+    lineNumbers: LineNumberSpec;
+    onSelect: (id: number) => void;
+    isActive: boolean;
+    highlightWords: boolean;
+}
+
+/** Callbacks the ours/theirs blocks use to accept or discard their side. */
+interface ConflictSideCallbacks {
+    onResolve: (id: number, resolution: HunkResolution) => void;
+    onDismiss: (id: number, side: "ours" | "theirs") => void;
+}
+
+/** Derived render flags for one conflict hunk: which sides are in the result,
+ * which controls to show, and how the result/side panes compare against base. */
+interface ConflictView {
+    isEdited: boolean;
+    isOurs: boolean;
+    isTheirs: boolean;
+    oursInResult: boolean;
+    theirsInResult: boolean;
+    oursDismissed: boolean;
+    theirsDismissed: boolean;
+    isAutoMerged: boolean;
+    isResolved: boolean;
+    resultIsUnresolved: boolean;
+    /** One-sided hunk explicitly settled by the user: its result rows drop the variant fill. */
+    resultSettled: boolean;
+    showLeftActions: boolean;
+    showRightActions: boolean;
+    leftAppend: boolean;
+    rightAppend: boolean;
+    resultCompareLines: string[] | undefined;
+    sideVariant: string;
+}
+
+/**
+ * Determines the lines the result pane diffs against: nothing once a side is
+ * accepted, otherwise the opposite side (single accept) or base (unresolved).
+ */
+function resultCompareBaseline(
+    segment: ConflictSegment,
+    resolution: HunkResolution | undefined,
+    oursInResult: boolean,
+    theirsInResult: boolean,
+): string[] | undefined {
+    if (oursInResult || theirsInResult) return undefined;
+    if (resolution === "ours") return segment.theirsLines;
+    if (resolution === "theirs") return segment.oursLines;
+    return segment.baseLines;
+}
+
+/**
+ * PyCharm-style color class for a one-sided hunk: pure insertions green,
+ * deletions gray, modifications blue. True conflicts carry no variant class.
+ */
+function sideVariantClass(segment: ConflictSegment): string {
+    if (segment.changeKind === "conflict") return "";
+    if (segment.baseLines.length === 0) return "variant-insertion";
+    const changedSideLines =
+        segment.changeKind === "ours-only" ? segment.oursLines : segment.theirsLines;
+    if (changedSideLines.length === 0) return "variant-deletion";
+    return "variant-modification";
+}
+
+/**
+ * Computes the render flags for a conflict hunk from its resolution, manual
+ * edits, and per-side dismissals. Pure helper so ConflictSection stays a thin
+ * view over these derived values.
+ */
+function deriveConflictView(
+    segment: ConflictSegment,
+    resolution: HunkResolution | undefined,
+    editedLines: string[] | undefined,
+    dismissed: HunkSideDismissal | undefined,
+): ConflictView {
+    const isEdited = editedLines !== undefined;
+    const isOurs = !isEdited && resolution === "ours";
+    const isTheirs = !isEdited && resolution === "theirs";
+    // Both orders stack the two sides; the order only differs in getResultLines.
+    const isBoth = !isEdited && (resolution === "both" || resolution === "both-reversed");
+    const oursInResult = isOurs || isBoth;
+    const theirsInResult = isTheirs || isBoth;
+    // A side is "dismissed" when the user discarded it (X) without accepting the
+    // opposite side. Resolving to "none" discards BOTH sides (the reducer clears
+    // per-side dismissals then), so it must read as dismissed too — otherwise the
+    // settled blocks would keep their suggestion bands and controls. Acceptance
+    // overrides dismissal, so a side in the result is never treated as
+    // dismissed. A manual edit supersedes both.
+    const bothDiscarded = !isEdited && resolution === "none";
+    const oursDismissed = !oursInResult && (dismissed?.ours === true || bothDiscarded);
+    const theirsDismissed =
+        !theirsInResult && (dismissed?.theirs === true || bothDiscarded);
+    const isAutoMerged =
+        segment.autoResolvedLines !== undefined && resolution === undefined && !isEdited;
+    const isResolved =
+        segment.changeKind !== "conflict" ||
+        segment.autoResolvedLines !== undefined ||
+        resolution !== undefined ||
+        isEdited;
+    const resultIsUnresolved =
+        segment.changeKind === "conflict" &&
+        !isEdited &&
+        ((isOurs && !theirsDismissed) || (isTheirs && !oursDismissed));
+    // A one-sided hunk is auto-included in the result the moment it loads
+    // (isResolved is unconditionally true for changeKind !== "conflict"), but
+    // it only counts as the user's DECISION once a resolution is actually set
+    // — an explicit accept/discard, not the initial auto-include. Only then
+    // does PyCharm drop the variant wash and show the result as plain merged
+    // text under its dotted contour.
+    const resultSettled =
+        segment.changeKind !== "conflict" && resolution !== undefined && !isEdited;
+    return {
+        isEdited,
+        isOurs,
+        isTheirs,
+        oursInResult,
+        theirsInResult,
+        oursDismissed,
+        theirsDismissed,
+        isAutoMerged,
+        isResolved,
+        resultIsUnresolved,
+        resultSettled,
+        // A side's controls show only while that side is still pending: not yet
+        // in the result and not discarded. Accepting one side leaves the other
+        // side's accept button available to append (stack) below it; discarding
+        // the other side hides its controls. Once both are stacked, all controls
+        // hide. A manual edit puts neither side "in result", so both reappear.
+        showLeftActions: !oursInResult && !oursDismissed,
+        showRightActions: !theirsInResult && !theirsDismissed,
+        // When one side is already in the result, the opposite accept button
+        // appends the second side below it instead of replacing the result.
+        leftAppend: theirsInResult,
+        rightAppend: oursInResult,
+        resultCompareLines: resultCompareBaseline(
+            segment,
+            resolution,
+            oursInResult,
+            theirsInResult,
+        ),
+        sideVariant: sideVariantClass(segment),
+    };
+}
+
+/** Left-column controls for a pending "ours" side: discard and accept-or-append. */
+function LeftHunkActions({
+    segmentId,
+    leftAppend,
+    isOurs,
+    isEdited,
+    theirsDismissed,
+    onResolve,
+    onDismiss,
+}: {
+    segmentId: number;
+    leftAppend: boolean;
+    isOurs: boolean;
+    isEdited: boolean;
+    theirsDismissed: boolean;
+    onResolve: (id: number, resolution: HunkResolution) => void;
+    onDismiss: (id: number, side: "ours" | "theirs") => void;
 }) {
     return (
-        <div className="segment segment-common">
-            <div className="column column-left">
-                <CodeBlock
-                    lines={segment.lines}
-                    lineCount={lineCount}
-                    lineNumbers={lineNumbers.left}
-                    wordHighlight={highlightWords}
-                />
-            </div>
-            <div className="column column-middle result-column">
-                <CodeBlock
-                    lines={resultLines}
-                    lineCount={lineCount}
-                    lineNumbers={lineNumbers.middle}
-                    wordHighlight={highlightWords}
-                    editable
-                    onEdit={onEditResult}
-                />
-            </div>
-            <div className="column column-right">
-                <CodeBlock
-                    lines={segment.lines}
-                    lineCount={lineCount}
-                    lineNumbers={lineNumbers.right}
-                    wordHighlight={highlightWords}
-                />
-            </div>
+        <div className="conflict-actions-left" onClick={(e) => e.stopPropagation()}>
+            <button
+                type="button"
+                className="action-btn discard-btn"
+                onClick={() =>
+                    theirsDismissed && !isEdited
+                        ? onResolve(segmentId, "none")
+                        : onDismiss(segmentId, "ours")
+                }
+                title={t("merge.hunk.ignoreLeft")}
+                aria-label={t("merge.hunk.ignoreLeft")}
+            >
+                <span className="hunk-action-glyph" aria-hidden="true">
+                    ×
+                </span>
+            </button>
+            <button
+                type="button"
+                className={`action-btn accept-btn ${leftAppend ? "append-btn" : ""} ${isOurs ? "active" : ""}`}
+                onClick={() => onResolve(segmentId, leftAppend ? "both-reversed" : "ours")}
+                title={t(leftAppend ? "merge.hunk.appendLeft" : "merge.hunk.acceptLeft")}
+                aria-label={t(leftAppend ? "merge.hunk.appendLeft" : "merge.hunk.acceptLeft")}
+                aria-current={isOurs ? "true" : undefined}
+            >
+                <span className="hunk-action-glyph" aria-hidden="true">
+                    {leftAppend ? "≫+" : "≫"}
+                </span>
+            </button>
         </div>
     );
 }
 
-export interface ConflictSectionProps {
-    segment: ConflictSegment;
-    resolution: HunkResolution | undefined;
-    resultLines: string[];
-    lineCount: number;
-    lineNumbers: SegmentPaneLineNumbers;
+/** Right-column controls for a pending "theirs" side: accept-or-append and discard. */
+function RightHunkActions({
+    segmentId,
+    rightAppend,
+    isTheirs,
+    isEdited,
+    oursDismissed,
+    onResolve,
+    onDismiss,
+}: {
+    segmentId: number;
+    rightAppend: boolean;
+    isTheirs: boolean;
+    isEdited: boolean;
+    oursDismissed: boolean;
     onResolve: (id: number, resolution: HunkResolution) => void;
-    onEditResult: (value: string) => void;
-    onSelect: (id: number) => void;
-    setSectionRef: (el: HTMLDivElement | null) => void;
-    isActive: boolean;
-    showDetails: boolean;
-    highlightWords: boolean;
+    onDismiss: (id: number, side: "ours" | "theirs") => void;
+}) {
+    return (
+        <div className="conflict-actions-right" onClick={(e) => e.stopPropagation()}>
+            <button
+                type="button"
+                className={`action-btn accept-btn ${rightAppend ? "append-btn" : ""} ${isTheirs ? "active" : ""}`}
+                onClick={() => onResolve(segmentId, rightAppend ? "both" : "theirs")}
+                title={t(rightAppend ? "merge.hunk.appendRight" : "merge.hunk.acceptRight")}
+                aria-label={t(rightAppend ? "merge.hunk.appendRight" : "merge.hunk.acceptRight")}
+                aria-current={isTheirs ? "true" : undefined}
+            >
+                <span className="hunk-action-glyph" aria-hidden="true">
+                    {rightAppend ? "≪+" : "≪"}
+                </span>
+            </button>
+            <button
+                type="button"
+                className="action-btn discard-btn"
+                onClick={() =>
+                    oursDismissed && !isEdited
+                        ? onResolve(segmentId, "none")
+                        : onDismiss(segmentId, "theirs")
+                }
+                title={t("merge.hunk.ignoreRight")}
+                aria-label={t("merge.hunk.ignoreRight")}
+            >
+                <span className="hunk-action-glyph" aria-hidden="true">
+                    ×
+                </span>
+            </button>
+        </div>
+    );
+}
+
+/**
+ * Outer per-pane wrapper class list for a conflict block. The change-/variant-
+ * classes must be an ancestor of the pane's code block for the band-color CSS to
+ * apply, so every pane block replicates them.
+ */
+function conflictWrapperClass(
+    segment: ConflictSegment,
+    view: ConflictView,
+    isActive: boolean,
+): string {
+    return [
+        "segment",
+        "segment-conflict",
+        `change-${segment.changeKind}`,
+        view.sideVariant,
+        view.isResolved ? "resolved" : "unresolved",
+        view.isAutoMerged ? "auto-merged" : "",
+        isActive ? "active" : "",
+    ]
+        .filter(Boolean)
+        .join(" ");
+}
+
+/** Value-compares the shared conflict-pane props used by the ours/theirs blocks. */
+function sideConflictEqual(
+    prev: ConflictPaneBaseProps & ConflictSideCallbacks,
+    next: ConflictPaneBaseProps & ConflictSideCallbacks,
+): boolean {
+    return (
+        prev.segment === next.segment &&
+        prev.resolution === next.resolution &&
+        prev.editedLines === next.editedLines &&
+        prev.dismissed === next.dismissed &&
+        prev.lineCount === next.lineCount &&
+        prev.isActive === next.isActive &&
+        prev.highlightWords === next.highlightWords &&
+        prev.onResolve === next.onResolve &&
+        prev.onDismiss === next.onDismiss &&
+        prev.onSelect === next.onSelect &&
+        lineNumberSpecEqual(prev.lineNumbers, next.lineNumbers)
+    );
+}
+
+/** Props for the middle (result) conflict block: manual edit callback + ordinals. */
+export interface ResultConflictBlockProps extends ConflictPaneBaseProps {
+    onEditResult: (id: number, lines: string[]) => void;
+    onClearEdit: (id: number) => void;
     conflictOrdinal: number;
     trueConflictOrdinal?: number;
 }
 
-export function ConflictSection({
+/** Value-compares the result-pane props (edit callback + ordinals). */
+function resultConflictEqual(
+    prev: ResultConflictBlockProps,
+    next: ResultConflictBlockProps,
+): boolean {
+    return (
+        prev.segment === next.segment &&
+        prev.resolution === next.resolution &&
+        prev.editedLines === next.editedLines &&
+        prev.dismissed === next.dismissed &&
+        prev.lineCount === next.lineCount &&
+        prev.isActive === next.isActive &&
+        prev.highlightWords === next.highlightWords &&
+        prev.onEditResult === next.onEditResult &&
+        prev.onClearEdit === next.onClearEdit &&
+        prev.onSelect === next.onSelect &&
+        prev.conflictOrdinal === next.conflictOrdinal &&
+        prev.trueConflictOrdinal === next.trueConflictOrdinal &&
+        lineNumberSpecEqual(prev.lineNumbers, next.lineNumbers)
+    );
+}
+
+/**
+ * Left (ours) pane block: the ours lines plus this side's accept/discard
+ * controls. Selecting anywhere in the block activates the hunk. Memoized so a
+ * resolution or edit elsewhere re-renders only the affected block.
+ */
+export const OursConflictBlock = React.memo(function OursConflictBlock({
     segment,
     resolution,
-    resultLines,
+    editedLines,
+    dismissed,
     lineCount,
     lineNumbers,
     onResolve,
+    onDismiss,
+    onSelect,
+    isActive,
+    highlightWords,
+}: ConflictPaneBaseProps & ConflictSideCallbacks) {
+    const view = deriveConflictView(segment, resolution, editedLines, dismissed);
+    const handleSelect = useCallback(() => onSelect(segment.id), [onSelect, segment.id]);
+    const handleKeyDown = useCallback(
+        (event: React.KeyboardEvent<HTMLDivElement>) => {
+            if (event.currentTarget !== event.target) return;
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            onSelect(segment.id);
+        },
+        [onSelect, segment.id],
+    );
+    return (
+        <div
+            className={conflictWrapperClass(segment, view, isActive)}
+            style={intrinsicSizeStyle(lineCount)}
+            // Native button is invalid here because the block contains hunk action buttons.
+            // react-doctor-disable-next-line react-doctor/prefer-tag-over-role
+            role="button"
+            tabIndex={0}
+            data-conflict-id={segment.id}
+            onClick={handleSelect}
+            onKeyDown={handleKeyDown}
+        >
+            <div
+                className={`column column-left conflict-column ${view.oursInResult ? "accepted" : ""} ${view.oursDismissed ? "dismissed" : ""}`}
+            >
+                <CodeBlock
+                    lines={segment.oursLines}
+                    lineCount={lineCount}
+                    lineNumbers={lineNumbers}
+                    lineNumberSide="right"
+                    className={`conflict-ours ${view.oursInResult ? "accepted-pane" : ""}`}
+                    wordHighlight={highlightWords}
+                    compareLines={view.oursInResult ? undefined : segment.baseLines}
+                />
+                {view.showLeftActions ? (
+                    <LeftHunkActions
+                        segmentId={segment.id}
+                        leftAppend={view.leftAppend}
+                        isOurs={view.isOurs}
+                        isEdited={view.isEdited}
+                        theirsDismissed={view.theirsDismissed}
+                        onResolve={onResolve}
+                        onDismiss={onDismiss}
+                    />
+                ) : null}
+            </div>
+        </div>
+    );
+}, sideConflictEqual);
+
+/**
+ * Middle (result) pane block: the editable merged result. Carries the hunk's
+ * keyboard/aria affordances (the result is the primary target for a hunk).
+ */
+export const ResultConflictBlock = React.memo(function ResultConflictBlock({
+    segment,
+    resolution,
+    editedLines,
+    dismissed,
+    lineCount,
+    lineNumbers,
     onEditResult,
     onSelect,
-    setSectionRef,
     isActive,
-    showDetails,
     highlightWords,
     conflictOrdinal,
     trueConflictOrdinal,
-}: ConflictSectionProps) {
-    const status = getHunkStatus(segment, resolution);
-    const leftScrollRef = useRef<HTMLDivElement | HTMLTextAreaElement | null>(null);
-    const middleScrollRef = useRef<HTMLDivElement | HTMLTextAreaElement | null>(null);
-    const middlePreviewScrollRef = useRef<HTMLDivElement | null>(null);
-    const rightScrollRef = useRef<HTMLDivElement | HTMLTextAreaElement | null>(null);
-    const isSyncingScrollRef = useRef(false);
-    const handleHorizontalScroll = useCallback((source: HTMLDivElement | HTMLTextAreaElement) => {
-        if (isSyncingScrollRef.current) return;
-        isSyncingScrollRef.current = true;
-        const scrollLeft = source.scrollLeft;
-        [
-            leftScrollRef.current,
-            middleScrollRef.current,
-            middlePreviewScrollRef.current,
-            rightScrollRef.current,
-        ].forEach((element) => {
-            if (!element || element === source) return;
-            element.scrollLeft = scrollLeft;
-        });
-        requestAnimationFrame(() => {
-            isSyncingScrollRef.current = false;
-        });
-    }, []);
-
-    const isOurs = resolution === "ours";
-    const isTheirs = resolution === "theirs";
-    const isBoth = resolution === "both";
-    const isNone = resolution === "none";
-    const isCustom = resolution === "custom";
-    const isResolved = segment.changeKind !== "conflict" || resolution !== undefined;
-    const kindLabel = getHunkKindLabel(segment);
-    const resultCompareLines =
-        resolution === "ours"
-            ? segment.theirsLines
-            : resolution === "theirs"
-              ? segment.oursLines
-              : segment.baseLines;
-
+    onClearEdit,
+}: ResultConflictBlockProps) {
+    const view = deriveConflictView(segment, resolution, editedLines, dismissed);
+    const resultLines = getEffectiveResultLines(segment, resolution, editedLines);
+    const handleSelect = useCallback(() => onSelect(segment.id), [onSelect, segment.id]);
+    const handleKeyDown = useCallback(
+        (event: React.KeyboardEvent<HTMLDivElement>) => {
+            if (event.currentTarget !== event.target) return;
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            onSelect(segment.id);
+        },
+        [onSelect, segment.id],
+    );
     return (
         <div
-            ref={setSectionRef}
-            className={[
-                "segment",
-                "segment-conflict",
-                `change-${segment.changeKind}`,
-                isResolved ? "resolved" : "unresolved",
-                isActive ? "active" : "",
-            ]
-                .filter(Boolean)
-                .join(" ")}
+            className={conflictWrapperClass(segment, view, isActive)}
+            style={intrinsicSizeStyle(lineCount)}
+            // Native button is invalid here because the block contains an edit textarea.
+            // react-doctor-disable-next-line react-doctor/prefer-tag-over-role
+            role="button"
+            tabIndex={0}
+            aria-label={t("merge.hunk.groupAria", {
+                ordinal: trueConflictOrdinal ?? conflictOrdinal,
+            })}
             data-conflict-id={segment.id}
-            onClick={() => onSelect(segment.id)}
+            onClick={handleSelect}
+            onKeyDown={handleKeyDown}
         >
-            <div className="hunk-header">
-                <div className="hunk-header-left">
-                    <span className={`hunk-badge hunk-kind-${segment.changeKind}`}>
-                        {trueConflictOrdinal !== undefined
-                            ? `#${trueConflictOrdinal}`
-                            : `#${conflictOrdinal}`}
-                    </span>
-                    <span className="hunk-kind-label">{kindLabel}</span>
-                    {showDetails ? (
-                        <span className="hunk-detail-lines">
-                            L:{segment.oursLines.length} R:{segment.theirsLines.length} Result:{" "}
-                            {resultLines.length}
-                        </span>
-                    ) : null}
-                </div>
-                <div className="hunk-header-center" onClick={(e) => e.stopPropagation()}>
-                    <button
-                        className={`hunk-choice ${isOurs ? "active" : ""}`}
-                        onClick={() => onResolve(segment.id, "ours")}
-                        title="Use left block"
-                    >
-                        <IconArrowRight />
-                        Left
-                    </button>
-                    {segment.changeKind === "conflict" ? (
-                        <button
-                            className={`hunk-choice ${isBoth ? "active" : ""}`}
-                            onClick={() => onResolve(segment.id, "both")}
-                            title="Use both blocks"
-                        >
-                            <IconSplitBoth />
-                            Both
-                        </button>
-                    ) : null}
-                    <button
-                        className={`hunk-choice ${isTheirs ? "active" : ""}`}
-                        onClick={() => onResolve(segment.id, "theirs")}
-                        title="Use right block"
-                    >
-                        <IconArrowLeft />
-                        Right
-                    </button>
-                    <button
-                        className={`hunk-choice danger ${isNone ? "active" : ""}`}
-                        onClick={() => onResolve(segment.id, "none")}
-                        title="Remove this block from result"
-                    >
-                        <IconClose />
-                        Drop
-                    </button>
-                </div>
-                <div className={`hunk-status tone-${status.tone}`}>
-                    <span className="toolbar-icon status-icon">
-                        {status.tone === "warn" ? (
-                            <IconWarning />
-                        ) : status.tone === "ok" ? (
-                            <IconCheck />
-                        ) : (
-                            <IconDot />
-                        )}
-                    </span>
-                    {status.label}
-                </div>
-            </div>
-
-            <div className="hunk-columns">
-                <div className={`column column-left conflict-column ${isOurs ? "accepted" : ""}`}>
-                    <CodeBlock
-                        lines={segment.oursLines}
-                        lineCount={lineCount}
-                        lineNumbers={lineNumbers.left}
-                        className="conflict-ours"
-                        wordHighlight={highlightWords}
-                        compareLines={segment.theirsLines}
-                        scrollElementRef={leftScrollRef}
-                        onHorizontalScroll={handleHorizontalScroll}
-                    />
-                    <div className="conflict-actions-left" onClick={(e) => e.stopPropagation()}>
-                        <button
-                            className="action-btn discard-btn"
-                            onClick={() => onResolve(segment.id, "theirs")}
-                            title="Ignore left block"
-                            aria-label="Ignore left block"
-                        >
-                            <IconClose />
-                        </button>
-                        <button
-                            className={`action-btn accept-btn ${isOurs ? "active" : ""}`}
-                            onClick={() => onResolve(segment.id, "ours")}
-                            title="Accept left block"
-                            aria-label="Accept left block"
-                            aria-current={isOurs ? "true" : undefined}
-                        >
-                            <IconArrowRight />
-                        </button>
-                    </div>
-                </div>
-
-                <div className="column column-middle conflict-column result-column">
-                    <CodeBlock
-                        lines={resultLines}
-                        lineCount={lineCount}
-                        lineNumbers={lineNumbers.middle}
-                        className={[
-                            "conflict-result",
-                            isResolved ? "resolved" : "unresolved",
-                            isCustom ? "custom" : "",
-                        ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        wordHighlight={highlightWords}
-                        compareLines={resultCompareLines}
-                        editable
-                        onEdit={onEditResult}
-                        scrollElementRef={middleScrollRef}
-                        previewScrollElementRef={middlePreviewScrollRef}
-                        onHorizontalScroll={handleHorizontalScroll}
-                    />
-                </div>
-
-                <div
-                    className={`column column-right conflict-column ${isTheirs ? "accepted" : ""}`}
-                >
+            <div className="column column-middle conflict-column result-column">
+                <EditableResultBlock
+                    lines={resultLines}
+                    lineCount={lineCount}
+                    lineNumbers={lineNumbers}
+                    className={`conflict-result ${
+                        view.resultIsUnresolved || !view.isResolved ? "unresolved" : "resolved"
+                    } ${view.isEdited ? "edited" : ""} ${view.resultSettled ? "settled" : ""}`}
+                    wordHighlight={highlightWords}
+                    compareLines={view.resultCompareLines}
+                    onCommit={(lines) => onEditResult(segment.id, lines)}
+                />
+                {view.isEdited ? (
                     <div className="conflict-actions-right" onClick={(e) => e.stopPropagation()}>
                         <button
-                            className={`action-btn accept-btn ${isTheirs ? "active" : ""}`}
-                            onClick={() => onResolve(segment.id, "theirs")}
-                            title="Accept right block"
-                            aria-label="Accept right block"
-                            aria-current={isTheirs ? "true" : undefined}
+                            type="button"
+                            className="action-btn"
+                            onClick={() => onClearEdit(segment.id)}
+                            title="Undo manual edit"
+                            aria-label="Undo manual edit"
                         >
-                            <IconArrowLeft />
-                        </button>
-                        <button
-                            className="action-btn discard-btn"
-                            onClick={() => onResolve(segment.id, "ours")}
-                            title="Ignore right block"
-                            aria-label="Ignore right block"
-                        >
-                            <IconClose />
+                            <span className="hunk-action-glyph" aria-hidden="true">
+                                ↶
+                            </span>
                         </button>
                     </div>
-                    <CodeBlock
-                        lines={segment.theirsLines}
-                        lineCount={lineCount}
-                        lineNumbers={lineNumbers.right}
-                        className="conflict-theirs"
-                        wordHighlight={highlightWords}
-                        compareLines={segment.oursLines}
-                        scrollElementRef={rightScrollRef}
-                        onHorizontalScroll={handleHorizontalScroll}
-                    />
-                </div>
+                ) : null}
             </div>
         </div>
+    );
+}, resultConflictEqual);
+
+/**
+ * Right (theirs) pane block: this side's accept/discard controls plus the
+ * theirs lines.
+ */
+export const TheirsConflictBlock = React.memo(function TheirsConflictBlock({
+    segment,
+    resolution,
+    editedLines,
+    dismissed,
+    lineCount,
+    lineNumbers,
+    onResolve,
+    onDismiss,
+    onSelect,
+    isActive,
+    highlightWords,
+}: ConflictPaneBaseProps & ConflictSideCallbacks) {
+    const view = deriveConflictView(segment, resolution, editedLines, dismissed);
+    const handleSelect = useCallback(() => onSelect(segment.id), [onSelect, segment.id]);
+    const handleKeyDown = useCallback(
+        (event: React.KeyboardEvent<HTMLDivElement>) => {
+            if (event.currentTarget !== event.target) return;
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            onSelect(segment.id);
+        },
+        [onSelect, segment.id],
+    );
+    return (
+        <div
+            className={conflictWrapperClass(segment, view, isActive)}
+            style={intrinsicSizeStyle(lineCount)}
+            // Native button is invalid here because the block contains hunk action buttons.
+            // react-doctor-disable-next-line react-doctor/prefer-tag-over-role
+            role="button"
+            tabIndex={0}
+            data-conflict-id={segment.id}
+            onClick={handleSelect}
+            onKeyDown={handleKeyDown}
+        >
+            <div
+                className={`column column-right conflict-column ${view.theirsInResult ? "accepted" : ""} ${view.theirsDismissed ? "dismissed" : ""}`}
+            >
+                {view.showRightActions ? (
+                    <RightHunkActions
+                        segmentId={segment.id}
+                        rightAppend={view.rightAppend}
+                        isTheirs={view.isTheirs}
+                        isEdited={view.isEdited}
+                        oursDismissed={view.oursDismissed}
+                        onResolve={onResolve}
+                        onDismiss={onDismiss}
+                    />
+                ) : null}
+                <CodeBlock
+                    lines={segment.theirsLines}
+                    lineCount={lineCount}
+                    lineNumbers={lineNumbers}
+                    className={`conflict-theirs ${view.theirsInResult ? "accepted-pane" : ""}`}
+                    wordHighlight={highlightWords}
+                    compareLines={view.theirsInResult ? undefined : segment.baseLines}
+                />
+            </div>
+        </div>
+    );
+}, sideConflictEqual);
+
+// --- Connector ribbons ---
+
+/** One hunk's connector metadata; geometry is set imperatively per scroll frame. */
+export interface ConnectorSpec {
+    id: number;
+    leftColorClass?: string;
+    rightColorClass?: string;
+}
+
+/** Color class for a hunk's connector ribbon, matching its block band. */
+// react-doctor-disable-next-line react-doctor/only-export-components
+export function connectorClass(segment: ConflictSegment): string {
+    return sideVariantClass(segment) || "change-conflict";
+}
+
+/**
+ * SVG overlay drawing a colored ribbon per conflict hunk across the gutters
+ * between panes. Paths carry no geometry here — the scroll driver sets each
+ * path's `d` in its rAF so the ribbons track the translated columns without a
+ * React re-render.
+ */
+export function ConnectorLayer({
+    specs,
+    registerPath,
+}: {
+    specs: ConnectorSpec[];
+    registerPath: (key: string, el: SVGPathElement | null) => void;
+}): React.ReactElement {
+    return (
+        <svg className="merge-connectors" aria-hidden="true">
+            {specs.map((spec) => (
+                <React.Fragment key={spec.id}>
+                    {spec.leftColorClass ? (
+                        <path
+                            ref={(el) => registerPath(`${spec.id}-left`, el)}
+                            className={`merge-connector ${spec.leftColorClass}`}
+                        />
+                    ) : null}
+                    {spec.rightColorClass ? (
+                        <path
+                            ref={(el) => registerPath(`${spec.id}-right`, el)}
+                            className={`merge-connector ${spec.rightColorClass}`}
+                        />
+                    ) : null}
+                </React.Fragment>
+            ))}
+        </svg>
     );
 }
 
 // --- Overview rail ---
 
+/**
+ * Percentage-based minimap marker describing where a hunk appears in the full
+ * rendered merge document and whether it is resolved.
+ */
 export interface OverviewMarker {
     id: number;
     ordinal: number;
@@ -728,6 +1107,10 @@ export interface OverviewMarker {
     resolved: boolean;
 }
 
+/**
+ * Renders the merge-editor overview rail and maps marker clicks back to hunk IDs
+ * without changing hunk resolution state.
+ */
 export function OverviewRail({
     markers,
     activeConflictId,
@@ -738,10 +1121,11 @@ export function OverviewRail({
     onJump: (id: number) => void;
 }) {
     return (
-        <div className="overview-rail" aria-label="Conflict overview">
+        <div className="overview-rail" aria-label={t("merge.overview.label")}>
             <div className="overview-track">
                 {markers.map((marker) => (
                     <button
+                        type="button"
                         key={marker.id}
                         className={[
                             "overview-marker",
@@ -755,8 +1139,8 @@ export function OverviewRail({
                             top: `${marker.topPct}%`,
                             height: `${marker.heightPct}%`,
                         }}
-                        title={`Jump to hunk #${marker.ordinal}`}
-                        aria-label={`Jump to hunk #${marker.ordinal}`}
+                        title={t("merge.overview.jumpToHunk", { ordinal: marker.ordinal })}
+                        aria-label={t("merge.overview.jumpToHunk", { ordinal: marker.ordinal })}
                         aria-current={activeConflictId === marker.id ? "true" : undefined}
                         onClick={() => onJump(marker.id)}
                     />

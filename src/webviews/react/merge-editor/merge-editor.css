@@ -1,48 +1,43 @@
-
 .merge-editor {
-    --merge-pane-min-width: 460px;
-    --merge-editor-line-height: 22px;
-    --merge-border: color-mix(in srgb, var(--vscode-panel-border, #3f4654) 70%, transparent);
+    --merge-editor-bg: var(--vscode-editor-background, #2b3240);
+    --merge-editor-fg: var(--vscode-editor-foreground, #bfc7d5);
+    --merge-border: color-mix(in srgb, var(--merge-editor-fg) 14%, transparent);
     --merge-toolbar-bg: color-mix(in srgb, var(--vscode-sideBar-background, #2b2d30) 82%, #000 18%);
-    --merge-header-bg: color-mix(in srgb, var(--vscode-editorGroupHeader-tabsBackground, #31343a) 88%, #000 12%);
+    --merge-header-bg: color-mix(
+        in srgb,
+        var(--vscode-editorGroupHeader-tabsBackground, #31343a) 88%,
+        #000 12%
+    );
     --merge-muted: var(--vscode-descriptionForeground, #9ca3af);
     --merge-accent: var(--vscode-textLink-foreground, #4ea1ff);
     --merge-warning: #f2c572;
     --merge-danger: #d86c6c;
     --merge-ok: #79c18d;
-    --merge-current-content-bg: var(
-        --vscode-merge-currentContentBackground,
-        rgba(116, 46, 53, 0.25)
-    );
-    --merge-incoming-content-bg: var(
-        --vscode-merge-incomingContentBackground,
-        rgba(116, 46, 53, 0.25)
-    );
-    --merge-common-content-bg: var(
-        --vscode-merge-commonContentBackground,
-        rgba(47, 79, 130, 0.2)
-    );
-    --merge-result-conflict-bg: color-mix(
-        in srgb,
-        var(--merge-current-content-bg) 45%,
-        var(--merge-incoming-content-bg) 55%
-    );
-    --merge-result-nonconflict-bg: color-mix(
-        in srgb,
-        var(--merge-common-content-bg) 65%,
-        transparent
-    );
-    --merge-result-resolved-bg: var(
-        --vscode-diffEditor-insertedTextBackground,
-        rgba(56, 118, 66, 0.35)
-    );
+    /* PyCharm Darcula merge palette: the block/ribbon wash is a muted maroon
+       so it reads as a background tint, while changed-word fragments (see
+       .word-diff-change below) carry the same family at full intensity on
+       top of it. */
+    --pycharm-conflict: #4b1515;
+    --pycharm-inserted: #3d6f4e;
+    --pycharm-modified: #1c6978;
+    --pycharm-deleted: #565b62;
+    --merge-conflict-block-bg: #3a2a32;
+    --merge-conflict-ribbon-bg: var(--merge-conflict-block-bg);
+    --merge-inserted-block-bg: #264b33;
+    --merge-modified-block-bg: #13404b;
+    --merge-deleted-block-bg: #3f444b;
+    --merge-pane-boundary: color-mix(in srgb, var(--merge-editor-fg) 24%, #0d1522 76%);
+    --merge-hunk-boundary: color-mix(in srgb, var(--merge-border) 72%, transparent);
+    --merge-hunk-boundary-width: 1px;
+    --merge-line-number-gutter: 33px;
+    --merge-action-gutter: 44px;
 
     display: flex;
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
     color: var(--vscode-foreground);
-    background: var(--vscode-editor-background);
+    background: var(--merge-editor-bg);
     font-family: var(--vscode-font-family, sans-serif);
     font-size: var(--vscode-font-size, 13px);
 }
@@ -81,12 +76,11 @@
     gap: 8px;
     min-height: 30px;
     padding: 2px 8px;
-    background:
-        linear-gradient(
-            180deg,
-            color-mix(in srgb, var(--merge-toolbar-bg) 90%, white 10%),
-            var(--merge-toolbar-bg)
-        );
+    background: linear-gradient(
+        180deg,
+        color-mix(in srgb, var(--merge-toolbar-bg) 90%, white 10%),
+        var(--merge-toolbar-bg)
+    );
     border-bottom: 1px solid var(--merge-border);
     box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
     flex-shrink: 0;
@@ -101,7 +95,6 @@
 }
 .toolbar-left {
     flex: 1 1 auto;
-    flex-wrap: wrap;
 }
 .toolbar-center {
     justify-content: center;
@@ -123,33 +116,6 @@
     height: 16px;
     background: color-mix(in srgb, var(--merge-border) 80%, transparent);
     margin: 0 4px;
-}
-.toolbar-apply-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-}
-.toolbar-group-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--merge-muted);
-    white-space: nowrap;
-}
-.toolbar-segmented {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 1px;
-    border: 1px solid color-mix(in srgb, var(--merge-border) 82%, transparent);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.02);
-}
-.toolbar-inline-note {
-    color: var(--merge-muted);
-    font-size: 11px;
-    white-space: nowrap;
 }
 .toolbar-icon {
     display: inline-flex;
@@ -177,10 +143,6 @@
 }
 .toolbar-btn {
     padding: 0 7px;
-}
-.toolbar-btn.compact {
-    padding: 0 8px;
-    height: 22px;
 }
 .toolbar-icon-btn {
     width: 22px;
@@ -307,21 +269,20 @@
 
 .pane-meta-row {
     display: flex;
-    border-bottom: 1px solid var(--merge-border);
-    background: color-mix(in srgb, var(--merge-header-bg) 82%, #000 18%);
-    min-height: 28px;
+    border-bottom: 1px solid color-mix(in srgb, var(--merge-border) 72%, transparent);
+    background: color-mix(in srgb, var(--merge-editor-bg) 92%, #000 8%);
+    min-height: 24px;
     flex-shrink: 0;
-    min-width: calc(var(--merge-pane-min-width) * 3);
 }
 .pane-meta {
-    flex: 0 0 var(--merge-pane-min-width);
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-width: var(--merge-pane-min-width);
-    padding: 4px 10px;
-    color: var(--merge-muted);
+    min-width: 0;
+    padding: 2px 8px;
+    color: color-mix(in srgb, var(--merge-editor-fg) 76%, transparent);
     font-size: 11px;
     border-right: 1px solid var(--merge-border);
 }
@@ -335,7 +296,7 @@
     text-overflow: ellipsis;
 }
 .pane-lock {
-    opacity: 0.75;
+    opacity: 0.64;
 }
 .pane-meta-right-group {
     display: inline-flex;
@@ -343,141 +304,241 @@
     gap: 8px;
 }
 .pane-meta-counts {
-    color: color-mix(in srgb, var(--merge-muted) 88%, transparent);
+    color: color-mix(in srgb, var(--merge-editor-fg) 62%, transparent);
     white-space: nowrap;
 }
 .pane-meta-center {
     justify-content: center;
-    color: var(--vscode-foreground);
+    color: color-mix(in srgb, var(--merge-editor-fg) 82%, transparent);
     font-weight: 500;
 }
 .pane-meta-right {
     border-right: none;
 }
-.show-details {
-    height: 20px;
-    padding: 0 4px;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--merge-accent);
-    cursor: pointer;
-    font-size: 11px;
-}
-.show-details:hover {
-    text-decoration: underline;
-    background: rgba(78, 161, 255, 0.06);
-}
-
 .merge-content-shell {
     position: relative;
     flex: 1;
     min-height: 0;
-    background: var(--vscode-editor-background);
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: hidden;
+    background: var(--merge-editor-bg);
 }
 .merge-content {
+    box-sizing: border-box;
     height: 100%;
-    min-width: calc(var(--merge-pane-min-width) * 3);
-    overflow-x: visible;
+    overflow-x: hidden;
     overflow-y: auto;
     font-family: var(--vscode-editor-font-family, monospace);
-    font-size: var(--vscode-editor-font-size, 12px);
-    line-height: var(--merge-editor-line-height);
-    background: var(--vscode-editor-background);
+    font-size: var(--merge-code-font-size, var(--vscode-editor-font-size, 13px));
+    line-height: 20px;
+    background: var(--merge-editor-bg);
     padding-right: 14px;
+    padding-bottom: 20px;
+    color: var(--merge-editor-fg);
+}
+/* Sticky viewport holding the three translated columns. It is exactly one
+   viewport tall and pinned to the top of the scroller; the spacer below supplies
+   the scroll length (canonicalTotalPx). The negative margin removes the
+   viewport's own height from flow so the scroll range is the spacer alone. The
+   --merge-viewport-h var is set by the scroll driver from clientHeight. */
+.merge-viewport {
+    position: sticky;
+    top: 0;
+    height: var(--merge-viewport-h, 100%);
+    margin-bottom: calc(-1 * var(--merge-viewport-h, 0px));
+    display: flex;
+    overflow: hidden;
+    min-width: 100%;
+}
+/* Each column flows at its own natural height and is moved by the driver's
+   translateY; the viewport clips the overflow. align-self keeps it from
+   stretching to the viewport height so translate reveals the right rows. */
+.merge-col {
+    flex: 1 1 0;
+    min-width: 0;
+    align-self: flex-start;
+    will-change: transform;
+    /* Columns paint above the connector SVG so opaque ribbons run underneath
+       line numbers and action glyphs (z-index applies to flex items). */
+    z-index: 2;
+}
+/* Divider strip between panes; hunk ribbons curve across exactly this zone
+   (PyCharm's divider width), so it stays wide enough for the S-bend to read. */
+.merge-gutter {
+    flex: 0 0 28px;
+    align-self: stretch;
+    background: transparent;
+    z-index: 3;
+}
+/* Full length below the sticky viewport; height set inline to canonicalTotalPx. */
+.merge-vscroll-spacer {
+    flex: none;
+    width: 1px;
+}
+/* Ribbon overlay covering the viewport; paths are positioned in viewport
+   coordinates by the scroll driver. Painted below the columns (z-index 1 vs 2)
+   so opaque band-colored ribbons flow underneath line numbers and buttons,
+   PyCharm-style. pointer-events:none so it never blocks the panes. */
+.merge-connectors {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+    z-index: 1;
+}
+/* Ribbon fills use the block-band color at full strength — no translucency —
+   so a hunk's band, its gutter strips, and its divider curve read as one
+   continuous region across all three panes, PyCharm-style. The muted block
+   palette keeps overlapping ribbons legible at full opacity, and the 1px
+   brightened edge stroke keeps individual ribbons traceable where they
+   cross. */
+.merge-connector {
+    fill: var(--merge-conflict-ribbon-bg);
+    stroke: color-mix(in srgb, var(--merge-conflict-ribbon-bg) 45%, #d86c6c 55%);
+    stroke-width: 1;
+}
+.merge-connector.variant-insertion {
+    fill: var(--merge-inserted-block-bg);
+    stroke: color-mix(in srgb, var(--merge-inserted-block-bg) 45%, #79c18d 55%);
+}
+.merge-connector.variant-modification {
+    fill: var(--merge-modified-block-bg);
+    stroke: color-mix(in srgb, var(--merge-modified-block-bg) 45%, #58b5c9 55%);
+}
+.merge-connector.variant-deletion {
+    fill: var(--merge-deleted-block-bg);
+    stroke: color-mix(in srgb, var(--merge-deleted-block-bg) 45%, #9aa3ad 55%);
+}
+/* Settled sides (accepted / discarded) trade the filled band for PyCharm's
+   dotted contour: an unfilled outline tracing the source block, the divider
+   curve, and the result extent, so a decided hunk stays traceable without
+   competing with pending suggestions. Strokes brighten the band color so 1px
+   dots stay legible on the editor background. Ordered after the variant fill
+   rules so fill:none wins the specificity tie. */
+.merge-connector.connector-resolved {
+    fill: none;
+    stroke: color-mix(in srgb, var(--merge-conflict-ribbon-bg) 45%, #d86c6c 55%);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+.merge-connector.variant-insertion.connector-resolved {
+    stroke: color-mix(in srgb, var(--merge-inserted-block-bg) 45%, #79c18d 55%);
+}
+.merge-connector.variant-modification.connector-resolved {
+    stroke: color-mix(in srgb, var(--merge-modified-block-bg) 45%, #58b5c9 55%);
+}
+.merge-connector.variant-deletion.connector-resolved {
+    stroke: color-mix(in srgb, var(--merge-deleted-block-bg) 45%, #9aa3ad 55%);
 }
 .merge-content::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 9px;
+    height: 9px;
+}
+.merge-content::-webkit-scrollbar-track {
+    background: transparent;
 }
 .merge-content::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
+    background: color-mix(in srgb, var(--merge-editor-fg) 22%, transparent);
+    border-radius: 6px;
     border: 2px solid transparent;
     background-clip: padding-box;
 }
 
 .segment {
-    display: flex;
-    min-width: calc(var(--merge-pane-min-width) * 3);
+    width: 100%;
+    /* Browser-level virtualization: offscreen segments skip rendering work
+       while the inline contain-intrinsic-size keeps scrollbar geometry stable
+       for very large conflict files. Each segment now holds a single pane's
+       slice, stacked vertically inside its column. */
+    content-visibility: auto;
 }
+/* Columns stay transparent; pane and line-number separators are drawn in the
+   gutter channels so hunk ribbons still pass underneath them. */
 .column {
-    flex: 0 0 var(--merge-pane-min-width);
-    min-width: var(--merge-pane-min-width);
-    border-right: 1px solid var(--merge-border);
-    background: color-mix(in srgb, var(--vscode-editor-background) 95%, #0b0d11 5%);
-}
-.column-right {
-    border-right: none;
-}
-.result-column {
-    border-left: 1px solid var(--merge-border);
-    border-right: 1px solid var(--merge-border);
+    min-width: 0;
+    background: transparent;
 }
 .code-block {
     display: grid;
-    grid-template-columns: 76px minmax(0, 1fr);
+    grid-template-columns: var(--merge-line-number-gutter) minmax(0, 1fr);
     min-height: 0;
     overflow: hidden;
-    background: var(--vscode-editor-background);
-    color: var(--vscode-editor-foreground);
+    position: relative;
 }
-.code-scroll {
-    overflow-x: auto;
-    overflow-y: hidden;
-    background:
-        repeating-linear-gradient(
-            to right,
-            transparent 0,
-            transparent 39px,
-            color-mix(in srgb, var(--vscode-editorIndentGuide-background1, #404040) 38%, transparent)
-                39px,
-            transparent 40px
-        ),
-        var(--vscode-editor-background);
-    background-position: 10px 0, 0 0;
-    background-size: 40px var(--merge-editor-line-height), auto;
+.code-block.line-numbers-right {
+    grid-template-columns:
+        minmax(0, 1fr)
+        calc(var(--merge-line-number-gutter) + var(--merge-action-gutter));
 }
-.code-scroll::-webkit-scrollbar {
-    height: 10px;
+.conflict-theirs.code-block {
+    grid-template-columns:
+        calc(var(--merge-line-number-gutter) + var(--merge-action-gutter))
+        minmax(0, 1fr);
 }
-.code-scroll::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 8px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
+.code-block.no-line-numbers {
+    grid-template-columns: minmax(0, 1fr);
 }
+/* Transparent so ribbons drawn below the column show through non-band rows;
+   band rows still paint their own row background on top. */
 .line-numbers {
-    background: color-mix(
-        in srgb,
-        var(--vscode-editorGutter-background, var(--vscode-sideBar-background, transparent)) 82%,
-        #111 18%
-    );
-    border-right: 1px solid var(--merge-border);
+    background: transparent;
     color: var(--vscode-editorLineNumber-foreground, var(--merge-muted));
-    user-select: none;
+    box-sizing: border-box;
+}
+.segment-conflict.change-conflict.unresolved .line-numbers {
+    position: relative;
+}
+.col-left .segment-conflict.change-conflict.unresolved .code-block.line-numbers-right .line-numbers,
+.col-middle .segment-conflict.change-conflict.unresolved .code-block.line-numbers-left .line-numbers,
+.col-right .segment-conflict.change-conflict.unresolved .code-block.line-numbers-left .line-numbers {
+    isolation: isolate;
+}
+.col-left .segment-conflict.change-conflict.unresolved .code-block.line-numbers-right .line-numbers::after,
+.col-middle .segment-conflict.change-conflict.unresolved .code-block.line-numbers-left .line-numbers::after,
+.col-right .segment-conflict.change-conflict.unresolved .code-block.line-numbers-left .line-numbers::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--merge-pane-boundary);
+    pointer-events: none;
+    z-index: 2;
 }
 .line-number-row {
     display: grid;
     grid-template-columns: 1fr;
+    box-sizing: border-box;
+}
+.code-block.line-numbers-right .line-number-row {
+    padding-left: var(--merge-action-gutter);
+}
+.col-right .code-block.line-numbers-left {
+    grid-template-columns:
+        calc(var(--merge-line-number-gutter) + var(--merge-action-gutter))
+        minmax(0, 1fr);
+}
+.col-right .code-block.line-numbers-left .line-number-row {
+    padding-right: var(--merge-action-gutter);
+}
+.conflict-theirs .line-number-row {
+    padding-right: var(--merge-action-gutter);
 }
 .line-numbers.has-secondary .line-number-row {
     grid-template-columns: 1fr 1fr;
 }
 .line-number {
-    padding: 0 8px 0 4px;
+    padding: 0 7px 0 3px;
     text-align: right;
-    min-height: var(--merge-editor-line-height);
-    line-height: var(--merge-editor-line-height);
-    font-size: calc(var(--vscode-editor-font-size, 12px) - 1px);
-    opacity: 0.92;
+    min-height: 20px;
+    line-height: 20px;
     border-left: 1px solid transparent;
 }
 .line-number-secondary {
-    color: color-mix(in srgb, var(--merge-muted) 72%, transparent);
-    font-size: 10px;
+    color: color-mix(in srgb, var(--merge-muted) 58%, transparent);
+    font-size: 11px;
     padding-right: 4px;
 }
 .line-number-primary {
@@ -486,325 +547,366 @@
 .line-numbers.has-secondary .line-number-primary {
     border-left-color: color-mix(in srgb, var(--merge-border) 60%, transparent);
 }
-.code-lines {
-    min-width: max-content;
-    position: relative;
-    tab-size: 4;
-    background: var(--vscode-editor-background);
+.segment-conflict.change-conflict.unresolved .line-numbers,
+.segment-conflict.change-conflict.unresolved .line-number-row {
+    background: var(--merge-conflict-ribbon-bg);
 }
-.editable-code-shell {
-    position: relative;
-    min-height: var(--merge-editor-line-height);
-}
-.code-scroll-preview {
-    overflow: hidden;
-    pointer-events: none;
-}
-.result-editor-textarea {
+.segment-conflict.change-conflict.unresolved .code-block::before {
+    content: "";
     position: absolute;
-    inset: 0;
-    display: block;
-    width: 100%;
-    min-height: var(--merge-editor-line-height);
-    padding: 0 10px;
-    border: 0;
-    outline: 0;
-    resize: none;
-    color: transparent;
-    caret-color: var(--vscode-editor-foreground);
-    background: transparent;
-    font-family: var(--vscode-editor-font-family, monospace);
-    font-size: var(--vscode-editor-font-size, 12px);
-    line-height: var(--merge-editor-line-height);
-    white-space: pre;
-    overflow-wrap: normal;
+    top: 0;
+    bottom: 0;
+    width: var(--merge-line-number-gutter);
+    background: var(--merge-conflict-ribbon-bg);
+    pointer-events: none;
+    z-index: 0;
+}
+.segment-conflict.change-conflict.unresolved .code-block.line-numbers-left::before {
+    left: 0;
+}
+.segment-conflict.change-conflict.unresolved .code-block.line-numbers-right::before {
+    right: 0;
+    width: calc(var(--merge-line-number-gutter) + var(--merge-action-gutter));
+}
+.segment-conflict.change-conflict.unresolved .conflict-theirs.code-block::before {
+    width: calc(var(--merge-line-number-gutter) + var(--merge-action-gutter));
+}
+.segment-conflict.change-conflict.unresolved .line-numbers,
+.segment-conflict.change-conflict.unresolved .code-lines {
+    position: relative;
+    z-index: 1;
+}
+.code-lines {
+    min-width: 0;
+    position: relative;
+    /* Single-column grid keeps line rows and token overflow in one horizontal
+       scroll plane. The lower bound is the widest line across ALL panes
+       (--merge-line-min-width), so every pane shares one scroll extent and moves
+       in lockstep — PyCharm-style — instead of each pane sizing to its own
+       content and short panes (a conflict side/result) refusing to scroll. Row
+       color is painted by the sticky real-code-line layer. */
+    display: grid;
+    grid-template-columns: minmax(max(100%, var(--merge-line-min-width, 0px)), max-content);
     overflow-x: auto;
     overflow-y: hidden;
-    box-sizing: border-box;
+    scrollbar-width: none;
 }
-.result-editor-textarea::selection {
-    background: rgba(78, 161, 255, 0.32);
-}
-.result-editor-textarea:focus {
-    background: transparent;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--merge-accent) 45%, transparent);
-}
-.editable-code-shell.editing .code-scroll-preview {
-    opacity: 0.92;
+.code-lines::-webkit-scrollbar {
+    width: 0;
+    height: 0;
 }
 .code-line {
-    padding: 0 10px;
+    padding: 0 9px;
     white-space: pre;
-    line-height: var(--merge-editor-line-height);
-    min-height: var(--merge-editor-line-height);
-    overflow: visible;
-    font-variant-ligatures: none;
-    box-sizing: border-box;
+    line-height: 20px;
+    min-height: 20px;
 }
-.code-line:hover {
-    background: var(--vscode-editor-hoverHighlightBackground, rgba(128, 128, 128, 0.08));
+.real-code-line {
+    position: relative;
+}
+.real-code-line::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 20px;
+    pointer-events: none;
 }
 .code-line-content {
-    display: inline-block;
-    min-width: 1ch;
-}
-.code-line.empty-line .code-line-content {
-    min-width: 100%;
-}
-.editor-whitespace {
-    color: var(--vscode-editorWhitespace-foreground, rgba(120, 120, 120, 0.52));
-}
-.tok-comment.editor-whitespace {
-    color: color-mix(
-        in srgb,
-        var(--vscode-editorLineNumber-foreground, #6e7681) 72%,
-        transparent
-    );
+    position: relative;
 }
 .segment-common .code-line {
-    color: color-mix(in srgb, var(--vscode-editor-foreground) 90%, transparent);
-}
-.words-highlighted .segment-conflict .word-highlight .code-line {
-    background-image: linear-gradient(
-        180deg,
-        transparent 0,
-        transparent calc(100% - 1px),
-        rgba(255, 221, 120, 0.08) calc(100% - 1px),
-        rgba(255, 221, 120, 0.08) 100%
-    );
+    color: var(--vscode-editor-foreground);
 }
 
 .segment-conflict {
+    --merge-hunk-boundary: color-mix(in srgb, var(--merge-border) 72%, transparent);
+    --merge-hunk-boundary-width: 1px;
+
     display: block;
-    margin: 2px 0 3px;
-    border-top: 1px solid color-mix(in srgb, var(--merge-border) 92%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--merge-border) 92%, transparent);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), inset 0 -1px 0 rgba(0, 0, 0, 0.18);
-}
-.segment-conflict.active {
-    border-top-color: rgba(78, 161, 255, 0.55);
-    border-bottom-color: rgba(78, 161, 255, 0.55);
+    /* Hunk boundary rules are drawn as zero-height inset shadows (not a
+       border/margin) so a conflict block occupies exactly its rows
+       (lines * 20px) — matching the scroll geometry and contain-intrinsic-size
+       — with no per-conflict overhead that would drift connectors or jitter
+       on first reveal. */
     box-shadow:
-        inset 0 0 0 1px rgba(78, 161, 255, 0.18),
-        0 0 0 1px rgba(78, 161, 255, 0.08);
+        inset 0 var(--merge-hunk-boundary-width) 0 0 var(--merge-hunk-boundary),
+        inset 0 calc(-1 * var(--merge-hunk-boundary-width)) 0 0 var(--merge-hunk-boundary);
 }
-.hunk-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-height: 24px;
-    padding: 2px 8px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.06));
-    border-bottom: 1px solid color-mix(in srgb, var(--merge-border) 80%, transparent);
+.segment-conflict.change-conflict {
+    --merge-hunk-boundary: color-mix(in srgb, var(--pycharm-conflict) 88%, transparent);
+    --merge-hunk-boundary-width: 2px;
 }
-.hunk-header-left,
-.hunk-header-center {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
+.segment-conflict.variant-insertion {
+    --merge-hunk-boundary: color-mix(in srgb, var(--pycharm-inserted) 76%, transparent);
+    --merge-hunk-boundary-width: 2px;
 }
-.hunk-header-left {
-    flex: 1 1 auto;
+.segment-conflict.variant-modification {
+    --merge-hunk-boundary: color-mix(in srgb, var(--pycharm-modified) 76%, transparent);
+    --merge-hunk-boundary-width: 2px;
 }
-.hunk-header-center {
-    flex: 0 0 auto;
-    flex-wrap: wrap;
-    justify-content: center;
+.segment-conflict.variant-deletion {
+    --merge-hunk-boundary: color-mix(in srgb, var(--pycharm-deleted) 76%, transparent);
+    --merge-hunk-boundary-width: 2px;
 }
-.hunk-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 26px;
-    height: 16px;
-    padding: 0 5px;
-    border-radius: 10px;
-    font-size: 10px;
+.segment-conflict.auto-merged {
+    box-shadow:
+        inset 0 1px 0 0
+            color-mix(
+                in srgb,
+                var(--vscode-gitDecoration-addedResourceForeground, #81b88b) 45%,
+                transparent
+            ),
+        inset 0 -1px 0 0
+            color-mix(
+                in srgb,
+                var(--vscode-gitDecoration-addedResourceForeground, #81b88b) 45%,
+                transparent
+            );
+}
+/* Ordered after .auto-merged so the focus emphasis wins the specificity tie
+   when a hunk is both active and auto-merged. */
+.segment-conflict.active {
+    box-shadow:
+        inset 0 var(--merge-hunk-boundary-width) 0 0 var(--merge-hunk-boundary),
+        inset 0 calc(-1 * var(--merge-hunk-boundary-width)) 0 0 var(--merge-hunk-boundary),
+        inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, #4ea1ff) 16%, transparent);
+}
+.hunk-action-glyph {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 22.5px;
     font-weight: 700;
-    letter-spacing: 0.02em;
-    border: 1px solid color-mix(in srgb, var(--merge-border) 85%, transparent);
-    background: rgba(255, 255, 255, 0.03);
-    color: var(--merge-muted);
+    line-height: 1;
 }
-.hunk-badge.hunk-kind-conflict {
-    color: #f0b3b3;
-    border-color: rgba(216, 108, 108, 0.35);
-    background: rgba(216, 108, 108, 0.10);
-}
-.hunk-badge.hunk-kind-ours-only,
-.hunk-badge.hunk-kind-theirs-only {
-    color: #9ec3ff;
-    border-color: rgba(91, 137, 214, 0.35);
-    background: rgba(91, 137, 214, 0.08);
-}
-.hunk-kind-label {
-    font-size: 11px;
-    color: var(--vscode-foreground);
-    white-space: nowrap;
-}
-.hunk-detail-lines {
-    font-size: 10px;
-    color: var(--merge-muted);
-    white-space: nowrap;
-}
-.hunk-choice {
-    height: 19px;
-    padding: 0 6px;
-    border: 1px solid color-mix(in srgb, var(--merge-border) 78%, transparent);
-    border-radius: 3px;
-    background: rgba(255, 255, 255, 0.01);
-    color: var(--merge-muted);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    cursor: pointer;
-}
-.hunk-choice:hover {
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--vscode-foreground);
-}
-.hunk-choice.active {
-    background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 26%, transparent);
-    border-color: color-mix(in srgb, var(--vscode-button-background, #0e639c) 58%, transparent);
-    color: var(--vscode-button-foreground, #fff);
-}
-.hunk-choice.danger.active {
-    background: rgba(216, 108, 108, 0.18);
-    border-color: rgba(216, 108, 108, 0.45);
-}
-.hunk-status {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    max-width: 180px;
-    color: var(--merge-muted);
-    font-size: 10px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.hunk-status.tone-warn {
-    color: var(--merge-warning);
-}
-.hunk-status.tone-ok {
+.accept-btn {
     color: var(--merge-ok);
 }
-.hunk-status .status-icon {
-    width: 10px;
-    height: 10px;
+/* Dark red at rest like PyCharm's ×; the hover rule escalates to bright red. */
+.discard-btn {
+    color: #c02b42;
 }
-
 .conflict-column {
     position: relative;
     overflow: visible;
 }
-.hunk-columns {
-    display: flex;
-    align-items: stretch;
+.merge-horizontal-scroll {
+    position: absolute;
+    right: 14px;
+    bottom: 0;
+    left: 0;
+    height: 9px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    z-index: 6;
+    background: var(--merge-editor-bg);
+}
+.merge-horizontal-scroll-inner {
+    height: 1px;
+    /* Match the code font so the `ch` unit used to size this spacer equals one
+       monospace glyph in the panes. */
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--merge-code-font-size, var(--vscode-editor-font-size, 13px));
+}
+.merge-horizontal-scroll::-webkit-scrollbar {
+    height: 9px;
+}
+.merge-horizontal-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.merge-horizontal-scroll::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--merge-editor-fg) 24%, transparent);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
 }
 .conflict-actions-left {
     position: absolute;
-    top: 2px;
-    right: -1px;
+    top: 1px;
+    right: var(--merge-line-number-gutter);
     display: flex;
     gap: 0;
-    z-index: 5;
+    z-index: 7;
 }
 .conflict-actions-right {
     position: absolute;
-    top: 2px;
-    left: -1px;
+    top: 1px;
+    left: var(--merge-line-number-gutter);
     display: flex;
     gap: 0;
-    z-index: 5;
+    z-index: 7;
 }
+/* Flat PyCharm-style gutter glyphs: no box chrome at rest, a subtle tint only
+   on hover. The 20px box keeps the hit target. */
 .action-btn {
-    width: 18px;
-    height: 18px;
-    border: 1px solid color-mix(in srgb, var(--merge-border) 80%, transparent);
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 3px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1;
-    background: color-mix(in srgb, var(--merge-header-bg) 86%, #000 14%);
-    color: var(--vscode-foreground);
-    opacity: 0.95;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+    background: transparent;
+    color: color-mix(in srgb, var(--merge-editor-fg) 84%, transparent);
+    opacity: 0.92;
 }
 .action-btn:hover {
-    background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.1));
+    background: color-mix(in srgb, var(--merge-editor-fg) 10%, transparent);
     opacity: 1;
-}
-.accept-btn.active {
-    border-color: color-mix(in srgb, var(--vscode-focusBorder, #4ea1ff) 70%, transparent);
-    background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 78%, #000 22%);
-    color: var(--vscode-button-foreground, #ffffff);
 }
 .discard-btn:hover {
     background: rgba(216, 108, 108, 0.15);
     color: var(--vscode-errorForeground, #f48771);
 }
-
-.conflict-ours .code-lines,
-.conflict-theirs .code-lines,
-.conflict-result .code-lines {
-    position: relative;
+.action-btn.accept-btn {
+    color: var(--merge-ok);
 }
-.conflict-ours .code-lines::before,
-.conflict-theirs .code-lines::before,
-.conflict-result .code-lines::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
+/* Append mode stacks the second side below the first; the "+" in the glyph
+   carries the add-not-replace meaning. */
+.action-btn.append-btn {
+    color: var(--merge-ok);
 }
-.conflict-result .code-lines::before {
-    clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+.action-btn.discard-btn {
+    color: #c02b42;
 }
-
-.change-conflict .conflict-ours .code-lines::before,
-.change-conflict .conflict-theirs .code-lines::before {
+/* Block backgrounds are row-scoped like IntelliJ/PyCharm line fragments:
+   filler rows align panes but stay neutral. Code rows use a sticky background
+   layer so color stays pinned to the visible pane while text scrolls. */
+.change-conflict .conflict-ours .real-code-line::before,
+.change-conflict .conflict-theirs .real-code-line::before,
+.change-conflict .conflict-result.unresolved .real-code-line::before,
+.change-conflict .conflict-ours .real-line-row,
+.change-conflict .conflict-theirs .real-line-row,
+.change-conflict .conflict-result.unresolved .real-line-row {
+    background: var(--merge-conflict-block-bg);
+}
+.variant-insertion .conflict-ours .real-code-line::before,
+.variant-insertion .conflict-theirs .real-code-line::before,
+.variant-insertion .conflict-ours .real-line-row,
+.variant-insertion .conflict-theirs .real-line-row {
+    background: var(--merge-inserted-block-bg);
+}
+.variant-modification .conflict-ours .real-code-line::before,
+.variant-modification .conflict-theirs .real-code-line::before,
+.variant-modification .conflict-ours .real-line-row,
+.variant-modification .conflict-theirs .real-line-row {
+    background: var(--merge-modified-block-bg);
+}
+.variant-deletion .conflict-ours .real-code-line::before,
+.variant-deletion .conflict-theirs .real-code-line::before,
+.variant-deletion .conflict-ours .real-line-row,
+.variant-deletion .conflict-theirs .real-line-row {
+    background: var(--merge-deleted-block-bg);
+}
+.change-ours-only .conflict-theirs .real-code-line::before,
+.change-theirs-only .conflict-ours .real-code-line::before,
+.change-ours-only .conflict-theirs .real-line-row,
+.change-theirs-only .conflict-ours .real-line-row {
     background: transparent;
 }
-.change-conflict .conflict-ours .code-lines::before {
-    background: var(--merge-current-content-bg);
+/* One-sided hunks are auto-resolved, so their result pane can be "resolved"
+   without meaning "green accepted"; keep the variant colors so the result band
+   matches its source band and connector ribbon. User edits win via the .edited
+   tint below. Once the user explicitly settles the hunk (.settled, set when a
+   resolution is actually chosen rather than just auto-included) the decision
+   is made: the result drops the variant wash and reads as plain merged text
+   under its dotted contour, PyCharm-style. */
+.variant-insertion .conflict-result.resolved:not(.edited):not(.settled) .real-code-line::before,
+.variant-insertion .conflict-result.resolved:not(.edited):not(.settled) .real-line-row {
+    background: var(--merge-inserted-block-bg);
 }
-.change-conflict .conflict-theirs .code-lines::before {
-    background: var(--merge-incoming-content-bg);
+.variant-modification .conflict-result.resolved:not(.edited):not(.settled) .real-code-line::before,
+.variant-modification .conflict-result.resolved:not(.edited):not(.settled) .real-line-row {
+    background: var(--merge-modified-block-bg);
 }
-.change-conflict .conflict-result.unresolved .code-lines::before {
-    background: var(
-        --vscode-mergeEditor-conflict-unhandledUnfocusedMinimapOverViewRuler,
-        var(--merge-result-conflict-bg)
-    );
-    opacity: 0.7;
+.variant-deletion .conflict-result.resolved:not(.edited):not(.settled) .real-code-line::before,
+.variant-deletion .conflict-result.resolved:not(.edited):not(.settled) .real-line-row {
+    background: var(--merge-deleted-block-bg);
 }
-.change-ours-only .conflict-ours .code-lines::before,
-.change-theirs-only .conflict-theirs .code-lines::before {
-    background: var(--merge-common-content-bg);
+/* An accepted source pane drops its conflict band (the choice now lives in the
+   result), including when both sides are stacked and both columns are accepted.
+   Scoped to the accepted column and specific enough (0-4-0) to beat the 0-3-0
+   change-/variant- band rules above; the middle result keeps its resolved fill. */
+.conflict-column.accepted .conflict-ours .real-code-line::before,
+.conflict-column.accepted .conflict-theirs .real-code-line::before,
+.conflict-column.accepted .conflict-ours .real-line-row,
+.conflict-column.accepted .conflict-theirs .real-line-row {
+    background: transparent;
 }
-.change-ours-only .conflict-result.unresolved .code-lines::before,
-.change-theirs-only .conflict-result.unresolved .code-lines::before {
-    background: var(--merge-result-nonconflict-bg);
+/* A dismissed source pane was rejected via its discard (X) control without
+   accepting the opposite side. Drop its conflict band and dim it so it reads as
+   discarded rather than a live suggestion; the opposite side stays offered. */
+.conflict-column.dismissed .conflict-ours .real-code-line::before,
+.conflict-column.dismissed .conflict-theirs .real-code-line::before,
+.conflict-column.dismissed .conflict-ours .real-line-row,
+.conflict-column.dismissed .conflict-theirs .real-line-row {
+    background: transparent;
 }
-.conflict-result.resolved .code-lines::before {
-    background: var(--merge-result-resolved-bg);
+.conflict-column.dismissed {
+    opacity: 0.5;
+}
+/* Settled blocks are framed by the dotted SVG contour instead of the solid
+   hunk boundary: doubled chrome reads as a still-pending suggestion. Applies
+   to accepted/dismissed source panes and to the result once nothing is
+   pending against it; an active hunk keeps only its focus ring. */
+.segment-conflict.change-conflict:has(> .conflict-column.accepted),
+.segment-conflict.change-conflict:has(> .conflict-column.dismissed),
+.segment-conflict.change-conflict.resolved:has(.conflict-result.resolved) {
+    box-shadow: none;
+}
+.segment-conflict.change-conflict.active:has(> .conflict-column.accepted),
+.segment-conflict.change-conflict.active:has(> .conflict-column.dismissed),
+.segment-conflict.change-conflict.resolved.active:has(.conflict-result.resolved) {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, #4ea1ff) 16%, transparent);
+}
+/* A dismissed-only side has no resolution yet, so its wrapper is still
+   .unresolved — strip the red number/gutter bands the unresolved rules paint
+   so the discarded block shows only its dotted contour. */
+.segment-conflict.change-conflict.unresolved:has(> .conflict-column.dismissed) .line-numbers,
+.segment-conflict.change-conflict.unresolved:has(> .conflict-column.dismissed) .line-number-row,
+.segment-conflict.change-conflict.unresolved:has(> .conflict-column.dismissed) .code-block::before {
+    background: transparent;
+}
+
+.result-editable {
+    cursor: text;
+}
+.result-editable:hover .code-lines {
+    box-shadow: inset 0 0 0 1px rgba(78, 161, 255, 0.25);
+}
+.code-block.editing {
+    background: color-mix(in srgb, var(--vscode-editor-background) 88%, #4ea1ff 12%);
+}
+.result-edit-textarea {
+    width: 100%;
+    min-height: 20px;
+    padding: 0 10px;
+    border: none;
+    outline: 1px solid rgba(78, 161, 255, 0.55);
+    outline-offset: -1px;
+    resize: vertical;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--merge-code-font-size, var(--vscode-editor-font-size, 12px));
+    line-height: 20px;
+    white-space: pre;
+    overflow-x: auto;
+}
+.conflict-result.edited .real-code-line::before,
+.conflict-result.edited .real-line-row {
+    background: color-mix(in srgb, var(--merge-inserted-block-bg) 70%, #4ea1ff 30%);
 }
 
 .conflict-ours .code-line,
 .conflict-theirs .code-line,
 .conflict-result .code-line {
-    position: relative;
-    z-index: 1;
     color: var(--vscode-editor-foreground);
 }
-.segment-conflict.active .conflict-result.unresolved .code-lines::before {
+.segment-conflict.active .conflict-result.unresolved .code-lines {
     box-shadow:
         inset 0 0 0 1px rgba(78, 161, 255, 0.14),
         inset 0 0 18px rgba(78, 161, 255, 0.05);
@@ -815,18 +917,18 @@
     top: 0;
     right: 0;
     bottom: 0;
-    width: 12px;
+    width: 10px;
     pointer-events: none;
 }
 .overview-track {
     position: absolute;
     top: 3px;
-    right: 1px;
+    right: 3px;
     bottom: 3px;
-    width: 6px;
-    border-radius: 4px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.03);
+    width: 3px;
+    border-radius: 2px;
+    background: transparent;
+    border: none;
     pointer-events: auto;
 }
 .overview-marker {
@@ -837,24 +939,24 @@
     border: none;
     padding: 0;
     margin: 0;
-    border-radius: 3px;
+    border-radius: 1px;
     cursor: pointer;
-    opacity: 0.95;
+    opacity: 0.68;
 }
 .overview-marker.marker-conflict.unresolved {
-    background: rgba(216, 108, 108, 0.9);
+    background: rgba(216, 108, 108, 0.74);
 }
 .overview-marker.marker-conflict.resolved {
-    background: rgba(121, 193, 141, 0.8);
+    background: rgba(121, 193, 141, 0.66);
 }
 .overview-marker.marker-ours-only,
 .overview-marker.marker-theirs-only {
-    background: rgba(91, 137, 214, 0.85);
+    background: rgba(91, 137, 214, 0.68);
 }
 .overview-marker.active {
-    outline: 1px solid rgba(255, 255, 255, 0.65);
+    outline: 1px solid color-mix(in srgb, var(--merge-editor-fg) 48%, transparent);
     outline-offset: 0;
-    box-shadow: 0 0 0 1px rgba(78, 161, 255, 0.6);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, #4ea1ff) 42%, transparent);
 }
 .overview-marker:hover {
     filter: brightness(1.1);
@@ -918,6 +1020,14 @@
 .footer-btn.secondary.ghost:hover {
     color: var(--vscode-foreground);
 }
+.footer-btn.danger {
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f48771) 10%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-errorForeground, #f48771) 34%, transparent);
+    color: var(--vscode-errorForeground, #f48771);
+}
+.footer-btn.danger:hover {
+    background: color-mix(in srgb, var(--vscode-errorForeground, #f48771) 18%, transparent);
+}
 .footer-hint {
     color: var(--merge-muted);
     font-size: 10px;
@@ -927,7 +1037,7 @@
 }
 
 .tok-comment {
-    color: var(--vscode-editorLineNumber-foreground, #6e7681);
+    color: color-mix(in srgb, var(--vscode-editorLineNumber-foreground, #6e7681) 74%, transparent);
     font-style: italic;
 }
 .tok-keyword {
@@ -936,23 +1046,43 @@
 .tok-string {
     color: var(--vscode-symbolIcon-stringForeground, #ce9178);
 }
-.tok-type {
-    color: var(--vscode-symbolIcon-typeParameterForeground, #4ec9b0);
-}
 .tok-number {
     color: var(--vscode-symbolIcon-numberForeground, #b5cea8);
 }
 .tok-constant {
     color: var(--vscode-symbolIcon-constantForeground, #4fc1ff);
 }
+/* Changed words carry the full PyCharm color on top of the faded block
+   background: dark red words in red conflict sections, dark green words in
+   green insertions, and so on. */
 .word-diff-change {
-    background: rgba(255, 208, 97, 0.16);
+    background: var(--pycharm-modified);
     border-radius: 2px;
-    box-shadow: inset 0 0 0 1px rgba(255, 208, 97, 0.12);
+}
+.change-conflict .word-diff-change {
+    background: var(--pycharm-conflict);
+}
+.variant-insertion .conflict-ours .word-diff-change,
+.variant-insertion .conflict-theirs .word-diff-change,
+.variant-insertion .conflict-result .word-diff-change {
+    background: var(--pycharm-inserted);
+}
+.variant-modification .word-diff-change {
+    background: var(--pycharm-modified);
+}
+.variant-deletion .word-diff-change {
+    background: var(--pycharm-deleted);
+}
+.conflict-result.edited .word-diff-change {
+    background: var(--pycharm-inserted);
+}
+/* Keep result-pane word color matched to the block variant (see the
+   block-background rules above). */
+.variant-modification .conflict-result.resolved:not(.edited) .word-diff-change {
+    background: var(--pycharm-modified);
 }
 .word-diff-change.word-diff-whitespace {
-    background: rgba(255, 208, 97, 0.07);
-    box-shadow: inset 0 0 0 1px rgba(255, 208, 97, 0.06);
+    background: color-mix(in srgb, var(--vscode-editor-foreground, #ccc) 10%, transparent);
 }
 
 @media (max-width: 1200px) {
@@ -962,22 +1092,9 @@
     .pane-meta-counts {
         display: none;
     }
-    .hunk-status {
-        display: none;
-    }
 }
 
 @media (max-width: 980px) {
-    .hunk-header {
-        flex-wrap: wrap;
-        align-items: center;
-    }
-    .hunk-header-center {
-        order: 3;
-        width: 100%;
-        justify-content: flex-start;
-        padding-bottom: 2px;
-    }
     .footer-hint {
         display: none;
     }

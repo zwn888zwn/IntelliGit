@@ -1,16 +1,16 @@
-// Tests for merge editor state management in merge-editor/mergeState.ts.
+// Tests for the upstream-style merge editor state model.
 
 import { describe, it, expect } from "vitest";
 import {
     reducer,
     getResultLines,
+    getEffectiveResultLines,
+    splitEditedText,
     buildResultContent,
     allResolved,
     trueConflictCount,
     resolvedTrueConflictCount,
     paneChangeCount,
-    getConflictResultKey,
-    getCommonResultKey,
 } from "../../src/webviews/react/merge-editor/mergeState";
 import type {
     MergeEditorData,
@@ -42,100 +42,138 @@ function makeData(segments: MergeSegment[]): MergeEditorData {
 }
 
 describe("reducer", () => {
-    const initial = { data: null, error: null, resolutions: {}, resultEdits: {} };
+    const initial = {
+        data: null,
+        error: null,
+        resolutions: {},
+        edits: {},
+        dismissals: {},
+    };
 
-    it("SET_DATA replaces data and clears resolutions", () => {
+    it("SET_DATA replaces data and clears local decisions", () => {
         const data = makeData([]);
         const state = reducer(
-            { ...initial, resolutions: { 0: "ours" } },
+            {
+                ...initial,
+                resolutions: { 0: "ours" as const },
+                edits: { 0: ["manual"] },
+                dismissals: { 0: { ours: true } },
+            },
             { type: "SET_DATA", data },
         );
         expect(state.data).toBe(data);
         expect(state.error).toBeNull();
         expect(state.resolutions).toEqual({});
+        expect(state.edits).toEqual({});
+        expect(state.dismissals).toEqual({});
     });
 
     it("SET_ERROR sets error message", () => {
-        const state = reducer(initial, { type: "SET_ERROR", message: "fail" });
-        expect(state.error).toBe("fail");
+        expect(reducer(initial, { type: "SET_ERROR", message: "fail" }).error).toBe("fail");
     });
 
-    it("RESOLVE_HUNK adds resolution immutably", () => {
-        const state = reducer(initial, { type: "RESOLVE_HUNK", id: 1, resolution: "ours" });
-        expect(state.resolutions[1]).toBe("ours");
-        expect(initial.resolutions).toEqual({});
-    });
-
-    it("EDIT_RESULT marks conflict hunks as custom", () => {
-        const state = reducer(initial, {
-            type: "EDIT_RESULT",
-            key: getConflictResultKey(2),
-            lines: ["manual"],
-            conflictId: 2,
-        });
-        expect(state.resolutions[2]).toBe("custom");
-        expect(state.resultEdits[getConflictResultKey(2)]).toEqual(["manual"]);
-    });
-
-    it("RESOLVE_HUNK clears stale custom result lines for that conflict", () => {
+    it("RESOLVE_HUNK stores the choice and clears stale edits and dismissals", () => {
         const state = reducer(
             {
                 ...initial,
-                resultEdits: { [getConflictResultKey(0)]: ["manual"] },
-                resolutions: { 0: "custom" },
+                edits: { 1: ["manual"] },
+                dismissals: { 1: { theirs: true } },
             },
-            { type: "RESOLVE_HUNK", id: 0, resolution: "ours" },
+            { type: "RESOLVE_HUNK", id: 1, resolution: "ours" },
         );
-        expect(state.resolutions[0]).toBe("ours");
-        expect(state.resultEdits[getConflictResultKey(0)]).toBeUndefined();
+        expect(state.resolutions[1]).toBe("ours");
+        expect(state.edits[1]).toBeUndefined();
+        expect(state.dismissals[1]).toBeUndefined();
+    });
+
+    it("EDIT_HUNK_RESULT stores manual result lines", () => {
+        const state = reducer(initial, {
+            type: "EDIT_HUNK_RESULT",
+            id: 2,
+            lines: ["manual"],
+        });
+        expect(state.edits[2]).toEqual(["manual"]);
+    });
+
+    it("CLEAR_HUNK_EDIT resets the hunk to its unresolved state", () => {
+        const state = reducer(
+            {
+                ...initial,
+                resolutions: { 2: "both" },
+                edits: { 2: ["manual"] },
+                dismissals: { 2: { ours: true, theirs: true } },
+            },
+            { type: "CLEAR_HUNK_EDIT", id: 2 },
+        );
+        expect(state.resolutions[2]).toBeUndefined();
+        expect(state.edits[2]).toBeUndefined();
+        expect(state.dismissals[2]).toBeUndefined();
+    });
+
+    it("DISMISS_SIDE records only the selected side", () => {
+        const state = reducer(initial, { type: "DISMISS_SIDE", id: 2, side: "ours" });
+        expect(state.dismissals[2]).toEqual({ ours: true });
     });
 });
 
 describe("getResultLines", () => {
     const segment = makeConflict();
 
-    it("returns oursLines for 'ours' resolution", () => {
+    it("returns ours for an ours resolution", () => {
         expect(getResultLines(segment, "ours")).toEqual(["ours"]);
     });
 
-    it("returns theirsLines for 'theirs' resolution", () => {
+    it("returns theirs for a theirs resolution", () => {
         expect(getResultLines(segment, "theirs")).toEqual(["theirs"]);
     });
 
-    it("returns both for 'both' resolution", () => {
+    it("stacks ours then theirs", () => {
         expect(getResultLines(segment, "both")).toEqual(["ours", "theirs"]);
     });
 
-    it("returns empty for 'none' resolution", () => {
-        expect(getResultLines(segment, "none")).toEqual([]);
+    it("stacks theirs then ours when accepted in reverse order", () => {
+        expect(getResultLines(segment, "both-reversed")).toEqual(["theirs", "ours"]);
     });
 
-    it("returns custom lines for 'custom' resolution", () => {
-        expect(getResultLines(segment, "custom", ["manual"])).toEqual(["manual"]);
+    it("restores base lines when both sides are dropped", () => {
+        expect(getResultLines(segment, "none")).toEqual(["base"]);
     });
 
-    it("returns baseLines for unresolved conflict", () => {
+    it("returns empty lines when both inserted sides are dropped", () => {
+        expect(getResultLines(makeConflict({ baseLines: [] }), "none")).toEqual([]);
+    });
+
+    it("returns base lines for an unresolved true conflict", () => {
         expect(getResultLines(segment, undefined)).toEqual(["base"]);
     });
 
-    it("keeps base lines for unresolved ours-only changes", () => {
-        const seg = makeConflict({ changeKind: "ours-only" });
-        expect(getResultLines(seg, undefined)).toEqual(["base"]);
+    it("auto-includes ours-only changes", () => {
+        expect(getResultLines(makeConflict({ changeKind: "ours-only" }), undefined)).toEqual([
+            "ours",
+        ]);
     });
 
-    it("keeps base lines for unresolved theirs-only changes", () => {
-        const seg = makeConflict({ changeKind: "theirs-only" });
-        expect(getResultLines(seg, undefined)).toEqual(["base"]);
+    it("auto-includes theirs-only changes", () => {
+        expect(getResultLines(makeConflict({ changeKind: "theirs-only" }), undefined)).toEqual([
+            "theirs",
+        ]);
     });
 
-    it("uses ours-only lines after applying that side", () => {
-        const seg = makeConflict({ changeKind: "ours-only" });
-        expect(getResultLines(seg, "ours")).toEqual(["ours"]);
+    it("uses token-level auto-merged lines when supplied", () => {
+        expect(
+            getResultLines(makeConflict({ autoResolvedLines: ["auto"] }), undefined),
+        ).toEqual(["auto"]);
+    });
+});
+
+describe("manual edits", () => {
+    it("splits edited text and treats empty text as deletion", () => {
+        expect(splitEditedText("one\ntwo")).toEqual(["one", "two"]);
+        expect(splitEditedText("")).toEqual([]);
     });
 
-    it("uses theirs-only lines after applying that side", () => {
-        const seg = makeConflict({ changeKind: "theirs-only" });
-        expect(getResultLines(seg, "theirs")).toEqual(["theirs"]);
+    it("manual lines take priority over a side resolution", () => {
+        expect(getEffectiveResultLines(makeConflict(), "ours", ["manual"])).toEqual(["manual"]);
     });
 });
 
@@ -146,115 +184,65 @@ describe("buildResultContent", () => {
             makeConflict({ id: 0 }),
             { type: "common", lines: ["line3"] },
         ]);
-        const result = buildResultContent(data, { 0: "ours" });
-        expect(result).toBe("line1\nours\nline3\n");
+        expect(buildResultContent(data, { 0: "ours" })).toBe("line1\nours\nline3\n");
     });
 
-    it("omits trailing newline when hasTrailingNewline is false", () => {
+    it("includes manual conflict edits", () => {
+        const data = makeData([
+            { type: "common", lines: ["line1"] },
+            makeConflict({ id: 0 }),
+        ]);
+        expect(buildResultContent(data, {}, { 0: ["manual", "result"] })).toBe(
+            "line1\nmanual\nresult\n",
+        );
+    });
+
+    it("preserves the source trailing-newline contract", () => {
         const data = makeData([{ type: "common", lines: ["only"] }]);
         data.hasTrailingNewline = false;
         expect(buildResultContent(data, {})).toBe("only");
     });
-
-    it("preserves a single blank line when trailing newline is present", () => {
-        const data = makeData([{ type: "common", lines: [""] }]);
-        expect(buildResultContent(data, {})).toBe("\n");
-    });
-
-    it("prefers custom conflict result edits", () => {
-        const data = makeData([
-            { type: "common", lines: ["line1"] },
-            makeConflict({ id: 0 }),
-            { type: "common", lines: ["line3"] },
-        ]);
-        const result = buildResultContent(
-            data,
-            { 0: "custom" },
-            {
-                [getConflictResultKey(0)]: ["manual", "result"],
-            },
-        );
-        expect(result).toBe("line1\nmanual\nresult\nline3\n");
-    });
-
-    it("preserves editable common result lines", () => {
-        const data = makeData([
-            { type: "common", lines: ["line1"] },
-            makeConflict({ id: 0 }),
-        ]);
-        const result = buildResultContent(
-            data,
-            { 0: "ours" },
-            {
-                [getCommonResultKey(0)]: ["edited common"],
-            },
-        );
-        expect(result).toBe("edited common\nours\n");
-    });
 });
 
-describe("allResolved", () => {
-    it("returns true when all true conflicts are resolved", () => {
+describe("resolution status", () => {
+    it("requires only true conflicts to be resolved", () => {
         const segments: MergeSegment[] = [
             makeConflict({ id: 0 }),
             makeConflict({ id: 1, changeKind: "ours-only" }),
         ];
         expect(allResolved(segments, { 0: "ours" })).toBe(true);
-    });
-
-    it("returns true when a true conflict has a custom result", () => {
-        const segments: MergeSegment[] = [makeConflict({ id: 0 })];
-        expect(allResolved(segments, { 0: "custom" })).toBe(true);
-    });
-
-    it("returns false when a true conflict is unresolved", () => {
-        const segments: MergeSegment[] = [makeConflict({ id: 0 })];
         expect(allResolved(segments, {})).toBe(false);
     });
 
-    it("returns true for common segments only", () => {
-        const segments: MergeSegment[] = [{ type: "common", lines: ["a"] }];
+    it("treats a manual edit as a resolution", () => {
+        expect(allResolved([makeConflict()], {}, { 0: ["manual"] })).toBe(true);
+    });
+
+    it("does not count auto-merged hunks as true conflicts", () => {
+        const segments: MergeSegment[] = [makeConflict({ autoResolvedLines: ["auto"] })];
+        expect(trueConflictCount(segments)).toBe(0);
         expect(allResolved(segments, {})).toBe(true);
     });
-});
 
-describe("trueConflictCount", () => {
-    it("counts only true conflicts", () => {
-        const segments: MergeSegment[] = [
-            makeConflict({ id: 0 }),
-            makeConflict({ id: 1, changeKind: "ours-only" }),
-            makeConflict({ id: 2 }),
-        ];
-        expect(trueConflictCount(segments)).toBe(2);
-    });
-});
-
-describe("resolvedTrueConflictCount", () => {
     it("counts resolved true conflicts", () => {
-        const segments: MergeSegment[] = [
-            makeConflict({ id: 0 }),
-            makeConflict({ id: 1 }),
-        ];
+        const segments: MergeSegment[] = [makeConflict({ id: 0 }), makeConflict({ id: 1 })];
         expect(resolvedTrueConflictCount(segments, { 0: "ours" })).toBe(1);
+        expect(resolvedTrueConflictCount(segments, {}, { 1: ["manual"] })).toBe(1);
     });
 });
 
 describe("paneChangeCount", () => {
-    it("counts ours-side changes (excludes theirs-only)", () => {
-        const segments: MergeSegment[] = [
-            makeConflict({ changeKind: "conflict" }),
-            makeConflict({ changeKind: "ours-only" }),
-            makeConflict({ changeKind: "theirs-only" }),
-        ];
+    const segments: MergeSegment[] = [
+        makeConflict({ id: 0, changeKind: "conflict" }),
+        makeConflict({ id: 1, changeKind: "ours-only" }),
+        makeConflict({ id: 2, changeKind: "theirs-only" }),
+    ];
+
+    it("excludes theirs-only hunks from the ours count", () => {
         expect(paneChangeCount(segments, "ours")).toBe(2);
     });
 
-    it("counts theirs-side changes (excludes ours-only)", () => {
-        const segments: MergeSegment[] = [
-            makeConflict({ changeKind: "conflict" }),
-            makeConflict({ changeKind: "ours-only" }),
-            makeConflict({ changeKind: "theirs-only" }),
-        ];
+    it("excludes ours-only hunks from the theirs count", () => {
         expect(paneChangeCount(segments, "theirs")).toBe(2);
     });
 });
