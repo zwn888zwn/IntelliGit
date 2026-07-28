@@ -82,8 +82,10 @@ const withProgress = vi.fn(
 
 const workspaceState: {
     workspaceFolders: Array<{ uri: { fsPath: string; path: string } }> | undefined;
+    clearLastCommit: boolean;
 } = {
     workspaceFolders: [{ uri: { fsPath: "/repo", path: "/repo" } }],
+    clearLastCommit: true,
 };
 
 const vscodeMock = {
@@ -162,6 +164,11 @@ const vscodeMock = {
             workspaceState.workspaceFolders = value;
         },
         openTextDocument,
+        getConfiguration: vi.fn(() => ({
+            get: vi.fn((key: string, defaultValue?: unknown) =>
+                key === "clearLastCommit" ? workspaceState.clearLastCommit : defaultValue,
+            ),
+        })),
         fs: { readFile, writeFile, stat: fsStat },
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn((_scheme, provider) => {
@@ -320,6 +327,7 @@ describe("view providers integration", () => {
     beforeEach(async () => {
         vi.clearAllMocks();
         workspaceState.workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
+        workspaceState.clearLastCommit = true;
         readFile.mockResolvedValue(Buffer.from("working tree content", "utf8"));
         showWarningMessage.mockResolvedValue(undefined);
         const { registerDiffContentProvider } = await import("../../src/services/diffService");
@@ -773,6 +781,20 @@ describe("view providers integration", () => {
         expect(postMessageSpy).toHaveBeenCalledWith({
             type: "lastCommitMessage",
             message: "last message",
+        });
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider retains the submitted message when clearing is disabled", async () => {
+        workspaceState.clearLastCommit = false;
+        const { provider, webview } = await setupCommitPanelProvider();
+
+        await webview.send({ type: "commit", message: "feat: retain", amend: false });
+
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "committed" });
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "lastCommitMessage",
+            message: "feat: retain",
         });
         provider.dispose();
     });

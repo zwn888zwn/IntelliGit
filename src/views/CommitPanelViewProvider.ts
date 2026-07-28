@@ -677,7 +677,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                         vscode.window.showInformationMessage(successMessage);
                     }
                 }
-                this.postToWebview({ type: "committed" });
+                this.postCommitCompleted(message);
                 await this.refreshData();
                 break;
             }
@@ -693,7 +693,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     await this.gitOps.commit(message, amend);
                 });
                 vscode.window.showInformationMessage("Committed successfully.");
-                this.postToWebview({ type: "committed" });
+                this.postCommitCompleted(message);
                 await this.refreshData();
                 break;
             }
@@ -713,7 +713,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     "Committed and pushed successfully.",
                     pushOutput,
                 );
-                this.postToWebview({ type: "committed" });
+                this.postCommitCompleted(message);
                 await this.refreshData();
                 break;
             }
@@ -906,6 +906,16 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
     private postToWebview(msg: InboundMessage): void {
         this.view?.webview.postMessage(msg);
+    }
+
+    private postCommitCompleted(message: string): void {
+        this.postToWebview({ type: "committed" });
+        const clearCommitMessage = vscode.workspace
+            .getConfiguration("intelligit")
+            .get<boolean>("clearLastCommit", true);
+        if (!clearCommitMessage) {
+            this.postToWebview({ type: "lastCommitMessage", message });
+        }
     }
 
     private getRepositoryRoot(): vscode.Uri {

@@ -539,6 +539,12 @@
                     "type": "boolean",
                     "default": false,
                     "markdownDescription": "Opt in to opening merge conflicts with the external JetBrains merge tool by default. When disabled, IntelliGit opens its built-in IDEA-style merge editor; the external tool remains available from the conflict file context menu."
+                },
+                "intelligit.clearLastCommit": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "window",
+                    "markdownDescription": "Clear the commit message after a successful commit. Disable this setting to keep the submitted message in the commit input."
                 }
             }
         }
