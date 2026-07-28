@@ -13,7 +13,7 @@ import {
     tokenizeWordDiff,
     alignCompareLinesForWordDiff,
 } from "./wordDiff";
-import { getEffectiveResultLines, splitEditedText } from "./mergeState";
+import { getEffectiveResultLines, isConflictResolved, splitEditedText } from "./mergeState";
 import { tokenizeSyntaxLine, type SyntaxTokenKind } from "./syntaxHighlight";
 import type { LineNumberValue } from "./lineNumbers";
 import { LINE_HEIGHT_PX, type MergePane } from "./mergeScrollLayout";
@@ -347,7 +347,7 @@ const CodeBlock = React.memo(
  * Display mode renders the highlighted result; double-click switches to a
  * textarea seeded with the current result text. Blur commits the draft through
  * `onCommit` (no-op when the text is unchanged), and Escape cancels without
- * committing. Committed edits mark the hunk resolved upstream.
+ * committing. The user explicitly marks a committed edit resolved upstream.
  */
 function EditableResultBlock({
     lines,
@@ -413,6 +413,7 @@ function EditableResultBlock({
                 aria-label={t("merge.result.editingAria")}
                 value={draft}
                 rows={rowCount}
+                style={{ height: rowCount * LINE_HEIGHT_PX }}
                 // Deliberate: edit mode opens from a user action and should focus the draft textarea.
                 // react-doctor-disable-next-line react-doctor/no-autofocus
                 autoFocus
@@ -508,6 +509,7 @@ export interface ConflictPaneBaseProps {
     resolution: HunkResolution | undefined;
     editedLines: string[] | undefined;
     dismissed: HunkSideDismissal | undefined;
+    completedEdit: true | undefined;
     lineCount: number;
     lineNumbers: LineNumberSpec;
     onSelect: (id: number) => void;
@@ -583,6 +585,7 @@ function deriveConflictView(
     resolution: HunkResolution | undefined,
     editedLines: string[] | undefined,
     dismissed: HunkSideDismissal | undefined,
+    completedEdit: true | undefined,
 ): ConflictView {
     const isEdited = editedLines !== undefined;
     const isOurs = !isEdited && resolution === "ours";
@@ -603,11 +606,13 @@ function deriveConflictView(
         !theirsInResult && (dismissed?.theirs === true || bothDiscarded);
     const isAutoMerged =
         segment.autoResolvedLines !== undefined && resolution === undefined && !isEdited;
-    const isResolved =
-        segment.changeKind !== "conflict" ||
-        segment.autoResolvedLines !== undefined ||
-        resolution !== undefined ||
-        isEdited;
+    const isResolved = isConflictResolved(
+        segment,
+        resolution,
+        editedLines,
+        dismissed,
+        completedEdit,
+    );
     const resultIsUnresolved =
         segment.changeKind === "conflict" &&
         !isEdited &&
@@ -788,6 +793,7 @@ function sideConflictEqual(
         prev.resolution === next.resolution &&
         prev.editedLines === next.editedLines &&
         prev.dismissed === next.dismissed &&
+        prev.completedEdit === next.completedEdit &&
         prev.lineCount === next.lineCount &&
         prev.isActive === next.isActive &&
         prev.highlightWords === next.highlightWords &&
@@ -801,7 +807,8 @@ function sideConflictEqual(
 /** Props for the middle (result) conflict block: manual edit callback + ordinals. */
 export interface ResultConflictBlockProps extends ConflictPaneBaseProps {
     onEditResult: (id: number, lines: string[]) => void;
-    onClearEdit: (id: number) => void;
+    onMarkResolved: (id: number) => void;
+    onReset: (id: number) => void;
     conflictOrdinal: number;
     trueConflictOrdinal?: number;
 }
@@ -816,11 +823,13 @@ function resultConflictEqual(
         prev.resolution === next.resolution &&
         prev.editedLines === next.editedLines &&
         prev.dismissed === next.dismissed &&
+        prev.completedEdit === next.completedEdit &&
         prev.lineCount === next.lineCount &&
         prev.isActive === next.isActive &&
         prev.highlightWords === next.highlightWords &&
         prev.onEditResult === next.onEditResult &&
-        prev.onClearEdit === next.onClearEdit &&
+        prev.onMarkResolved === next.onMarkResolved &&
+        prev.onReset === next.onReset &&
         prev.onSelect === next.onSelect &&
         prev.conflictOrdinal === next.conflictOrdinal &&
         prev.trueConflictOrdinal === next.trueConflictOrdinal &&
@@ -838,6 +847,7 @@ export const OursConflictBlock = React.memo(function OursConflictBlock({
     resolution,
     editedLines,
     dismissed,
+    completedEdit,
     lineCount,
     lineNumbers,
     onResolve,
@@ -846,7 +856,13 @@ export const OursConflictBlock = React.memo(function OursConflictBlock({
     isActive,
     highlightWords,
 }: ConflictPaneBaseProps & ConflictSideCallbacks) {
-    const view = deriveConflictView(segment, resolution, editedLines, dismissed);
+    const view = deriveConflictView(
+        segment,
+        resolution,
+        editedLines,
+        dismissed,
+        completedEdit,
+    );
     const handleSelect = useCallback(() => onSelect(segment.id), [onSelect, segment.id]);
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -906,6 +922,7 @@ export const ResultConflictBlock = React.memo(function ResultConflictBlock({
     resolution,
     editedLines,
     dismissed,
+    completedEdit,
     lineCount,
     lineNumbers,
     onEditResult,
@@ -914,10 +931,19 @@ export const ResultConflictBlock = React.memo(function ResultConflictBlock({
     highlightWords,
     conflictOrdinal,
     trueConflictOrdinal,
-    onClearEdit,
+    onMarkResolved,
+    onReset,
 }: ResultConflictBlockProps) {
-    const view = deriveConflictView(segment, resolution, editedLines, dismissed);
+    const view = deriveConflictView(
+        segment,
+        resolution,
+        editedLines,
+        dismissed,
+        completedEdit,
+    );
     const resultLines = getEffectiveResultLines(segment, resolution, editedLines);
+    const hasDecision =
+        resolution !== undefined || editedLines !== undefined || dismissed !== undefined;
     const handleSelect = useCallback(() => onSelect(segment.id), [onSelect, segment.id]);
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -955,14 +981,27 @@ export const ResultConflictBlock = React.memo(function ResultConflictBlock({
                     compareLines={view.resultCompareLines}
                     onCommit={(lines) => onEditResult(segment.id, lines)}
                 />
-                {view.isEdited ? (
+                {hasDecision ? (
                     <div className="conflict-actions-right" onClick={(e) => e.stopPropagation()}>
+                        {view.isEdited && completedEdit === undefined ? (
+                            <button
+                                type="button"
+                                className="action-btn accept-btn"
+                                onClick={() => onMarkResolved(segment.id)}
+                                title={t("merge.hunk.markResolved")}
+                                aria-label={t("merge.hunk.markResolved")}
+                            >
+                                <span className="hunk-action-glyph" aria-hidden="true">
+                                    ✓
+                                </span>
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             className="action-btn"
-                            onClick={() => onClearEdit(segment.id)}
-                            title="Undo manual edit"
-                            aria-label="Undo manual edit"
+                            onClick={() => onReset(segment.id)}
+                            title={t("merge.hunk.reset")}
+                            aria-label={t("merge.hunk.reset")}
                         >
                             <span className="hunk-action-glyph" aria-hidden="true">
                                 ↶
@@ -984,6 +1023,7 @@ export const TheirsConflictBlock = React.memo(function TheirsConflictBlock({
     resolution,
     editedLines,
     dismissed,
+    completedEdit,
     lineCount,
     lineNumbers,
     onResolve,
@@ -992,7 +1032,13 @@ export const TheirsConflictBlock = React.memo(function TheirsConflictBlock({
     isActive,
     highlightWords,
 }: ConflictPaneBaseProps & ConflictSideCallbacks) {
-    const view = deriveConflictView(segment, resolution, editedLines, dismissed);
+    const view = deriveConflictView(
+        segment,
+        resolution,
+        editedLines,
+        dismissed,
+        completedEdit,
+    );
     const handleSelect = useCallback(() => onSelect(segment.id), [onSelect, segment.id]);
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent<HTMLDivElement>) => {

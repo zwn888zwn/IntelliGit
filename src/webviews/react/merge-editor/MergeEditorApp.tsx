@@ -41,6 +41,7 @@ import {
     resolvedTrueConflictCount,
     paneChangeCount,
     isTrueConflict,
+    isConflictResolved,
 } from "./mergeState";
 import {
     CommonPaneBlock,
@@ -254,11 +255,34 @@ function App() {
         resolutions: {},
         edits: {},
         dismissals: {},
+        completedEdits: {},
+        past: [],
+        future: [],
     });
     const [highlightWords, setHighlightWords] = useState(true);
     const [ignoreMode, setIgnoreMode] = useState<"none" | "whitespace">("none");
     const [activeConflictId, setActiveConflictId] = useState<number | null>(null);
     const segments = state.data?.segments ?? EMPTY_SEGMENTS;
+    const hasLocalChanges =
+        Object.keys(state.resolutions).length > 0 ||
+        Object.keys(state.edits).length > 0 ||
+        Object.keys(state.dismissals).length > 0;
+    const confirmationIdRef = useRef(0);
+    const confirmationCallbacksRef = useRef(new Map<number, () => void>());
+
+    const requestConfirmation = useCallback(
+        (message: string, confirmLabel: string, onConfirmed: () => void) => {
+            const requestId = ++confirmationIdRef.current;
+            confirmationCallbacksRef.current.set(requestId, onConfirmed);
+            getVsCodeApi().postMessage({
+                type: "confirm",
+                requestId,
+                message,
+                confirmLabel,
+            });
+        },
+        [],
+    );
 
     const mergeContentRef = useRef<HTMLDivElement | null>(null);
     const columnRefs = useRef<Record<MergePane, HTMLDivElement | null>>({
@@ -294,7 +318,9 @@ function App() {
             sync.raf = 0;
             const targetLeft = sync.left;
             const panes =
-                mergeContentRef.current?.querySelectorAll<HTMLElement>(".code-lines") ?? [];
+                mergeContentRef.current?.querySelectorAll<HTMLElement>(
+                    ".code-lines, .result-edit-textarea",
+                ) ?? [];
             for (const pane of panes) {
                 if (pane === source) continue;
                 const max = Math.max(0, pane.scrollWidth - pane.clientWidth);
@@ -492,7 +518,10 @@ function App() {
         (event: React.UIEvent<HTMLDivElement>) => {
             const target = event.target as HTMLElement | null;
             if (!target) return;
-            if (target.classList.contains("code-lines")) {
+            if (
+                target.classList.contains("code-lines") ||
+                target.classList.contains("result-edit-textarea")
+            ) {
                 const left = target.scrollLeft;
                 const sharedLeft = scrollSyncRef.current.left;
                 if (Math.abs(left - sharedLeft) < 1) return;
@@ -799,6 +828,10 @@ function App() {
                 dispatch({ type: "SET_DATA", data: event.data.data });
             } else if (event.data.type === "loadError") {
                 dispatch({ type: "SET_ERROR", message: event.data.message });
+            } else if (event.data.type === "confirmResult") {
+                const callback = confirmationCallbacksRef.current.get(event.data.requestId);
+                confirmationCallbacksRef.current.delete(event.data.requestId);
+                if (event.data.confirmed) callback?.();
             }
         };
         window.addEventListener("message", handler);
@@ -813,11 +846,24 @@ function App() {
             if (prev !== null && trueConflictIds.includes(prev)) return prev;
             const firstUnresolved = trueConflicts.find(
                 (seg) =>
-                    state.resolutions[seg.id] === undefined && state.edits[seg.id] === undefined,
+                    !isConflictResolved(
+                        seg,
+                        state.resolutions[seg.id],
+                        state.edits[seg.id],
+                        state.dismissals[seg.id],
+                        state.completedEdits[seg.id],
+                    ),
             );
             return firstUnresolved?.id ?? trueConflictIds[0];
         });
-    }, [trueConflictIds, trueConflicts, state.resolutions, state.edits]);
+    }, [
+        trueConflictIds,
+        trueConflicts,
+        state.resolutions,
+        state.edits,
+        state.dismissals,
+        state.completedEdits,
+    ]);
 
     const handleResolve = useCallback((id: number, resolution: HunkResolution) => {
         setActiveConflictId(id);
@@ -829,9 +875,14 @@ function App() {
         dispatch({ type: "EDIT_HUNK_RESULT", id, lines });
     }, []);
 
-    const handleClearEdit = useCallback((id: number) => {
+    const handleMarkResolved = useCallback((id: number) => {
         setActiveConflictId(id);
-        dispatch({ type: "CLEAR_HUNK_EDIT", id });
+        dispatch({ type: "MARK_HUNK_RESOLVED", id });
+    }, []);
+
+    const handleResetHunk = useCallback((id: number) => {
+        setActiveConflictId(id);
+        dispatch({ type: "RESET_HUNK", id });
     }, []);
 
     const handleDismissSide = useCallback((id: number, side: "ours" | "theirs") => {
@@ -845,42 +896,99 @@ function App() {
         getVsCodeApi().postMessage({ type: "applyResolution", content, mode: "apply" });
     }, [state.data, state.resolutions, state.edits]);
 
-    const handleAcceptAllYours = useCallback(() => {
+    const acceptAllYours = useCallback(() => {
         if (!state.data) return;
-        for (const seg of state.data.segments) {
-            if (seg.type === "conflict") {
-                dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "ours" });
-            }
+        dispatch({
+            type: "RESOLVE_HUNKS",
+            resolutions: state.data.segments
+                .filter((seg): seg is ConflictSegment => seg.type === "conflict")
+                .map((seg) => ({ id: seg.id, resolution: "ours" })),
+            settleOpposite: true,
+        });
+    }, [state.data]);
+
+    const handleAcceptAllYours = useCallback(() => {
+        if (hasLocalChanges) {
+            requestConfirmation(
+                "Accepting all yours will replace the merge choices and edits made so far.",
+                "Accept All Yours",
+                acceptAllYours,
+            );
+            return;
         }
+        acceptAllYours();
+    }, [acceptAllYours, hasLocalChanges, requestConfirmation]);
+
+    const acceptAllTheirs = useCallback(() => {
+        if (!state.data) return;
+        dispatch({
+            type: "RESOLVE_HUNKS",
+            resolutions: state.data.segments
+                .filter((seg): seg is ConflictSegment => seg.type === "conflict")
+                .map((seg) => ({ id: seg.id, resolution: "theirs" })),
+            settleOpposite: true,
+        });
     }, [state.data]);
 
     const handleAcceptAllTheirs = useCallback(() => {
-        if (!state.data) return;
-        for (const seg of state.data.segments) {
-            if (seg.type === "conflict") {
-                dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "theirs" });
-            }
+        if (hasLocalChanges) {
+            requestConfirmation(
+                "Accepting all theirs will replace the merge choices and edits made so far.",
+                "Accept All Theirs",
+                acceptAllTheirs,
+            );
+            return;
         }
-    }, [state.data]);
+        acceptAllTheirs();
+    }, [acceptAllTheirs, hasLocalChanges, requestConfirmation]);
+
+    const pendingNonConflicting = useMemo(
+        () =>
+            conflictSegments.filter(
+                (seg) =>
+                    (seg.changeKind === "ours-only" || seg.changeKind === "theirs-only") &&
+                    state.resolutions[seg.id] === undefined &&
+                    state.edits[seg.id] === undefined &&
+                    state.dismissals[seg.id] === undefined,
+            ),
+        [conflictSegments, state.dismissals, state.edits, state.resolutions],
+    );
 
     const handleApplyNonConflicting = useCallback(() => {
-        if (!state.data) return;
-        for (const seg of state.data.segments) {
-            if (seg.type === "conflict" && seg.changeKind === "ours-only") {
-                dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "ours" });
-            } else if (seg.type === "conflict" && seg.changeKind === "theirs-only") {
-                dispatch({ type: "RESOLVE_HUNK", id: seg.id, resolution: "theirs" });
-            }
-        }
-    }, [state.data]);
+        dispatch({
+            type: "RESOLVE_HUNKS",
+            resolutions: pendingNonConflicting.map((seg) => ({
+                id: seg.id,
+                resolution: seg.changeKind === "ours-only" ? "ours" : "theirs",
+            })),
+        });
+    }, [pendingNonConflicting]);
 
     const handleBulkAcceptYours = useCallback(() => {
-        getVsCodeApi().postMessage({ type: "acceptYours" });
-    }, []);
+        const accept = () => getVsCodeApi().postMessage({ type: "acceptYours" });
+        if (hasLocalChanges) {
+            requestConfirmation(
+                "Using the entire ours file will discard all merge choices and edits.",
+                "Use File Ours",
+                accept,
+            );
+            return;
+        }
+        accept();
+    }, [hasLocalChanges, requestConfirmation]);
 
     const handleBulkAcceptTheirs = useCallback(() => {
-        getVsCodeApi().postMessage({ type: "acceptTheirs" });
-    }, []);
+        const accept = () => getVsCodeApi().postMessage({ type: "acceptTheirs" });
+        if (hasLocalChanges) {
+            requestConfirmation(
+                "Using the entire theirs file will discard all merge choices and edits.",
+                "Use File Theirs",
+                accept,
+            );
+            return;
+        }
+        accept();
+    }, [hasLocalChanges, requestConfirmation]);
 
     const handleRetry = useCallback(() => {
         dispatch({ type: "SET_ERROR", message: "" });
@@ -888,14 +996,37 @@ function App() {
     }, []);
 
     const handleClose = useCallback(() => {
-        getVsCodeApi().postMessage({ type: "close" });
-    }, []);
+        const close = () => getVsCodeApi().postMessage({ type: "close" });
+        if (hasLocalChanges) {
+            requestConfirmation(
+                "Close the merge editor and discard all merge choices and edits?",
+                "Discard and Close",
+                close,
+            );
+            return;
+        }
+        close();
+    }, [hasLocalChanges, requestConfirmation]);
 
     const handleToggleIgnoreMode = useCallback(() => {
         const nextMode: "none" | "whitespace" = ignoreMode === "none" ? "whitespace" : "none";
-        setIgnoreMode(nextMode);
-        getVsCodeApi().postMessage({ type: "setIgnoreMode", mode: nextMode });
-    }, [ignoreMode]);
+        const toggle = () => {
+            setIgnoreMode(nextMode);
+            getVsCodeApi().postMessage({ type: "setIgnoreMode", mode: nextMode });
+        };
+        if (hasLocalChanges) {
+            requestConfirmation(
+                "Changing the ignore mode will re-parse the file and discard all merge choices and edits.",
+                "Change Ignore Mode",
+                toggle,
+            );
+            return;
+        }
+        toggle();
+    }, [hasLocalChanges, ignoreMode, requestConfirmation]);
+
+    const handleUndo = useCallback(() => dispatch({ type: "UNDO" }), []);
+    const handleRedo = useCallback(() => dispatch({ type: "REDO" }), []);
 
     const jumpToConflict = useCallback(
         (id: number) => {
@@ -944,8 +1075,13 @@ function App() {
                     ? activeConflictId
                     : trueConflicts.find(
                           (seg) =>
-                              state.resolutions[seg.id] === undefined &&
-                              state.edits[seg.id] === undefined,
+                              !isConflictResolved(
+                                  seg,
+                                  state.resolutions[seg.id],
+                                  state.edits[seg.id],
+                                  state.dismissals[seg.id],
+                                  state.completedEdits[seg.id],
+                              ),
                       )?.id;
             if (targetId === undefined) return;
             const segment = state.data.segments.find(
@@ -969,8 +1105,13 @@ function App() {
             const next = ordered.find(
                 (seg) =>
                     seg.id !== targetId &&
-                    state.resolutions[seg.id] === undefined &&
-                    state.edits[seg.id] === undefined,
+                    !isConflictResolved(
+                        seg,
+                        state.resolutions[seg.id],
+                        state.edits[seg.id],
+                        state.dismissals[seg.id],
+                        state.completedEdits[seg.id],
+                    ),
             );
             if (next) jumpToConflict(next.id);
         },
@@ -979,6 +1120,8 @@ function App() {
             handleResolve,
             jumpToConflict,
             state.data,
+            state.completedEdits,
+            state.dismissals,
             state.edits,
             state.resolutions,
             trueConflicts,
@@ -988,13 +1131,25 @@ function App() {
     useEffect(() => {
         const onKeyDown = (event: KeyboardEvent) => {
             const target = event.target as HTMLElement | null;
-            const tag = target?.tagName;
-            if (tag === "INPUT" || tag === "TEXTAREA") return;
+            if (
+                target?.closest(
+                    "button, input, textarea, select, a, [contenteditable='true']",
+                )
+            ) {
+                return;
+            }
             const normalizedKey = event.key.toLowerCase();
             const hasCommandModifier = event.ctrlKey || event.metaKey;
             const plainKey = !hasCommandModifier && !event.altKey;
 
-            if ((normalizedKey === "p" && plainKey) || (event.shiftKey && event.key === "F7")) {
+            if (hasCommandModifier && normalizedKey === "z") {
+                event.preventDefault();
+                if (event.shiftKey) handleRedo();
+                else handleUndo();
+            } else if (
+                (normalizedKey === "p" && plainKey) ||
+                (event.shiftKey && event.key === "F7")
+            ) {
                 event.preventDefault();
                 moveActiveConflict(-1);
             } else if ((normalizedKey === "n" && plainKey) || event.key === "F7") {
@@ -1014,7 +1169,16 @@ function App() {
                 resolveActiveFromKeyboard("none");
             } else if (hasCommandModifier && event.key === "Enter") {
                 if (!state.data) return;
-                if (!allResolved(state.data.segments, state.resolutions, state.edits)) return;
+                if (
+                    !allResolved(
+                        state.data.segments,
+                        state.resolutions,
+                        state.edits,
+                        state.dismissals,
+                        state.completedEdits,
+                    )
+                )
+                    return;
                 event.preventDefault();
                 handleApply();
             }
@@ -1023,9 +1187,13 @@ function App() {
         return () => window.removeEventListener("keydown", onKeyDown);
     }, [
         handleApply,
+        handleRedo,
+        handleUndo,
         moveActiveConflict,
         resolveActiveFromKeyboard,
+        state.completedEdits,
         state.data,
+        state.dismissals,
         state.resolutions,
         state.edits,
     ]);
@@ -1046,9 +1214,21 @@ function App() {
     }
 
     const total = trueConflictCount(segments);
-    const resolved = resolvedTrueConflictCount(segments, state.resolutions, state.edits);
+    const resolved = resolvedTrueConflictCount(
+        segments,
+        state.resolutions,
+        state.edits,
+        state.dismissals,
+        state.completedEdits,
+    );
     const unresolved = total - resolved;
-    const canApply = allResolved(segments, state.resolutions, state.edits);
+    const canApply = allResolved(
+        segments,
+        state.resolutions,
+        state.edits,
+        state.dismissals,
+        state.completedEdits,
+    );
     const changeCount = conflictSegments.length;
     // One-sided hunks auto-resolve to the changed side, so they never block Apply.
     const autoResolvedCount = changeCount - total;
@@ -1076,15 +1256,25 @@ function App() {
                 30,
             ),
             changeKind: item.segment.changeKind,
-            resolved:
-                !isTrueConflict(item.segment) ||
-                state.resolutions[item.segment.id] !== undefined ||
-                state.edits[item.segment.id] !== undefined,
+            resolved: isConflictResolved(
+                item.segment,
+                state.resolutions[item.segment.id],
+                state.edits[item.segment.id],
+                state.dismissals[item.segment.id],
+                state.completedEdits[item.segment.id],
+            ),
         }));
 
     const unresolvedTrueConflictIds = trueConflicts
         .filter(
-            (seg) => state.resolutions[seg.id] === undefined && state.edits[seg.id] === undefined,
+            (seg) =>
+                !isConflictResolved(
+                    seg,
+                    state.resolutions[seg.id],
+                    state.edits[seg.id],
+                    state.dismissals[seg.id],
+                    state.completedEdits[seg.id],
+                ),
         )
         .map((seg) => seg.id);
     const nextUnresolvedId = (() => {
@@ -1130,13 +1320,35 @@ function App() {
                             type="button"
                             className="toolbar-btn subtle"
                             onClick={handleApplyNonConflicting}
-                            disabled={autoResolvedCount === 0}
+                            disabled={pendingNonConflicting.length === 0}
                         >
                             <span className="toolbar-icon">
                                 <IconSpark />
                             </span>
                             {t("merge.toolbar.applyNonConflicting")}
                         </button>
+                        <div className="toolbar-nav-group">
+                            <button
+                                type="button"
+                                className="toolbar-icon-btn"
+                                onClick={handleUndo}
+                                title={t("merge.toolbar.undo")}
+                                aria-label={t("merge.toolbar.undo")}
+                                disabled={state.past.length === 0}
+                            >
+                                ↶
+                            </button>
+                            <button
+                                type="button"
+                                className="toolbar-icon-btn"
+                                onClick={handleRedo}
+                                title={t("merge.toolbar.redo")}
+                                aria-label={t("merge.toolbar.redo")}
+                                disabled={state.future.length === 0}
+                            >
+                                ↷
+                            </button>
+                        </div>
                         <div className="toolbar-nav-group">
                             <button
                                 type="button"
@@ -1329,6 +1541,9 @@ function App() {
                                             resolution={state.resolutions[item.segment.id]}
                                             editedLines={state.edits[item.segment.id]}
                                             dismissed={state.dismissals[item.segment.id]}
+                                            completedEdit={
+                                                state.completedEdits[item.segment.id]
+                                            }
                                             lineCount={item.paneLines.left}
                                             lineNumbers={item.lineNumbers.left}
                                             onResolve={handleResolve}
@@ -1364,10 +1579,14 @@ function App() {
                                             resolution={state.resolutions[item.segment.id]}
                                             editedLines={state.edits[item.segment.id]}
                                             dismissed={state.dismissals[item.segment.id]}
+                                            completedEdit={
+                                                state.completedEdits[item.segment.id]
+                                            }
                                             lineCount={item.paneLines.middle}
                                             lineNumbers={item.lineNumbers.middle}
                                             onEditResult={handleEditResult}
-                                            onClearEdit={handleClearEdit}
+                                            onMarkResolved={handleMarkResolved}
+                                            onReset={handleResetHunk}
                                             onSelect={setActiveConflictId}
                                             isActive={activeConflictId === item.segment.id}
                                             highlightWords={highlightWords}
@@ -1403,6 +1622,9 @@ function App() {
                                             resolution={state.resolutions[item.segment.id]}
                                             editedLines={state.edits[item.segment.id]}
                                             dismissed={state.dismissals[item.segment.id]}
+                                            completedEdit={
+                                                state.completedEdits[item.segment.id]
+                                            }
                                             lineCount={item.paneLines.right}
                                             lineNumbers={item.lineNumbers.right}
                                             onResolve={handleResolve}

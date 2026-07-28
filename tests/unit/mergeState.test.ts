@@ -48,6 +48,9 @@ describe("reducer", () => {
         resolutions: {},
         edits: {},
         dismissals: {},
+        completedEdits: {},
+        past: [],
+        future: [],
     };
 
     it("SET_DATA replaces data and clears local decisions", () => {
@@ -58,6 +61,7 @@ describe("reducer", () => {
                 resolutions: { 0: "ours" as const },
                 edits: { 0: ["manual"] },
                 dismissals: { 0: { ours: true } },
+                completedEdits: { 0: true as const },
             },
             { type: "SET_DATA", data },
         );
@@ -66,24 +70,29 @@ describe("reducer", () => {
         expect(state.resolutions).toEqual({});
         expect(state.edits).toEqual({});
         expect(state.dismissals).toEqual({});
+        expect(state.completedEdits).toEqual({});
+        expect(state.past).toEqual([]);
+        expect(state.future).toEqual([]);
     });
 
     it("SET_ERROR sets error message", () => {
         expect(reducer(initial, { type: "SET_ERROR", message: "fail" }).error).toBe("fail");
     });
 
-    it("RESOLVE_HUNK stores the choice and clears stale edits and dismissals", () => {
+    it("RESOLVE_HUNK preserves a discarded opposite side and clears the accepted side", () => {
         const state = reducer(
             {
                 ...initial,
                 edits: { 1: ["manual"] },
-                dismissals: { 1: { theirs: true } },
+                dismissals: { 1: { ours: true, theirs: true } },
+                completedEdits: { 1: true as const },
             },
             { type: "RESOLVE_HUNK", id: 1, resolution: "ours" },
         );
         expect(state.resolutions[1]).toBe("ours");
         expect(state.edits[1]).toBeUndefined();
-        expect(state.dismissals[1]).toBeUndefined();
+        expect(state.dismissals[1]).toEqual({ theirs: true });
+        expect(state.completedEdits[1]).toBeUndefined();
     });
 
     it("EDIT_HUNK_RESULT stores manual result lines", () => {
@@ -95,24 +104,90 @@ describe("reducer", () => {
         expect(state.edits[2]).toEqual(["manual"]);
     });
 
-    it("CLEAR_HUNK_EDIT resets the hunk to its unresolved state", () => {
+    it("RESET_HUNK resets every local decision for the hunk", () => {
         const state = reducer(
             {
                 ...initial,
                 resolutions: { 2: "both" },
                 edits: { 2: ["manual"] },
                 dismissals: { 2: { ours: true, theirs: true } },
+                completedEdits: { 2: true as const },
             },
-            { type: "CLEAR_HUNK_EDIT", id: 2 },
+            { type: "RESET_HUNK", id: 2 },
         );
         expect(state.resolutions[2]).toBeUndefined();
         expect(state.edits[2]).toBeUndefined();
         expect(state.dismissals[2]).toBeUndefined();
+        expect(state.completedEdits[2]).toBeUndefined();
     });
 
     it("DISMISS_SIDE records only the selected side", () => {
         const state = reducer(initial, { type: "DISMISS_SIDE", id: 2, side: "ours" });
         expect(state.dismissals[2]).toEqual({ ours: true });
+    });
+
+    it("marks manual edits resolved explicitly and supports undo/redo", () => {
+        const edited = reducer(initial, {
+            type: "EDIT_HUNK_RESULT",
+            id: 2,
+            lines: ["manual"],
+        });
+        const completed = reducer(edited, { type: "MARK_HUNK_RESOLVED", id: 2 });
+        expect(completed.completedEdits[2]).toBe(true);
+
+        const undone = reducer(completed, { type: "UNDO" });
+        expect(undone.completedEdits[2]).toBeUndefined();
+        expect(undone.edits[2]).toEqual(["manual"]);
+
+        const redone = reducer(undone, { type: "REDO" });
+        expect(redone.completedEdits[2]).toBe(true);
+    });
+
+    it("applies a bulk side choice as one undo step", () => {
+        const resolved = reducer(initial, {
+            type: "RESOLVE_HUNKS",
+            resolutions: [
+                { id: 0, resolution: "ours" },
+                { id: 1, resolution: "ours" },
+            ],
+            settleOpposite: true,
+        });
+        expect(resolved.dismissals).toEqual({
+            0: { theirs: true },
+            1: { theirs: true },
+        });
+        expect(resolved.past).toHaveLength(1);
+        expect(reducer(resolved, { type: "UNDO" }).resolutions).toEqual({});
+    });
+
+    it("settles a conflict regardless of whether discard or accept happens first", () => {
+        const discardThenAccept = reducer(
+            reducer(initial, { type: "DISMISS_SIDE", id: 0, side: "ours" }),
+            { type: "RESOLVE_HUNK", id: 0, resolution: "theirs" },
+        );
+        expect(
+            allResolved(
+                [makeConflict()],
+                discardThenAccept.resolutions,
+                discardThenAccept.edits,
+                discardThenAccept.dismissals,
+                discardThenAccept.completedEdits,
+            ),
+        ).toBe(true);
+
+        const acceptThenDiscard = reducer(
+            reducer(initial, { type: "RESOLVE_HUNK", id: 0, resolution: "ours" }),
+            { type: "DISMISS_SIDE", id: 0, side: "theirs" },
+        );
+        expect(
+            allResolved(
+                [makeConflict()],
+                acceptThenDiscard.resolutions,
+                acceptThenDiscard.edits,
+                acceptThenDiscard.dismissals,
+                acceptThenDiscard.completedEdits,
+            ),
+        ).toBe(true);
     });
 });
 
@@ -210,12 +285,16 @@ describe("resolution status", () => {
             makeConflict({ id: 0 }),
             makeConflict({ id: 1, changeKind: "ours-only" }),
         ];
-        expect(allResolved(segments, { 0: "ours" })).toBe(true);
+        expect(allResolved(segments, { 0: "ours" }, {}, { 0: { theirs: true } })).toBe(true);
+        expect(allResolved(segments, { 0: "ours" })).toBe(false);
         expect(allResolved(segments, {})).toBe(false);
     });
 
-    it("treats a manual edit as a resolution", () => {
-        expect(allResolved([makeConflict()], {}, { 0: ["manual"] })).toBe(true);
+    it("requires an explicit completion after a manual edit", () => {
+        expect(allResolved([makeConflict()], {}, { 0: ["manual"] })).toBe(false);
+        expect(allResolved([makeConflict()], {}, { 0: ["manual"] }, {}, { 0: true })).toBe(
+            true,
+        );
     });
 
     it("does not count auto-merged hunks as true conflicts", () => {
@@ -226,8 +305,14 @@ describe("resolution status", () => {
 
     it("counts resolved true conflicts", () => {
         const segments: MergeSegment[] = [makeConflict({ id: 0 }), makeConflict({ id: 1 })];
-        expect(resolvedTrueConflictCount(segments, { 0: "ours" })).toBe(1);
-        expect(resolvedTrueConflictCount(segments, {}, { 1: ["manual"] })).toBe(1);
+        expect(resolvedTrueConflictCount(segments, { 0: "ours" })).toBe(0);
+        expect(
+            resolvedTrueConflictCount(segments, { 0: "ours" }, {}, { 0: { theirs: true } }),
+        ).toBe(1);
+        expect(resolvedTrueConflictCount(segments, {}, { 1: ["manual"] })).toBe(0);
+        expect(
+            resolvedTrueConflictCount(segments, {}, { 1: ["manual"] }, {}, { 1: true }),
+        ).toBe(1);
     });
 });
 

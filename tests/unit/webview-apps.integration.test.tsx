@@ -1104,8 +1104,31 @@ describe("MergeEditorApp integration", () => {
         await flush();
 
         const resultEditor = document.querySelector(".result-edit-textarea") as HTMLTextAreaElement;
+        expect(resultEditor.style.height).toBe("20px");
+        const horizontalScroll = document.querySelector(
+            ".merge-horizontal-scroll",
+        ) as HTMLDivElement;
+        Object.defineProperties(resultEditor, {
+            scrollWidth: { configurable: true, value: 300 },
+            clientWidth: { configurable: true, value: 100 },
+        });
+        act(() => {
+            horizontalScroll.scrollLeft = 45;
+            horizontalScroll.dispatchEvent(new Event("scroll", { bubbles: true }));
+        });
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        expect(resultEditor.scrollLeft).toBe(45);
+
+        act(() => {
+            resultEditor.scrollLeft = 70;
+            resultEditor.dispatchEvent(new Event("scroll", { bubbles: true }));
+        });
+        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+        expect(horizontalScroll.scrollLeft).toBe(70);
+
         fireInput(resultEditor, "manual\nresult");
         await flush();
+        expect(resultEditor.style.height).toBe("40px");
         act(() => {
             resultEditor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
         });
@@ -1128,10 +1151,10 @@ describe("MergeEditorApp integration", () => {
         expect(document.querySelector(".col-right .conflict-column.dismissed")).not.toBeNull();
         expect(document.querySelector(".col-middle")?.textContent).toContain("manual");
 
-        const undoManualEdit = document.querySelector(
-            'button[aria-label="Undo manual edit"]',
+        const resetManualEdit = document.querySelector(
+            'button[aria-label="Reset this block to unresolved"]',
         ) as HTMLButtonElement;
-        fireClick(undoManualEdit);
+        fireClick(resetManualEdit);
         await flush();
         expect(document.querySelector(".col-middle")?.textContent).toContain("base");
         expect(document.querySelector(".col-middle")?.textContent).not.toContain("manual");
@@ -1152,6 +1175,13 @@ describe("MergeEditorApp integration", () => {
         act(() => {
             restoredEditor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
         });
+        await flush();
+
+        expect(applyButton.disabled).toBe(true);
+        const markResolved = document.querySelector(
+            'button[aria-label="Mark edited block as resolved"]',
+        ) as HTMLButtonElement;
+        fireClick(markResolved);
         await flush();
 
         const enabledApplyButton = Array.from(document.querySelectorAll("button")).find((button) =>

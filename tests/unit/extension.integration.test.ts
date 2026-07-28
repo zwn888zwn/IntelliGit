@@ -27,6 +27,7 @@ const showQuickPick = vi.fn(async (items: Array<Record<string, unknown>>) => ite
 const showTextDocument = vi.fn(async () => undefined);
 const openTextDocument = vi.fn(async (arg: unknown) => arg);
 const writeFile = vi.fn(async () => undefined);
+const readFile = vi.fn(async () => Buffer.from(""));
 const fsStat = vi.fn(async () => ({ type: 1, ctime: 0, mtime: 0, size: 1 }));
 const clipboardWriteText = vi.fn(async () => undefined);
 const createOutputChannel = vi.fn(() => ({ appendLine: vi.fn() }));
@@ -593,7 +594,7 @@ vi.mock("vscode", () => ({
             return { dispose: vi.fn() };
         }),
         onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
-        fs: { writeFile, stat: fsStat },
+        fs: { readFile, writeFile, stat: fsStat },
         openTextDocument,
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn(() => ({ dispose: vi.fn() })),
@@ -1762,6 +1763,71 @@ describe("extension integration", () => {
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
+    it("uses a native modal confirmation for destructive merge-editor actions", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        showWarningMessage.mockResolvedValueOnce("Discard and Close");
+
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/confirm-conflicted.ts",
+        });
+        await latestWebviewPanel?.emitMessage({
+            type: "confirm",
+            requestId: 7,
+            message: "Discard local merge edits?",
+            confirmLabel: "Discard and Close",
+        });
+
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Discard local merge edits?",
+            { modal: true },
+            "Discard and Close",
+        );
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith({
+            type: "confirmResult",
+            requestId: 7,
+            confirmed: true,
+        });
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("does not overwrite a conflicted file that changed after the editor loaded", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        gitOpsState.getConflictFileVersions.mockResolvedValue({
+            base: "base\n",
+            ours: "ours\n",
+            theirs: "theirs\n",
+        });
+        readFile
+            .mockResolvedValueOnce(Buffer.from("original\n"))
+            .mockResolvedValueOnce(Buffer.from("changed externally\n"));
+
+        await registeredCommands.get("intelligit.openMergeConflict")?.({
+            filePath: "src/stale-conflicted.ts",
+        });
+        await latestWebviewPanel?.emitMessage({ type: "ready" });
+        await latestWebviewPanel?.emitMessage({
+            type: "applyResolution",
+            content: "resolved\n",
+        });
+
+        expect(writeFile).not.toHaveBeenCalled();
+        expect(gitOpsState.stageFile).not.toHaveBeenCalled();
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            expect.stringContaining("changed on disk"),
+        );
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
     it("opens conflict files in the repository from the command context uri", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
@@ -1842,10 +1908,16 @@ describe("extension integration", () => {
         gitOpsState.getPendingCommitMessage.mockResolvedValue(
             "Merge branch 'master' into alpha",
         );
+        gitOpsState.getConflictFileVersions.mockResolvedValue({
+            base: "",
+            ours: "",
+            theirs: "",
+        });
 
         await registeredCommands.get("intelligit.openMergeConflict")?.({
             filePath: "src/final-conflict.ts",
         });
+        await latestWebviewPanel?.emitMessage({ type: "ready" });
         await latestWebviewPanel?.emitMessage({
             type: "applyResolution",
             content: "resolved\n",
@@ -1869,10 +1941,16 @@ describe("extension integration", () => {
 
         gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
         gitOpsState.isRebaseInProgress.mockResolvedValue(true);
+        gitOpsState.getConflictFileVersions.mockResolvedValue({
+            base: "",
+            ours: "",
+            theirs: "",
+        });
 
         await registeredCommands.get("intelligit.openMergeConflict")?.({
             filePath: "src/final-rebase-conflict.ts",
         });
+        await latestWebviewPanel?.emitMessage({ type: "ready" });
         await latestWebviewPanel?.emitMessage({
             type: "applyResolution",
             content: "resolved\n",

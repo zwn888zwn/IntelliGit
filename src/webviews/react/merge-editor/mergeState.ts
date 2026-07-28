@@ -17,8 +17,8 @@ import type {
  * `edits` maps a conflict segment id to user-typed result lines. An empty array
  * is a meaningful edit (the block was deleted), so presence is tested with
  * `!== undefined` rather than truthiness. `dismissals` records sides the user
- * rejected with the discard (X) control without accepting the opposite side;
- * choosing a side resolution clears that hunk's dismissals.
+ * rejected with the discard (X) control. Accepting one side clears only that
+ * side's stale dismissal and preserves the opposite side's settled state.
  */
 export interface State {
     data: MergeEditorData | null;
@@ -26,6 +26,16 @@ export interface State {
     resolutions: Record<number, HunkResolution>;
     edits: Record<number, string[]>;
     dismissals: Record<number, HunkSideDismissal>;
+    completedEdits: Record<number, true>;
+    past: DecisionSnapshot[];
+    future: DecisionSnapshot[];
+}
+
+export interface DecisionSnapshot {
+    resolutions: Record<number, HunkResolution>;
+    edits: Record<number, string[]>;
+    dismissals: Record<number, HunkSideDismissal>;
+    completedEdits: Record<number, true>;
 }
 
 /** Message-shaped reducer actions emitted by the merge editor app shell. */
@@ -33,9 +43,17 @@ export type Action =
     | { type: "SET_DATA"; data: MergeEditorData }
     | { type: "SET_ERROR"; message: string }
     | { type: "RESOLVE_HUNK"; id: number; resolution: HunkResolution }
+    | {
+          type: "RESOLVE_HUNKS";
+          resolutions: Array<{ id: number; resolution: HunkResolution }>;
+          settleOpposite?: boolean;
+      }
     | { type: "EDIT_HUNK_RESULT"; id: number; lines: string[] }
-    | { type: "CLEAR_HUNK_EDIT"; id: number }
-    | { type: "DISMISS_SIDE"; id: number; side: "ours" | "theirs" };
+    | { type: "MARK_HUNK_RESOLVED"; id: number }
+    | { type: "RESET_HUNK"; id: number }
+    | { type: "DISMISS_SIDE"; id: number; side: "ours" | "theirs" }
+    | { type: "UNDO" }
+    | { type: "REDO" };
 
 /**
  * Applies merge-editor state transitions.
@@ -54,39 +72,123 @@ export function reducer(state: State, action: Action): State {
                 resolutions: {},
                 edits: {},
                 dismissals: {},
+                completedEdits: {},
+                past: [],
+                future: [],
             };
         case "SET_ERROR":
             return { ...state, error: action.message };
         case "RESOLVE_HUNK": {
-            // A side choice supersedes any prior discard on this hunk, so the
-            // opposite side becomes appendable again.
-            return {
-                ...state,
+            const currentDismissal = state.dismissals[action.id];
+            let dismissals = state.dismissals;
+            if (action.resolution === "ours" || action.resolution === "theirs") {
+                const acceptedSide = action.resolution;
+                const remaining =
+                    acceptedSide === "ours"
+                        ? currentDismissal?.theirs
+                            ? { theirs: true as const }
+                            : undefined
+                        : currentDismissal?.ours
+                          ? { ours: true as const }
+                          : undefined;
+                dismissals = setOrRemoveKey(dismissals, action.id, remaining);
+            } else {
+                dismissals = removeKey(dismissals, action.id);
+            }
+            return withHistory(state, {
                 resolutions: { ...state.resolutions, [action.id]: action.resolution },
                 edits: removeKey(state.edits, action.id),
-                dismissals: removeKey(state.dismissals, action.id),
-            };
+                dismissals,
+                completedEdits: removeKey(state.completedEdits, action.id),
+            });
+        }
+        case "RESOLVE_HUNKS": {
+            if (action.resolutions.length === 0) return state;
+            let resolutions = state.resolutions;
+            let edits = state.edits;
+            let dismissals = state.dismissals;
+            let completedEdits = state.completedEdits;
+            for (const item of action.resolutions) {
+                resolutions = { ...resolutions, [item.id]: item.resolution };
+                edits = removeKey(edits, item.id);
+                completedEdits = removeKey(completedEdits, item.id);
+                if (action.settleOpposite && item.resolution === "ours") {
+                    dismissals = {
+                        ...dismissals,
+                        [item.id]: { theirs: true },
+                    };
+                } else if (action.settleOpposite && item.resolution === "theirs") {
+                    dismissals = {
+                        ...dismissals,
+                        [item.id]: { ours: true },
+                    };
+                } else {
+                    dismissals = removeKey(dismissals, item.id);
+                }
+            }
+            return withHistory(state, {
+                resolutions,
+                edits,
+                dismissals,
+                completedEdits,
+            });
         }
         case "EDIT_HUNK_RESULT":
-            return {
-                ...state,
+            return withHistory(state, {
+                resolutions: state.resolutions,
                 edits: { ...state.edits, [action.id]: action.lines },
-            };
-        case "CLEAR_HUNK_EDIT":
-            return {
-                ...state,
+                dismissals: state.dismissals,
+                completedEdits: removeKey(state.completedEdits, action.id),
+            });
+        case "MARK_HUNK_RESOLVED":
+            if (state.edits[action.id] === undefined || state.completedEdits[action.id]) {
+                return state;
+            }
+            return withHistory(state, {
+                resolutions: state.resolutions,
+                edits: state.edits,
+                dismissals: state.dismissals,
+                completedEdits: { ...state.completedEdits, [action.id]: true },
+            });
+        case "RESET_HUNK":
+            if (!isHunkChanged(state, action.id)) return state;
+            return withHistory(state, {
                 resolutions: removeKey(state.resolutions, action.id),
                 edits: removeKey(state.edits, action.id),
                 dismissals: removeKey(state.dismissals, action.id),
-            };
+                completedEdits: removeKey(state.completedEdits, action.id),
+            });
         case "DISMISS_SIDE": {
             const current = state.dismissals[action.id] ?? {};
-            return {
-                ...state,
+            if (current[action.side]) return state;
+            return withHistory(state, {
+                resolutions: state.resolutions,
+                edits: state.edits,
                 dismissals: {
                     ...state.dismissals,
                     [action.id]: { ...current, [action.side]: true },
                 },
+                completedEdits: removeKey(state.completedEdits, action.id),
+            });
+        }
+        case "UNDO": {
+            const previous = state.past[state.past.length - 1];
+            if (!previous) return state;
+            return {
+                ...state,
+                ...previous,
+                past: state.past.slice(0, -1),
+                future: [snapshot(state), ...state.future],
+            };
+        }
+        case "REDO": {
+            const next = state.future[0];
+            if (!next) return state;
+            return {
+                ...state,
+                ...next,
+                past: [...state.past, snapshot(state)],
+                future: state.future.slice(1),
             };
         }
         default:
@@ -94,11 +196,47 @@ export function reducer(state: State, action: Action): State {
     }
 }
 
+function snapshot(state: State): DecisionSnapshot {
+    return {
+        resolutions: state.resolutions,
+        edits: state.edits,
+        dismissals: state.dismissals,
+        completedEdits: state.completedEdits,
+    };
+}
+
+function withHistory(state: State, next: DecisionSnapshot): State {
+    return {
+        ...state,
+        ...next,
+        past: [...state.past.slice(-99), snapshot(state)],
+        future: [],
+    };
+}
+
+function isHunkChanged(state: State, id: number): boolean {
+    return (
+        state.resolutions[id] !== undefined ||
+        state.edits[id] !== undefined ||
+        state.dismissals[id] !== undefined ||
+        state.completedEdits[id] !== undefined
+    );
+}
+
 function removeKey<T>(map: Record<number, T>, id: number): Record<number, T> {
     if (map[id] === undefined) return map;
     const next = { ...map };
     delete next[id];
     return next;
+}
+
+function setOrRemoveKey<T>(
+    map: Record<number, T>,
+    id: number,
+    value: T | undefined,
+): Record<number, T> {
+    if (value === undefined) return removeKey(map, id);
+    return { ...map, [id]: value };
 }
 
 /**
@@ -195,17 +333,40 @@ export function buildResultContent(
  * Returns whether every true conflict has an explicit resolution choice or a
  * manual result edit.
  */
+export function isConflictResolved(
+    segment: MergeSegment,
+    resolution: HunkResolution | undefined,
+    editedLines: string[] | undefined,
+    dismissed: HunkSideDismissal | undefined,
+    completedEdit: true | undefined,
+): boolean {
+    if (!isTrueConflict(segment)) return true;
+    if (editedLines !== undefined) return completedEdit === true;
+    if (resolution === "both" || resolution === "both-reversed" || resolution === "none") {
+        return true;
+    }
+    if (resolution === "ours") return dismissed?.theirs === true;
+    if (resolution === "theirs") return dismissed?.ours === true;
+    return false;
+}
+
 export function allResolved(
     segments: MergeSegment[],
     resolutions: Record<number, HunkResolution>,
     edits: Record<number, string[]> = {},
+    dismissals: Record<number, HunkSideDismissal> = {},
+    completedEdits: Record<number, true> = {},
 ): boolean {
-    return segments.every(
-        (seg) =>
-            !isTrueConflict(seg) ||
-            resolutions[seg.id] !== undefined ||
-            edits[seg.id] !== undefined,
-    );
+    return segments.every((seg) => {
+        if (!isTrueConflict(seg)) return true;
+        return isConflictResolved(
+            seg,
+            resolutions[seg.id],
+            edits[seg.id],
+            dismissals[seg.id],
+            completedEdits[seg.id],
+        );
+    });
 }
 
 /** Counts only hunks that still need a human decision (no auto-merge). */
@@ -218,11 +379,19 @@ export function resolvedTrueConflictCount(
     segments: MergeSegment[],
     resolutions: Record<number, HunkResolution>,
     edits: Record<number, string[]> = {},
+    dismissals: Record<number, HunkSideDismissal> = {},
+    completedEdits: Record<number, true> = {},
 ): number {
     return segments.filter(
         (seg) =>
             isTrueConflict(seg) &&
-            (resolutions[seg.id] !== undefined || edits[seg.id] !== undefined),
+            isConflictResolved(
+                seg,
+                resolutions[seg.id],
+                edits[seg.id],
+                dismissals[seg.id],
+                completedEdits[seg.id],
+            ),
     ).length;
 }
 

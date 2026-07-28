@@ -12,12 +12,14 @@ export type OutboundMessage =
     | { type: "applyResolution"; content: string; mode?: "apply" | "applyNext" }
     | { type: "acceptYours" }
     | { type: "acceptTheirs" }
+    | { type: "confirm"; requestId: number; message: string; confirmLabel: string }
     | { type: "close" };
 
 /** Messages the extension host sends to initialize conflict data or report load failures. */
 export type InboundMessage =
     | { type: "setConflictData"; data: MergeEditorData }
-    | { type: "loadError"; message: string };
+    | { type: "loadError"; message: string }
+    | { type: "confirmResult"; requestId: number; confirmed: boolean };
 
 /**
  * Resolution choice for a single conflict hunk.
@@ -34,7 +36,8 @@ export type HunkResolution = "ours" | "theirs" | "both" | "both-reversed" | "non
  * A dismissed side is one the user rejected with its discard (X) control without
  * accepting the opposite side. It is neither in the result nor still offered, so
  * its action buttons hide while the opposite side's suggestion stays available.
- * Accepting a side clears its hunk's dismissals, so acceptance always overrides.
+ * Accepting a side clears that side's stale dismissal but preserves the opposite
+ * side's dismissal, making discard-then-accept and accept-then-discard equivalent.
  */
 export interface HunkSideDismissal {
     ours?: boolean;

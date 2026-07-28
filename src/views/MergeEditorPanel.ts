@@ -15,6 +15,7 @@ export class MergeEditorPanel {
     private disposed = false;
     private diffOptions: MergeDiffOptions = { ignoreWhitespace: false };
     private currentLoadId = 0;
+    private workingFileSnapshot: Uint8Array | undefined;
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -97,6 +98,27 @@ export class MergeEditorPanel {
                 break;
             }
 
+            case "confirm": {
+                if (
+                    typeof msg.requestId !== "number" ||
+                    typeof msg.message !== "string" ||
+                    typeof msg.confirmLabel !== "string"
+                ) {
+                    return;
+                }
+                const selection = await vscode.window.showWarningMessage(
+                    msg.message,
+                    { modal: true },
+                    msg.confirmLabel,
+                );
+                await this.panel.webview.postMessage({
+                    type: "confirmResult",
+                    requestId: msg.requestId,
+                    confirmed: selection === msg.confirmLabel,
+                });
+                break;
+            }
+
             case "applyResolution": {
                 if (typeof msg.content !== "string") {
                     vscode.window.showErrorMessage(
@@ -104,6 +126,7 @@ export class MergeEditorPanel {
                     );
                     return;
                 }
+                if (!(await this.ensureWorkingFileUnchanged())) return;
                 const content = msg.content;
                 const fileUri = vscode.Uri.joinPath(this.workspaceRoot, this.filePath);
                 await vscode.workspace.fs.writeFile(fileUri, Buffer.from(content, "utf8"));
@@ -118,6 +141,7 @@ export class MergeEditorPanel {
             }
 
             case "acceptYours": {
+                if (!(await this.ensureWorkingFileUnchanged())) return;
                 await this.gitOps.acceptConflictSide(this.filePath, "ours");
                 vscode.window.showInformationMessage(`Accepted yours: ${this.filePath}`);
                 try {
@@ -129,6 +153,7 @@ export class MergeEditorPanel {
             }
 
             case "acceptTheirs": {
+                if (!(await this.ensureWorkingFileUnchanged())) return;
                 await this.gitOps.acceptConflictSide(this.filePath, "theirs");
                 vscode.window.showInformationMessage(`Accepted theirs: ${this.filePath}`);
                 try {
@@ -150,9 +175,10 @@ export class MergeEditorPanel {
         try {
             const versions = await this.gitOps.getConflictFileVersions(this.filePath);
             if (this.disposed || loadId !== this.currentLoadId) return;
-            const textFormat = await this.detectTextFormatForOutput().catch(() =>
-                detectTextFormatFromText(versions.ours),
-            );
+            const workingFileSnapshot = await this.readWorkingFile().catch(() => undefined);
+            const textFormat = workingFileSnapshot
+                ? detectTextFormatFromText(Buffer.from(workingFileSnapshot).toString("utf8"))
+                : detectTextFormatFromText(versions.ours);
             if (this.disposed || loadId !== this.currentLoadId) return;
             const segments = parseConflictVersions(
                 versions.base,
@@ -172,6 +198,7 @@ export class MergeEditorPanel {
             };
 
             if (this.disposed || loadId !== this.currentLoadId) return;
+            this.workingFileSnapshot = workingFileSnapshot;
             await this.panel.webview.postMessage({ type: "setConflictData", data });
         } catch (err) {
             if (this.disposed || loadId !== this.currentLoadId) return;
@@ -199,14 +226,24 @@ export class MergeEditorPanel {
         return MergeEditorPanel.getPanelKey(this.workspaceRoot, this.filePath);
     }
 
-    private async detectTextFormatForOutput(): Promise<{
-        eol: "\n" | "\r\n";
-        hasTrailingNewline: boolean;
-    }> {
+    private async readWorkingFile(): Promise<Uint8Array> {
         const fileUri = vscode.Uri.joinPath(this.workspaceRoot, this.filePath);
-        const bytes = await vscode.workspace.fs.readFile(fileUri);
-        const text = Buffer.from(bytes).toString("utf8");
-        return detectTextFormatFromText(text);
+        return vscode.workspace.fs.readFile(fileUri);
+    }
+
+    private async ensureWorkingFileUnchanged(): Promise<boolean> {
+        if (!this.workingFileSnapshot) {
+            vscode.window.showWarningMessage(
+                `Cannot verify ${this.filePath}; reopen the merge editor before applying.`,
+            );
+            return false;
+        }
+        const current = await this.readWorkingFile();
+        if (Buffer.from(current).equals(Buffer.from(this.workingFileSnapshot))) return true;
+        vscode.window.showWarningMessage(
+            `${this.filePath} changed on disk after the merge editor opened. Reopen it to avoid overwriting those changes.`,
+        );
+        return false;
     }
 }
 
