@@ -242,15 +242,24 @@ function RepositorySection({
 
             {tracked.length > 0 && (
                 <>
-                    <SectionHeader
-                        label="Changes"
-                        count={tracked.length}
-                        isOpen={trackedOpen}
-                        isAllChecked={isAllChecked(tracked)}
-                        isSomeChecked={isSomeChecked(tracked)}
-                        onToggleOpen={() => setTrackedOpen((o) => !o)}
-                        onToggleCheck={() => onToggleSection(tracked)}
-                    />
+                    <Box
+                        data-vscode-context={JSON.stringify({
+                            webviewSection: "section",
+                            filePaths: tracked.map((file) => file.path),
+                            repoRoot: repository.root,
+                            preventDefaultContextMenuItems: true,
+                        })}
+                    >
+                        <SectionHeader
+                            label="Changes"
+                            count={tracked.length}
+                            isOpen={trackedOpen}
+                            isAllChecked={isAllChecked(tracked)}
+                            isSomeChecked={isSomeChecked(tracked)}
+                            onToggleOpen={() => setTrackedOpen((o) => !o)}
+                            onToggleCheck={() => onToggleSection(tracked)}
+                        />
+                    </Box>
                     {trackedOpen && (
                         <TreeEntries
                             repositoryRoot={repository.root}
@@ -276,15 +285,24 @@ function RepositorySection({
 
             {unversioned.length > 0 && (
                 <>
-                    <SectionHeader
-                        label="Unversioned Files"
-                        count={unversioned.length}
-                        isOpen={unversionedOpen}
-                        isAllChecked={isAllChecked(unversioned)}
-                        isSomeChecked={isSomeChecked(unversioned)}
-                        onToggleOpen={() => setUnversionedOpen((o) => !o)}
-                        onToggleCheck={() => onToggleSection(unversioned)}
-                    />
+                    <Box
+                        data-vscode-context={JSON.stringify({
+                            webviewSection: "section",
+                            filePaths: unversioned.map((file) => file.path),
+                            repoRoot: repository.root,
+                            preventDefaultContextMenuItems: true,
+                        })}
+                    >
+                        <SectionHeader
+                            label="Unversioned Files"
+                            count={unversioned.length}
+                            isOpen={unversionedOpen}
+                            isAllChecked={isAllChecked(unversioned)}
+                            isSomeChecked={isSomeChecked(unversioned)}
+                            onToggleOpen={() => setUnversionedOpen((o) => !o)}
+                            onToggleCheck={() => onToggleSection(unversioned)}
+                        />
+                    </Box>
                     {unversionedOpen && (
                         <TreeEntries
                             repositoryRoot={repository.root}
@@ -377,6 +395,8 @@ function TreeEntries({
                         <FolderRow
                             name={entry.name}
                             dirPath={entry.path}
+                            filePaths={dirFiles.map((file) => file.path)}
+                            repositoryRoot={repositoryRoot}
                             depth={depth}
                             isExpanded={isExpanded}
                             folderIcon={folderIcon}

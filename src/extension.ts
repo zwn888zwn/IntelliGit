@@ -1891,10 +1891,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         vscode.commands.registerCommand(
             "intelligit.fileRollback",
-            async (ctx: { filePath?: string; repoRoot?: string }) => {
-                if (!ctx?.filePath) return;
+            async (ctx: { filePath?: string; filePaths?: string[]; repoRoot?: string }) => {
+                const paths =
+                    Array.isArray(ctx?.filePaths) && ctx.filePaths.length > 0
+                        ? ctx.filePaths
+                        : ctx?.filePath
+                          ? [ctx.filePath]
+                          : [];
+                if (paths.length === 0) return;
                 const confirm = await vscode.window.showWarningMessage(
-                    `Rollback ${ctx.filePath}?`,
+                    paths.length === 1 ? `Rollback ${paths[0]}?` : `Rollback ${paths.length} file(s)?`,
                     { modal: true },
                     "Rollback",
                 );
@@ -1904,7 +1910,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                         (ctx.repoRoot
                             ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
                             : null) ?? requireCurrentRepository();
-                    await repository.gitOps.rollbackFiles([ctx.filePath]);
+                    await repository.gitOps.rollbackFiles(paths);
                     vscode.window.showInformationMessage("Changes rolled back.");
                 } catch (error) {
                     const message = getErrorMessage(error);

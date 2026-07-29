@@ -479,6 +479,11 @@
                     "group": "1_actions@1"
                 },
                 {
+                    "command": "intelligit.fileRollback",
+                    "when": "webviewId == 'intelligit.commitPanel' && (webviewSection == 'directory' || webviewSection == 'section')",
+                    "group": "1_actions@1"
+                },
+                {
                     "command": "intelligit.fileJumpToSource",
                     "when": "webviewId == 'intelligit.commitPanel' && webviewSection == 'file'",
                     "group": "1_actions@2"

@@ -13,6 +13,8 @@ import { resolveFolderIcon } from "../../shared/utils";
 interface Props {
     name: string;
     dirPath: string;
+    filePaths: string[];
+    repositoryRoot: string;
     depth: number;
     isExpanded: boolean;
     folderIcon?: ThemeTreeIcon;
@@ -28,6 +30,8 @@ interface Props {
 function FolderRowInner({
     name,
     dirPath,
+    filePaths,
+    repositoryRoot,
     depth,
     isExpanded,
     folderIcon,
@@ -62,6 +66,12 @@ function FolderRowInner({
             position="relative"
             whiteSpace="nowrap"
             _hover={{ bg: "var(--vscode-list-hoverBackground)" }}
+            data-vscode-context={JSON.stringify({
+                webviewSection: "directory",
+                filePaths,
+                repoRoot: repositoryRoot,
+                preventDefaultContextMenuItems: true,
+            })}
             onClick={(e) => {
                 if ((e.target as HTMLElement).tagName === "INPUT") return;
                 onToggleExpand(dirPath);
