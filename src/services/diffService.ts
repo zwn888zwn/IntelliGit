@@ -302,8 +302,7 @@ function makeTextDiffUriPath(
 }
 
 function shouldUsePlainTextDiffUri(filePath: string): boolean {
-    const extension = path.posix.extname(filePath).toLowerCase();
-    return extension === ".md" || isBinaryFilePath(filePath);
+    return isBinaryFilePath(filePath);
 }
 
 function isPreviewableImageFilePath(filePath: string): boolean {

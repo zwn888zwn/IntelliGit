@@ -1463,7 +1463,7 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
-    it("CommitPanelViewProvider keeps diff navigation active for virtual diff editors", async () => {
+    it("CommitPanelViewProvider preserves Markdown language in working tree diffs", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();
         gitOps.getStatus.mockResolvedValueOnce([
@@ -1515,14 +1515,14 @@ describe("view providers integration", () => {
         const markdownDiffCall = executeCommand.mock.calls.find((call) => call[0] === "vscode.diff");
         expect(markdownDiffCall?.[1]).toEqual(
             expect.objectContaining({
-                path: expect.stringMatching(/\.txt$/),
+                path: expect.stringMatching(/\/todo\.md$/),
                 query: expect.stringContaining("path=todo.md"),
             }),
         );
         expect(markdownDiffCall?.[2]).toEqual(
             expect.objectContaining({
-                path: expect.stringMatching(/\.txt$/),
-                query: expect.stringContaining("path=todo.md"),
+                scheme: "file",
+                path: "/repo/todo.md",
             }),
         );
         executeCommand.mockClear();
@@ -1531,9 +1531,9 @@ describe("view providers integration", () => {
             document: {
                 uri: {
                     scheme: "intelligit-diff-editable",
-                    path: "/__intelligit_text_diff__/1.txt",
+                    path: "/__intelligit_text_diff__/1/todo.md",
                     query: "ref=working-tree&path=todo.md",
-                    fsPath: "/__intelligit_text_diff__/1.txt",
+                    fsPath: "/__intelligit_text_diff__/1/todo.md",
                 },
             },
             selection: { active: { line: 1, character: 0 } },

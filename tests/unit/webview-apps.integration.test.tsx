@@ -1168,6 +1168,27 @@ describe("MergeEditorApp integration", () => {
         const horizontalScroll = document.querySelector(
             ".merge-horizontal-scroll",
         ) as HTMLDivElement;
+        const horizontalScrollInner = document.querySelector(
+            ".merge-horizontal-scroll-inner",
+        ) as HTMLDivElement;
+        horizontalScroll.hidden = true;
+        Object.defineProperties(horizontalScroll, {
+            clientWidth: {
+                configurable: true,
+                get: () => (horizontalScroll.hidden ? 0 : 100),
+            },
+        });
+        Object.defineProperties(horizontalScrollInner, {
+            offsetWidth: {
+                configurable: true,
+                get: () => (horizontalScroll.hidden ? 0 : 300),
+            },
+        });
+        act(() => {
+            window.dispatchEvent(new Event("resize"));
+        });
+        expect(horizontalScroll.hidden).toBe(false);
+
         Object.defineProperties(resultEditor, {
             scrollWidth: { configurable: true, value: 300 },
             clientWidth: { configurable: true, value: 100 },

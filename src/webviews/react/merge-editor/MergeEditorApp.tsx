@@ -645,6 +645,10 @@ function App() {
         const inner = horizontalScrollInnerRef.current;
         const content = mergeContentRef.current;
         if (!bar || !inner || !content) return;
+        // `hidden` maps to display:none, which makes both widths read as zero.
+        // Reveal the synthetic bar before measuring so a previously fitting
+        // editor can grow a scrollbar after the panel or sidebar narrows it.
+        bar.hidden = false;
         // The narrowest pane overflows first, so it sets the shared scroll extent.
         // Each column is one flow with a stable width, so the first non-collapsed
         // `.code-lines` in each `.merge-col` gives that pane's clientWidth without
@@ -847,6 +851,7 @@ function App() {
         const observer = new ResizeObserver(() => {
             measureViewport();
             measureGutters();
+            updateHorizontalScrollWidthRef.current();
             scheduleMergeFrame();
         });
         observer.observe(content);
