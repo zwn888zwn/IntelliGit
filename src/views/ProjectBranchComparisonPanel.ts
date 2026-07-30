@@ -7,7 +7,6 @@ import {
     openBranchComparisonFileDiff,
 } from "../services/diffService";
 import { getErrorMessage } from "../utils/errors";
-import { assertRepoRelativePath } from "../utils/fileOps";
 import { buildWebviewShellHtml } from "./webviewHtml";
 import { IconThemeService } from "./shared";
 import type {
@@ -15,11 +14,6 @@ import type {
     ProjectComparisonOutbound,
 } from "../webviews/react/project-comparison/types";
 import type { DiffNavigationState } from "./CommitPanelViewProvider";
-import {
-    getAdjacentHunkIndex,
-    parseChangedNewFileHunks,
-    type DiffHunkRange,
-} from "../services/diffNavigation";
 
 export class ProjectBranchComparisonPanel implements vscode.Disposable {
     static readonly viewType = "intelligit.projectBranchComparison";
@@ -29,7 +23,6 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     private readonly iconTheme: IconThemeService;
     private files: ProjectComparisonFile[] = [];
     private activeFile: ProjectComparisonFile | null = null;
-    private activeHunkIndex: number | null = null;
     private disposed = false;
 
     static open(
@@ -143,10 +136,7 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         }
     }
 
-    private async openFileDiff(
-        file: ProjectComparisonFile,
-        initialHunk: "first" | "last" = "first",
-    ): Promise<void> {
+    private async openFileDiff(file: ProjectComparisonFile): Promise<void> {
         await openBranchComparisonFileDiff(
             file,
             this.branchName,
@@ -154,15 +144,6 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             this.repository.gitOps,
             this.repository.executor,
         );
-        const changeRanges = await this.getFileChangeRanges(file);
-        const targetHunkIndex =
-            initialHunk === "last" ? Math.max(0, changeRanges.length - 1) : 0;
-        if (initialHunk === "last" && changeRanges.length > 1) {
-            await waitForEditorCommand();
-            await vscode.commands.executeCommand(getNativeDiffNavigationCommand("previous"));
-            await waitForEditorCommand();
-        }
-        this.activeHunkIndex = targetHunkIndex;
         this.setActiveFile(file);
     }
 
@@ -191,81 +172,50 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     syncActiveEditor(editor: vscode.TextEditor | undefined): void {
         const file = this.getFileForUri(editor?.document.uri);
         if (file && file.path !== this.activeFile?.path) {
-            this.activeHunkIndex = 0;
             this.setActiveFile(file);
             return;
         }
         this.updateNavigationContexts();
     }
 
-    async navigateChange(direction: "next" | "previous"): Promise<void> {
-        if (!(await this.canNavigateChange(direction))) return;
-        if (!this.activeFile) {
-            const firstTarget = this.getAdjacentFile(direction);
-            if (firstTarget) await this.openFileDiff(firstTarget);
-            return;
-        }
-
-        const changeRanges = await this.getActiveFileChangeRanges();
-        const targetHunkIndex = getAdjacentHunkIndex(
-            changeRanges,
-            this.activeHunkIndex,
-            direction,
-        );
-        if (targetHunkIndex !== null) {
-            await vscode.commands.executeCommand(getNativeDiffNavigationCommand(direction));
-            await waitForEditorCommand();
-            this.activeHunkIndex = targetHunkIndex;
-            this.updateNavigationContexts();
-            return;
-        }
-
+    async navigateFile(direction: "next" | "previous"): Promise<void> {
         const target = this.getAdjacentFile(direction);
         if (!target) return;
-        await this.openFileDiff(target, direction === "previous" ? "last" : "first");
-    }
-
-    private async canNavigateChange(direction: "next" | "previous"): Promise<boolean> {
-        if (!this.activeFile) return this.files.length > 0;
-        const changeRanges = await this.getActiveFileChangeRanges();
-        const hasAdjacentChange =
-            getAdjacentHunkIndex(changeRanges, this.activeHunkIndex, direction) !== null;
-        return hasAdjacentChange || Boolean(this.getAdjacentFile(direction));
+        await this.openFileDiff(target);
     }
 
     async getDiffNavigationState(
         editor: vscode.TextEditor | null | undefined = undefined,
     ): Promise<DiffNavigationState> {
-        if (editor === null) return { active: false, hasPrevious: false, hasNext: false };
+        if (editor === null) {
+            return {
+                active: false,
+                hasPrevious: false,
+                hasNext: false,
+                currentFile: 0,
+                totalFiles: 0,
+            };
+        }
         const activeFile = editor ? this.getFileForUri(editor.document.uri) : this.activeFile;
-        if (!activeFile) return { active: false, hasPrevious: false, hasNext: false };
-        const activeHunkIndex =
-            activeFile.path === this.activeFile?.path ? this.activeHunkIndex : 0;
-        const changeRanges = await this.getFileChangeRanges(activeFile);
-        const hasPreviousChange =
-            getAdjacentHunkIndex(changeRanges, activeHunkIndex, "previous") !== null;
-        const hasNextChange =
-            getAdjacentHunkIndex(changeRanges, activeHunkIndex, "next") !== null;
+        const currentIndex = activeFile
+            ? this.files.findIndex((file) => file.path === activeFile.path)
+            : -1;
+        if (currentIndex < 0) {
+            return {
+                active: false,
+                hasPrevious: false,
+                hasNext: false,
+                currentFile: 0,
+                totalFiles: 0,
+            };
+        }
         return {
             active: true,
-            hasPrevious: hasPreviousChange || Boolean(this.getAdjacentFile("previous", activeFile)),
-            hasNext: hasNextChange || Boolean(this.getAdjacentFile("next", activeFile)),
+            hasPrevious: currentIndex > 0,
+            hasNext: currentIndex < this.files.length - 1,
+            currentFile: currentIndex + 1,
+            totalFiles: this.files.length,
         };
-    }
-
-    private async getActiveFileChangeRanges(): Promise<DiffHunkRange[]> {
-        if (!this.activeFile) return [];
-        return this.getFileChangeRanges(this.activeFile);
-    }
-
-    private async getFileChangeRanges(file: ProjectComparisonFile): Promise<DiffHunkRange[]> {
-        const safePath = assertRepoRelativePath(file.path);
-        const trimmedRef = this.branchName.trim();
-        if (!trimmedRef) return [];
-        const diff = await this.repository.executor
-            .run(["diff", "--find-renames", "--unified=0", trimmedRef, "--", safePath])
-            .catch(() => "");
-        return parseChangedNewFileHunks(diff);
     }
 
     private getFileForUri(uri: vscode.Uri | undefined): ProjectComparisonFile | null {
@@ -305,14 +255,4 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             title: "Project Branch Comparison",
         });
     }
-}
-
-function waitForEditorCommand(): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, 80));
-}
-
-function getNativeDiffNavigationCommand(direction: "next" | "previous"): string {
-    return direction === "next"
-        ? "workbench.action.compareEditor.nextChange"
-        : "workbench.action.compareEditor.previousChange";
 }

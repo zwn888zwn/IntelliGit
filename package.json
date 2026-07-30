@@ -184,34 +184,16 @@
                 "enablement": "(resourceScheme == intelligit-diff || resourceScheme == intelligit-diff-editable || resourceScheme == git) && intelligit.commitDiffSourceExists"
             },
             {
-                "command": "intelligit.previousDiffChange",
-                "title": "Previous IntelliGit Change",
+                "command": "intelligit.previousDiffFile",
+                "title": "Previous IntelliGit File",
                 "category": "IntelliGit",
-                "icon": "$(arrow-up)"
+                "icon": "$(arrow-left)"
             },
             {
-                "command": "intelligit.previousDiffChangeUnavailable",
-                "title": "Previous IntelliGit Change",
+                "command": "intelligit.nextDiffFile",
+                "title": "Next IntelliGit File",
                 "category": "IntelliGit",
-                "icon": {
-                    "light": "media/icons/arrow-up-muted.svg",
-                    "dark": "media/icons/arrow-up-muted.svg"
-                }
-            },
-            {
-                "command": "intelligit.nextDiffChange",
-                "title": "Next IntelliGit Change",
-                "category": "IntelliGit",
-                "icon": "$(arrow-down)"
-            },
-            {
-                "command": "intelligit.nextDiffChangeUnavailable",
-                "title": "Next IntelliGit Change",
-                "category": "IntelliGit",
-                "icon": {
-                    "light": "media/icons/arrow-down-muted.svg",
-                    "dark": "media/icons/arrow-down-muted.svg"
-                }
+                "icon": "$(arrow-right)"
             },
             {
                 "command": "intelligit.fileDelete",
@@ -415,23 +397,13 @@
             ],
             "editor/title": [
                 {
-                    "command": "intelligit.previousDiffChange",
+                    "command": "intelligit.previousDiffFile",
                     "when": "intelligit.diffNavigation.active && intelligit.diffNavigation.hasPrevious",
                     "group": "navigation@6"
                 },
                 {
-                    "command": "intelligit.previousDiffChangeUnavailable",
-                    "when": "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasPrevious",
-                    "group": "navigation@6"
-                },
-                {
-                    "command": "intelligit.nextDiffChange",
+                    "command": "intelligit.nextDiffFile",
                     "when": "intelligit.diffNavigation.active && intelligit.diffNavigation.hasNext",
-                    "group": "navigation@7"
-                },
-                {
-                    "command": "intelligit.nextDiffChangeUnavailable",
-                    "when": "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasNext",
                     "group": "navigation@7"
                 },
                 {

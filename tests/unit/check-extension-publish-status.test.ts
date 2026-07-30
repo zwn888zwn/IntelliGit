@@ -181,32 +181,20 @@ describe("package editor title contributions", () => {
 
         const navigationItems = packageJson.contributes.menus["editor/title"].filter((item) =>
             [
-                "intelligit.previousDiffChange",
-                "intelligit.previousDiffChangeUnavailable",
-                "intelligit.nextDiffChange",
-                "intelligit.nextDiffChangeUnavailable",
+                "intelligit.previousDiffFile",
+                "intelligit.nextDiffFile",
             ].includes(item.command),
         );
 
         expect(navigationItems).toEqual([
             {
-                command: "intelligit.previousDiffChange",
+                command: "intelligit.previousDiffFile",
                 when: "intelligit.diffNavigation.active && intelligit.diffNavigation.hasPrevious",
                 group: "navigation@6",
             },
             {
-                command: "intelligit.previousDiffChangeUnavailable",
-                when: "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasPrevious",
-                group: "navigation@6",
-            },
-            {
-                command: "intelligit.nextDiffChange",
+                command: "intelligit.nextDiffFile",
                 when: "intelligit.diffNavigation.active && intelligit.diffNavigation.hasNext",
-                group: "navigation@7",
-            },
-            {
-                command: "intelligit.nextDiffChangeUnavailable",
-                when: "intelligit.diffNavigation.active && !intelligit.diffNavigation.hasNext",
                 group: "navigation@7",
             },
         ]);

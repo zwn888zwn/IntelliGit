@@ -29,16 +29,12 @@ import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
-import {
-    hasAdjacentHunk,
-    parseChangedNewFileHunks,
-    type DiffHunkRange,
-} from "../services/diffNavigation";
-
 export interface DiffNavigationState {
     active: boolean;
     hasPrevious: boolean;
     hasNext: boolean;
+    currentFile: number;
+    totalFiles: number;
 }
 
 export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
@@ -52,7 +48,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private folderIconsByName: ThemeFolderIconMap = {};
     private lastFileCount = 0;
     private activeFile: RepoPathRef | null = null;
-    private activeEditorLine: number | null = null;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
     private repository: RepositoryContextInfo | null = null;
@@ -319,19 +314,42 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     async getDiffNavigationState(
         editor: vscode.TextEditor | null | undefined = undefined,
     ): Promise<DiffNavigationState> {
-        if (editor === null) return { active: false, hasPrevious: false, hasNext: false };
+        if (editor === null) {
+            return {
+                active: false,
+                hasPrevious: false,
+                hasNext: false,
+                currentFile: 0,
+                totalFiles: 0,
+            };
+        }
         const activeFile = editor ? this.getTargetForUri(editor.document.uri) : this.activeFile;
-        if (!activeFile) return { active: false, hasPrevious: false, hasNext: false };
-        const hasPreviousFile = Boolean(this.getAdjacentWorkingFileTarget("previous", activeFile));
-        const hasNextFile = Boolean(this.getAdjacentWorkingFileTarget("next", activeFile));
-        const changeRanges = await this.getFileChangeRanges(activeFile);
-        const currentLine = editor?.selection?.active?.line ?? this.activeEditorLine;
-        const hasPreviousChange = hasAdjacentHunk(changeRanges, currentLine, "previous");
-        const hasNextChange = hasAdjacentHunk(changeRanges, currentLine, "next");
+        const files = this.getVisibleWorkingFileTargets();
+        let currentIndex = activeFile
+            ? files.findIndex(
+                  (file) =>
+                      file.repoRoot === activeFile.repoRoot && file.path === activeFile.path,
+              )
+            : -1;
+        if (!activeFile) {
+            return {
+                active: false,
+                hasPrevious: false,
+                hasNext: false,
+                currentFile: 0,
+                totalFiles: 0,
+            };
+        }
+        if (currentIndex < 0) {
+            files.push(activeFile);
+            currentIndex = files.length - 1;
+        }
         return {
             active: true,
-            hasPrevious: hasPreviousChange || hasPreviousFile,
-            hasNext: hasNextChange || hasNextFile,
+            hasPrevious: currentIndex > 0,
+            hasNext: currentIndex < files.length - 1,
+            currentFile: currentIndex + 1,
+            totalFiles: files.length,
         };
     }
 
@@ -365,7 +383,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     syncActiveEditor(editor: vscode.TextEditor | undefined): void {
-        this.activeEditorLine = editor?.selection?.active?.line ?? null;
         const uri = editor?.document.uri;
         if (!uri) {
             this.updateNavigationContexts();
@@ -433,21 +450,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async getActiveFileChangeRanges(): Promise<DiffHunkRange[]> {
-        if (!this.activeFile) return [];
-        return this.getFileChangeRanges(this.activeFile);
-    }
-
-    private async getFileChangeRanges(target: RepoPathRef): Promise<DiffHunkRange[]> {
-        const repository = this.getRepositoryEntry(target.repoRoot);
-        const safePath = assertRepoRelativePath(target.path);
-        const [unstagedDiff, stagedDiff] = await Promise.all([
-            repository.executor.run(["diff", "--unified=0", "--", safePath]).catch(() => ""),
-            repository.executor.run(["diff", "--cached", "--unified=0", "--", safePath]).catch(() => ""),
-        ]);
-        return parseChangedNewFileHunks(`${unstagedDiff}\n${stagedDiff}`);
-    }
-
     async openWorkingFileDiff(target: RepoPathRef): Promise<void> {
         const repository = this.getRepositoryEntry(target.repoRoot);
         const safePath = assertRepoRelativePath(target.path);
@@ -477,12 +479,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         await openStageFileDiff(file, repository.root, repository.gitOps);
     }
 
-    async canNavigateWorkingFileChange(direction: "next" | "previous"): Promise<boolean> {
-        if (!this.activeFile) return false;
-        const changeRanges = await this.getActiveFileChangeRanges();
-        const currentLine = this.activeEditorLine;
-        const hasAdjacentChange = hasAdjacentHunk(changeRanges, currentLine, direction);
-        return hasAdjacentChange || Boolean(this.getAdjacentWorkingFileTarget(direction));
+    async navigateFile(direction: "next" | "previous"): Promise<void> {
+        const target = this.getAdjacentWorkingFileTarget(direction);
+        if (target) await this.openWorkingFileDiff(target);
     }
 
     private groupTargetsByRepository(targets: RepoPathRef[]): Map<string, string[]> {

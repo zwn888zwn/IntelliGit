@@ -67,11 +67,6 @@ import {
     resolveAndValidateWorktreeTarget,
     resolveRemoteBranchTarget,
 } from "./services/worktreeService";
-import {
-    hasAdjacentHunk,
-    parseChangedNewFileHunks,
-    type DiffHunkRange,
-} from "./services/diffNavigation";
 import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -83,6 +78,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         active: boolean;
         hasPrevious: boolean;
         hasNext: boolean;
+        currentFile: number;
+        totalFiles: number;
     };
     type ActiveCommitDiffNavigation = {
         commitHash: string;
@@ -96,6 +93,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         active: false,
         hasPrevious: false,
         hasNext: false,
+        currentFile: 0,
+        totalFiles: 0,
     };
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) {
@@ -136,6 +135,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     const commitInfo = new CommitInfoViewProvider(context.extensionUri);
     const branchStatusBar = new BranchStatusBarController();
+    const diffFileCountStatusBar = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Left,
+        98,
+    );
+    diffFileCountStatusBar.name = "IntelliGit Diff File Position";
+    diffFileCountStatusBar.tooltip = "Current file in IntelliGit diff";
+    diffFileCountStatusBar.hide();
+    context.subscriptions.push(diffFileCountStatusBar);
     const commitPanel = new CommitPanelViewProvider(
         context.extensionUri,
         gitOps,
@@ -194,19 +201,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const nextIndex = direction === "next" ? index + 1 : index - 1;
         return active.files[nextIndex] ?? null;
     };
-    const getCommitDiffChangeRanges = async (
-        active: ActiveCommitDiffNavigation,
-    ): Promise<DiffHunkRange[]> => {
-        const repository = repositoryService
-            .listRepositories()
-            .find((entry) => entry.root === active.repoRoot);
-        if (!repository) return [];
-        const safePath = assertRepoRelativePath(active.filePath);
-        const diff = await repository.executor
-            .run(["diff", "--unified=0", active.parentRef, active.commitHash, "--", safePath])
-            .catch(() => "");
-        return parseChangedNewFileHunks(diff);
-    };
     const getCommitDiffNavigationState = async (
         editor: vscode.TextEditor | null | undefined,
     ): Promise<DiffNavigationState> => {
@@ -216,17 +210,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if (!filePath || filePath !== navigation.filePath) {
             return inactiveDiffNavigationState;
         }
-        const currentLine = editor.selection?.active?.line ?? null;
-        const changeRanges = await getCommitDiffChangeRanges(navigation);
-        const hasPreviousChange =
-            currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, "previous");
-        const hasNextChange =
-            currentLine !== null && hasAdjacentHunk(changeRanges, currentLine, "next");
+        const currentIndex = navigation.files.findIndex((file) => file === navigation.filePath);
+        if (currentIndex < 0) return inactiveDiffNavigationState;
         return {
             active: true,
-            hasPrevious:
-                hasPreviousChange || Boolean(getAdjacentCommitDiffFile("previous", navigation)),
-            hasNext: hasNextChange || Boolean(getAdjacentCommitDiffFile("next", navigation)),
+            hasPrevious: currentIndex > 0,
+            hasNext: currentIndex < navigation.files.length - 1,
+            currentFile: currentIndex + 1,
+            totalFiles: navigation.files.length,
         };
     };
     let diffNavigationContextSeq = 0;
@@ -244,6 +235,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
               ? commitDiffState
               : await commitPanel.getDiffNavigationState(editor);
         if (requestId !== diffNavigationContextSeq) return;
+        if (state.active) {
+            diffFileCountStatusBar.text = `${state.currentFile}/${state.totalFiles} files`;
+            diffFileCountStatusBar.show();
+        } else {
+            diffFileCountStatusBar.hide();
+        }
         await Promise.all([
             vscode.commands.executeCommand(
                 "setContext",
@@ -294,85 +291,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             enabled,
         );
     };
-    const getEditorNavigationState = (): { uri: string; line: number; character: number } | null => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) return null;
-        const active = editor.selection.active;
-        return {
-            uri: editor.document.uri.toString(),
-            line: active.line,
-            character: active.character,
-        };
-    };
-    const waitForEditorCommand = () => new Promise((resolve) => setTimeout(resolve, 80));
-    const isSameEditorPosition = (
-        before: { uri: string; line: number; character: number } | null,
-        after: { uri: string; line: number; character: number } | null,
-    ): boolean =>
-        before?.uri === after?.uri &&
-        before?.line === after?.line &&
-        before?.character === after?.character;
-    const didNativeDiffNavigationWrap = (
-        direction: "next" | "previous",
-        before: { uri: string; line: number; character: number } | null,
-        after: { uri: string; line: number; character: number } | null,
-    ): boolean => {
-        if (!before || !after || before.uri !== after.uri) return false;
-        return direction === "next" ? after.line < before.line : after.line > before.line;
-    };
-    const restoreEditorNavigationState = (
-        state: { uri: string; line: number; character: number } | null,
-    ): void => {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor || !state || editor.document.uri.toString() !== state.uri) return;
-        const position = new vscode.Position(state.line, state.character);
-        editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(
-            new vscode.Range(position, position),
-            vscode.TextEditorRevealType.InCenterIfOutsideViewport,
-        );
-    };
-    const navigateWorkingTreeDiff = async (direction: "next" | "previous"): Promise<void> => {
-        if (!(await commitPanel.canNavigateWorkingFileChange(direction))) return;
-        const command =
-            direction === "next"
-                ? "workbench.action.compareEditor.nextChange"
-                : "workbench.action.compareEditor.previousChange";
-        const before = getEditorNavigationState();
-        await vscode.commands.executeCommand(command);
-        await waitForEditorCommand();
-        commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
-        const after = getEditorNavigationState();
-        if (
-            !isSameEditorPosition(before, after) &&
-            !didNativeDiffNavigationWrap(direction, before, after)
-        ) {
-            return;
-        }
-
-        const target = commitPanel.getAdjacentWorkingFileTarget(direction);
-        if (!target) {
-            restoreEditorNavigationState(before);
-            commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
-            return;
-        }
-        await commitPanel.openWorkingFileDiff(target);
-        if (direction === "previous") {
-            await waitForEditorCommand();
-            await vscode.commands.executeCommand("workbench.action.compareEditor.previousChange");
-            await waitForEditorCommand();
-            commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
-        } else {
-            await waitForEditorCommand();
-            await vscode.commands.executeCommand("workbench.action.compareEditor.nextChange");
-            await waitForEditorCommand();
-            commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
-        }
-    };
     const openCommitDiffNavigationFile = async (
         filePath: string,
         navigation: ActiveCommitDiffNavigation,
-        initialHunk: "first" | "last" = "first",
     ): Promise<void> => {
         const repository =
             repositoryService.listRepositories().find((entry) => entry.root === navigation.repoRoot) ??
@@ -397,48 +318,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             parentDisplayHash: result.parentDisplayHash,
         };
         registerCommitDiffNavigation(nextNavigation, [result.leftUri, result.rightUri]);
-        if (initialHunk === "last") {
-            await waitForEditorCommand();
-            await vscode.commands.executeCommand("workbench.action.compareEditor.previousChange");
-            await waitForEditorCommand();
-        } else {
-            await waitForEditorCommand();
-            await vscode.commands.executeCommand("workbench.action.compareEditor.nextChange");
-            await waitForEditorCommand();
-        }
     };
     const navigateCommitFileDiff = async (direction: "next" | "previous"): Promise<void> => {
         const editor = vscode.window.activeTextEditor;
         const navigation = getCommitDiffNavigationForEditor(editor);
         const state = await getCommitDiffNavigationState(editor);
         if (!state.active || !navigation) return;
-        const command =
-            direction === "next"
-                ? "workbench.action.compareEditor.nextChange"
-                : "workbench.action.compareEditor.previousChange";
-        const before = getEditorNavigationState();
-        await vscode.commands.executeCommand(command);
-        await waitForEditorCommand();
-        const after = getEditorNavigationState();
-        if (
-            !isSameEditorPosition(before, after) &&
-            !didNativeDiffNavigationWrap(direction, before, after)
-        ) {
-            return;
-        }
-
         const target = getAdjacentCommitDiffFile(direction, navigation);
-        if (!target) {
-            restoreEditorNavigationState(before);
-            return;
-        }
-        await openCommitDiffNavigationFile(
-            target,
-            navigation,
-            direction === "previous" ? "last" : "first",
-        );
+        if (target) await openCommitDiffNavigationFile(target, navigation);
     };
-    const navigateIntelliGitDiff = async (direction: "next" | "previous"): Promise<void> => {
+    const navigateIntelliGitDiffFile = async (direction: "next" | "previous"): Promise<void> => {
         const projectPanel = ProjectBranchComparisonPanel.getActivePanel();
         const editor = vscode.window.activeTextEditor ?? null;
         const projectState = await projectPanel?.getDiffNavigationState(editor);
@@ -446,11 +335,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             ? inactiveDiffNavigationState
             : await getCommitDiffNavigationState(editor);
         if (projectPanel && projectState?.active) {
-            await projectPanel.navigateChange(direction);
+            await projectPanel.navigateFile(direction);
         } else if (commitDiffState.active) {
             await navigateCommitFileDiff(direction);
         } else {
-            await navigateWorkingTreeDiff(direction);
+            await commitPanel.navigateFile(direction);
         }
         await updateIntelliGitDiffNavigationContext();
     };
@@ -2017,17 +1906,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand("intelligit.fileRefreshing", () => {
             // No-op: visual-only command shown while refreshing (disabled via enablement).
         }),
-        vscode.commands.registerCommand("intelligit.previousDiffChange", async () => {
-            await navigateIntelliGitDiff("previous");
+        vscode.commands.registerCommand("intelligit.previousDiffFile", async () => {
+            await navigateIntelliGitDiffFile("previous");
         }),
-        vscode.commands.registerCommand("intelligit.previousDiffChangeUnavailable", () => {
-            // Visible no-op placeholder. VS Code hides commands disabled via enablement in editor/title.
-        }),
-        vscode.commands.registerCommand("intelligit.nextDiffChange", async () => {
-            await navigateIntelliGitDiff("next");
-        }),
-        vscode.commands.registerCommand("intelligit.nextDiffChangeUnavailable", () => {
-            // Visible no-op placeholder. VS Code hides commands disabled via enablement in editor/title.
+        vscode.commands.registerCommand("intelligit.nextDiffFile", async () => {
+            await navigateIntelliGitDiffFile("next");
         }),
     );
 

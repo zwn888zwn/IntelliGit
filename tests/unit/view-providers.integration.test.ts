@@ -1540,7 +1540,11 @@ describe("view providers integration", () => {
         } as unknown as Parameters<typeof provider.syncActiveEditor>[0]);
         await new Promise((resolve) => setTimeout(resolve, 0));
 
-        await expect(provider.getDiffNavigationState()).resolves.toMatchObject({ active: true });
+        await expect(provider.getDiffNavigationState()).resolves.toMatchObject({
+            active: true,
+            currentFile: 1,
+            totalFiles: 1,
+        });
         executeCommand.mockClear();
 
         provider.syncActiveEditor(undefined);
