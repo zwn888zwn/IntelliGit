@@ -52,6 +52,8 @@ export const COMMIT_ACTION_VALUES = [
     "interactiveRebaseFromHere",
     "newBranch",
     "newTag",
+    "pushTag",
+    "deleteTag",
 ] as const;
 
 export type BranchAction = (typeof BRANCH_ACTION_VALUES)[number];

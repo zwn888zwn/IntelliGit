@@ -301,6 +301,147 @@ export async function handleCommitContextAction(params: {
             await refreshAll();
             return;
         }
+        case "pushTag": {
+            const tags = (await executor.run(["tag", "--points-at", validatedHash]))
+                .split("\n")
+                .map((tag) => tag.trim())
+                .filter(Boolean);
+            if (tags.length === 0) {
+                vscode.window.showErrorMessage(`No tag found at commit ${short}.`);
+                return;
+            }
+
+            const tag =
+                tags.length === 1
+                    ? tags[0]
+                    : await vscode.window.showQuickPick(tags, {
+                          placeHolder: "Select a tag to push",
+                      });
+            if (!tag) return;
+
+            const remotes = (await executor.run(["remote"]))
+                .split("\n")
+                .map((remote) => remote.trim())
+                .filter(Boolean);
+            if (remotes.length === 0) {
+                vscode.window.showErrorMessage("No Git remote configured for this repository.");
+                return;
+            }
+
+            const remote =
+                remotes.length === 1
+                    ? remotes[0]
+                    : await vscode.window.showQuickPick(remotes, {
+                          placeHolder: `Select a remote for tag ${tag}`,
+                      });
+            if (!remote) return;
+
+            try {
+                await runWithNotificationProgress(`Pushing tag ${tag}...`, async () => {
+                    await executor.runWithStderr(["push", remote, `refs/tags/${tag}`]);
+                });
+                vscode.window.showInformationMessage(`Pushed tag ${tag} to ${remote}.`);
+            } catch (err) {
+                const message = getErrorMessage(err);
+                vscode.window.showErrorMessage(`Failed to push tag ${tag}: ${message}`);
+            }
+            await refreshAll();
+            return;
+        }
+        case "deleteTag": {
+            const tags = (await executor.run(["tag", "--points-at", validatedHash]))
+                .split("\n")
+                .map((tag) => tag.trim())
+                .filter(Boolean);
+            if (tags.length === 0) {
+                vscode.window.showErrorMessage(`No tag found at commit ${short}.`);
+                return;
+            }
+
+            const tag =
+                tags.length === 1
+                    ? tags[0]
+                    : await vscode.window.showQuickPick(tags, {
+                          placeHolder: "Select a tag to delete",
+                      });
+            if (!tag) return;
+
+            const target = await vscode.window.showQuickPick(
+                [
+                    {
+                        label: "Delete Local Tag",
+                        description: `Keep ${tag} on remotes`,
+                        mode: "local" as const,
+                    },
+                    {
+                        label: "Delete Remote Tag",
+                        description: `Keep the local ${tag} tag`,
+                        mode: "remote" as const,
+                    },
+                    {
+                        label: "Delete Local and Remote Tag",
+                        description: `Delete ${tag} locally and from a remote`,
+                        mode: "both" as const,
+                    },
+                ],
+                { placeHolder: `Choose where to delete tag ${tag}` },
+            );
+            if (!target) return;
+
+            let remote: string | undefined;
+            if (target.mode !== "local") {
+                const remotes = (await executor.run(["remote"]))
+                    .split("\n")
+                    .map((name) => name.trim())
+                    .filter(Boolean);
+                if (remotes.length === 0) {
+                    vscode.window.showErrorMessage("No Git remote configured for this repository.");
+                    return;
+                }
+                remote =
+                    remotes.length === 1
+                        ? remotes[0]
+                        : await vscode.window.showQuickPick(remotes, {
+                              placeHolder: `Select a remote for tag ${tag}`,
+                          });
+                if (!remote) return;
+            }
+
+            const location =
+                target.mode === "local"
+                    ? "locally"
+                    : target.mode === "remote"
+                      ? `from ${remote}`
+                      : `locally and from ${remote}`;
+            const confirm = await vscode.window.showWarningMessage(
+                `Delete tag '${tag}' ${location}?`,
+                { modal: true },
+                "Delete Tag",
+            );
+            if (confirm !== "Delete Tag") return;
+
+            let remoteDeleted = false;
+            try {
+                await runWithNotificationProgress(`Deleting tag ${tag}...`, async () => {
+                    if (remote) {
+                        await executor.runWithStderr(["push", remote, `:refs/tags/${tag}`]);
+                        remoteDeleted = true;
+                    }
+                    if (target.mode !== "remote") {
+                        await executor.run(["tag", "-d", tag]);
+                    }
+                });
+                vscode.window.showInformationMessage(`Deleted tag ${tag} ${location}.`);
+            } catch (err) {
+                const message = getErrorMessage(err);
+                const partial = remoteDeleted
+                    ? `Tag ${tag} was deleted from ${remote}, but local deletion failed: `
+                    : `Failed to delete tag ${tag}: `;
+                vscode.window.showErrorMessage(`${partial}${message}`);
+            }
+            await refreshAll();
+            return;
+        }
         case "undoCommit": {
             if (!(await isCommitUnpushed(validatedHash, gitOps))) {
                 vscode.window.showErrorMessage(

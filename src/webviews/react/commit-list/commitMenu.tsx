@@ -58,6 +58,10 @@ export function getCommitMenuItems(commit: Commit, isUnpushed: boolean): CommitM
     items.push({ separator: true, label: "", action: "sep-create" });
     items.push({ label: "New Branch...", action: "newBranch" });
     items.push({ label: "New Tag...", action: "newTag" });
+    if (commit.refs.some((ref) => ref.startsWith("tag:"))) {
+        items.push({ label: "Push Tag...", action: "pushTag", icon: iconPush() });
+        items.push({ label: "Delete Tag...", action: "deleteTag" });
+    }
 
     return items;
 }
