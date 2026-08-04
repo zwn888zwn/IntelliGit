@@ -853,10 +853,19 @@ export async function openShelvedFileDiff(
     const stashRef = `stash@{${index}}`;
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
 
-    const [baseContent, stashedContent] = await Promise.all([
-        gitOps.getFileContentAtRef(safePath, baseRef).catch(() => ""),
-        gitOps.getFileContentAtRef(safePath, stashRef).catch(() => ""),
-    ]);
+    let baseExists = true;
+    const baseContent = await gitOps.getFileContentAtRef(safePath, baseRef).catch(() => {
+        baseExists = false;
+        return "";
+    });
+    let stashedContent: string;
+    try {
+        stashedContent = await gitOps.getFileContentAtRef(safePath, stashRef);
+    } catch {
+        stashedContent = baseExists
+            ? ""
+            : await gitOps.getFileContentAtRef(safePath, `${stashRef}^3`).catch(() => "");
+    }
 
     const baseSnapshot = makeTextDiffSnapshot(safePath, baseContent, baseRef);
     const stashSnapshot = makeTextDiffSnapshot(safePath, stashedContent, stashRef);

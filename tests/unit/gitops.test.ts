@@ -1143,11 +1143,17 @@ describe("GitOps", () => {
         it("parses shelved file status and numstat", async () => {
             const executor = {
                 run: vi.fn(async (args: string[]) => {
-                    if (args.join(" ") === "stash show --name-status stash@{1}") {
-                        return "M\tsrc/a.ts\nR100\tsrc/old.ts\tsrc/new.ts\n";
+                    if (
+                        args.join(" ") ===
+                        "stash show --include-untracked --name-status stash@{1}"
+                    ) {
+                        return "M\tsrc/a.ts\nR100\tsrc/old.ts\tsrc/new.ts\nA\tsrc/new-file.ts\n";
                     }
-                    if (args.join(" ") === "stash show --numstat stash@{1}") {
-                        return "3\t1\tsrc/a.ts\n2\t0\tsrc/new.ts\n";
+                    if (
+                        args.join(" ") ===
+                        "stash show --include-untracked --numstat stash@{1}"
+                    ) {
+                        return "3\t1\tsrc/a.ts\n2\t0\tsrc/new.ts\n4\t0\tsrc/new-file.ts\n";
                     }
                     return "";
                 }),
@@ -1168,6 +1174,15 @@ describe("GitOps", () => {
                 {
                     repoId: ".",
                     repoRoot: "",
+                    path: "src/new-file.ts",
+                    status: "A",
+                    staged: false,
+                    additions: 4,
+                    deletions: 0,
+                },
+                {
+                    repoId: ".",
+                    repoRoot: "",
                     path: "src/new.ts",
                     status: "R",
                     staged: false,
@@ -1176,10 +1191,10 @@ describe("GitOps", () => {
                 },
             ]);
             expect((executor.run as ReturnType<typeof vi.fn>).mock.calls).toContainEqual([
-                ["stash", "show", "--name-status", "stash@{1}"],
+                ["stash", "show", "--include-untracked", "--name-status", "stash@{1}"],
             ]);
             expect((executor.run as ReturnType<typeof vi.fn>).mock.calls).toContainEqual([
-                ["stash", "show", "--numstat", "stash@{1}"],
+                ["stash", "show", "--include-untracked", "--numstat", "stash@{1}"],
             ]);
         });
 
@@ -1209,10 +1224,16 @@ describe("GitOps", () => {
             const quotedPath = '"docs/\\346\\226\\260\\346\\226\\207\\344\\273\\266.txt"';
             const executor = {
                 run: vi.fn(async (args: string[]) => {
-                    if (args.join(" ") === "stash show --name-status stash@{0}") {
+                    if (
+                        args.join(" ") ===
+                        "stash show --include-untracked --name-status stash@{0}"
+                    ) {
                         return `A\t${quotedPath}\n`;
                     }
-                    if (args.join(" ") === "stash show --numstat stash@{0}") {
+                    if (
+                        args.join(" ") ===
+                        "stash show --include-untracked --numstat stash@{0}"
+                    ) {
                         return `2\t0\t${quotedPath}\n`;
                     }
                     return "";

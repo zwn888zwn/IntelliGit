@@ -1003,7 +1003,13 @@ export class GitOps {
         };
 
         try {
-            const nameStatus = await this.executor.run(["stash", "show", "--name-status", ref]);
+            const nameStatus = await this.executor.run([
+                "stash",
+                "show",
+                "--include-untracked",
+                "--name-status",
+                ref,
+            ]);
             for (const line of nameStatus.trim().split("\n")) {
                 if (!line.trim()) continue;
                 const parts = line.split("\t");
@@ -1023,7 +1029,13 @@ export class GitOps {
         }
 
         try {
-            const numstat = await this.executor.run(["stash", "show", "--numstat", ref]);
+            const numstat = await this.executor.run([
+                "stash",
+                "show",
+                "--include-untracked",
+                "--numstat",
+                ref,
+            ]);
             for (const line of numstat.trim().split("\n")) {
                 if (!line.trim()) continue;
                 const parts = line.split("\t");
