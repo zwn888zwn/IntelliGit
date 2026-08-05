@@ -1299,18 +1299,21 @@ describe("MergeConflictSessionApp integration", () => {
                             sourceBranch: "feature",
                             targetBranch: "main",
                             selectedPath: "src/b.ts",
+                            simpleConflictsResolved: false,
                             files: [
                                 {
                                     path: "src/a.ts",
                                     code: "UU",
                                     ours: "Modified",
                                     theirs: "Modified",
+                                    resolved: false,
                                 },
                                 {
                                     path: "src/b.ts",
                                     code: "UU",
                                     ours: "Modified",
                                     theirs: "Modified",
+                                    resolved: false,
                                 },
                             ],
                         },
@@ -1322,7 +1325,7 @@ describe("MergeConflictSessionApp integration", () => {
 
         fireClick(
             Array.from(document.querySelectorAll("button")).find((button) =>
-                button.textContent?.includes("Merge"),
+                button.textContent?.includes("Resolve Manually"),
             ) ?? null,
         );
         expect(vscode.postMessage).toHaveBeenCalledWith({
@@ -1340,12 +1343,14 @@ describe("MergeConflictSessionApp integration", () => {
                             sourceBranch: "feature",
                             targetBranch: "main",
                             selectedPath: "src/a.ts",
+                            simpleConflictsResolved: false,
                             files: [
                                 {
                                     path: "src/a.ts",
                                     code: "UU",
                                     ours: "Modified",
                                     theirs: "Modified",
+                                    resolved: false,
                                 },
                             ],
                         },
@@ -1357,12 +1362,79 @@ describe("MergeConflictSessionApp integration", () => {
 
         fireClick(
             Array.from(document.querySelectorAll("button")).find((button) =>
-                button.textContent?.includes("Merge"),
+                button.textContent?.includes("Resolve Manually"),
             ) ?? null,
         );
         expect(vscode.postMessage).toHaveBeenCalledWith({
             type: "openMerge",
             filePath: "src/a.ts",
         });
+    });
+
+    it("shows resolved groups, conflict counts, and explicit finish controls", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/merge-conflicts-session/MergeConflictSessionApp");
+        await flush();
+        vscode.postMessage.mockClear();
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "setSessionData",
+                        data: {
+                            sourceBranch: "feature",
+                            targetBranch: "main",
+                            selectedPath: "src/auth.ts",
+                            simpleConflictsResolved: true,
+                            files: [
+                                {
+                                    path: "src/auth.ts",
+                                    code: "UU",
+                                    ours: "Modified",
+                                    theirs: "Modified",
+                                    resolved: false,
+                                    resolvedConflictCount: 8,
+                                    totalConflictCount: 9,
+                                },
+                                {
+                                    path: "go.mod",
+                                    code: "UU",
+                                    ours: "Modified",
+                                    theirs: "Modified",
+                                    resolved: true,
+                                    resolvedConflictCount: 10,
+                                    totalConflictCount: 10,
+                                },
+                            ],
+                        },
+                    },
+                }),
+            );
+        });
+        await flush();
+
+        expect(document.body.textContent).toContain(
+            "18 conflicts resolved. 1 conflict in 1 file still require attention",
+        );
+        expect(document.body.textContent).toContain("Resolved 1 file");
+        const finishButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Accept and Finish"),
+        ) as HTMLButtonElement;
+        const simpleButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Resolve All Simple Conflicts"),
+        ) as HTMLButtonElement;
+        expect(finishButton.disabled).toBe(true);
+        expect(simpleButton.disabled).toBe(true);
+
+        fireClick(
+            Array.from(document.querySelectorAll("button")).find((button) =>
+                button.textContent?.includes("Close"),
+            ) ?? null,
+        );
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "close" });
     });
 });

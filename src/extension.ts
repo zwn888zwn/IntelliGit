@@ -504,6 +504,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         repository: RepositoryEntry,
         resolvedPath?: string,
         refreshSession: boolean = true,
+        finishWhenReady: boolean = true,
     ): Promise<void> => {
         await ensureRepositoryContextActive(repository);
         await refreshService.refreshConflictUi();
@@ -513,6 +514,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 repoRoot: repository.root,
             });
         }
+        if (!finishWhenReady) return;
         if (await continueRebaseIfReady(repository)) return;
         await finalizeMergeIfReady(repository);
     };
@@ -542,6 +544,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             targetBranch?: string;
         },
         repository: RepositoryEntry = requireCurrentRepository(),
+        deferFinish: boolean = false,
+        applyNonConflicting: boolean = false,
     ): Promise<void> => {
         const safePath = assertRepoRelativePath(filePath);
         await ensureRepositoryContextActive(repository);
@@ -571,9 +575,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             {
                 oursSourceLabel: targetBranch,
                 theirsSourceLabel: labels?.sourceBranch,
+                applyNonConflicting,
             },
             async () => {
-                await handleConflictStateChanged(repository, safePath);
+                await handleConflictStateChanged(repository, safePath, true, !deferFinish);
             },
         );
     };
@@ -591,11 +596,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             repository.gitOps,
             labels,
             {
-                onOpenMergeConflict: async (filePath) => {
-                    await openMergeConflictForFile(filePath, labels, repository);
+                onOpenMergeConflict: async (filePath, applyNonConflicting) => {
+                    await openMergeConflictForFile(
+                        filePath,
+                        labels,
+                        repository,
+                        true,
+                        applyNonConflicting,
+                    );
                 },
                 onConflictStateChanged: async (resolvedPath) => {
-                    await handleConflictStateChanged(repository, resolvedPath, false);
+                    await handleConflictStateChanged(repository, resolvedPath, false, false);
+                },
+                onFinish: async () => {
+                    if (await continueRebaseIfReady(repository)) return true;
+                    return finalizeMergeIfReady(repository);
+                },
+                onMergeAborted: async () => {
+                    await vscode.commands.executeCommand("intelligit.refresh");
                 },
             },
             { repoRoot: repository.root },

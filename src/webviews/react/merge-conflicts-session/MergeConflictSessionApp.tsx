@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getVsCodeApi as getSharedVsCodeApi } from "../shared/vscodeApi";
-import type { MergeConflictFile } from "../../../types";
-import type { InboundMessage, OutboundMessage } from "./types";
+import type { InboundMessage, MergeConflictSessionFile, OutboundMessage } from "./types";
 import "./merge-conflicts-session.css";
 
 function getVsCodeApi() {
@@ -24,9 +23,9 @@ function fileName(filePath: string): string {
 function App() {
     const [sourceBranch, setSourceBranch] = useState("incoming branch");
     const [targetBranch, setTargetBranch] = useState("current branch");
-    const [files, setFiles] = useState<MergeConflictFile[]>([]);
+    const [files, setFiles] = useState<MergeConflictSessionFile[]>([]);
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
-    const [groupByDirectory, setGroupByDirectory] = useState(false);
+    const [simpleConflictsResolved, setSimpleConflictsResolved] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -37,17 +36,20 @@ function App() {
                 setSourceBranch(next.sourceBranch);
                 setTargetBranch(next.targetBranch);
                 setFiles(next.files);
+                setSimpleConflictsResolved(next.simpleConflictsResolved);
                 setError(null);
                 setSelectedPath((prev) => {
                     if (
                         next.selectedPath &&
-                        next.files.some((file) => file.path === next.selectedPath)
+                        next.files.some(
+                            (file) => file.path === next.selectedPath && !file.resolved,
+                        )
                     ) {
                         return next.selectedPath;
                     }
-                    return prev && next.files.some((file) => file.path === prev)
+                    return prev && next.files.some((file) => file.path === prev && !file.resolved)
                         ? prev
-                        : (next.files[0]?.path ?? null);
+                        : (next.files.find((file) => !file.resolved)?.path ?? null);
                 });
                 return;
             }
@@ -61,67 +63,74 @@ function App() {
         return () => window.removeEventListener("message", handler);
     }, []);
 
+    const unresolvedFiles = useMemo(() => files.filter((file) => !file.resolved), [files]);
+    const resolvedFiles = useMemo(() => files.filter((file) => file.resolved), [files]);
     const selectedFile = useMemo(
-        () => files.find((file) => file.path === selectedPath) ?? null,
-        [files, selectedPath],
+        () => unresolvedFiles.find((file) => file.path === selectedPath) ?? null,
+        [unresolvedFiles, selectedPath],
     );
-
-    const groupedFiles = useMemo(() => {
-        const groups = new Map<string, MergeConflictFile[]>();
-        for (const file of files) {
-            const dir = directoryName(file.path);
-            const list = groups.get(dir);
-            if (list) {
-                list.push(file);
-            } else {
-                groups.set(dir, [file]);
-            }
-        }
-        return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    }, [files]);
+    const conflictSummary = useMemo(
+        () =>
+            files.reduce(
+                (summary, file) => {
+                    const total = file.totalConflictCount ?? 0;
+                    const resolved = file.resolved ? total : (file.resolvedConflictCount ?? 0);
+                    summary.resolved += resolved;
+                    summary.unresolved += Math.max(0, total - resolved);
+                    return summary;
+                },
+                { resolved: 0, unresolved: 0 },
+            ),
+        [files],
+    );
 
     const openMerge = useCallback((filePath: string) => {
         getVsCodeApi().postMessage({ type: "openMerge", filePath });
     }, []);
 
-    const acceptSelected = useCallback(
-        (side: "acceptYours" | "acceptTheirs") => {
-            if (!selectedFile) return;
-            getVsCodeApi().postMessage({ type: side, filePath: selectedFile.path });
-        },
-        [selectedFile],
-    );
-
-    const refresh = useCallback(() => {
-        getVsCodeApi().postMessage({ type: "refresh" });
+    const resolveAllSimple = useCallback(() => {
+        getVsCodeApi().postMessage({ type: "resolveAllSimple" });
     }, []);
 
     const close = useCallback(() => {
         getVsCodeApi().postMessage({ type: "close" });
     }, []);
 
-    const renderRow = (file: MergeConflictFile) => {
+    const acceptAndFinish = useCallback(() => {
+        getVsCodeApi().postMessage({ type: "acceptAndFinish" });
+    }, []);
+
+    const renderRow = (file: MergeConflictSessionFile) => {
         const selected = selectedPath === file.path;
+        const showCount = simpleConflictsResolved && file.totalConflictCount !== undefined;
         return (
             <tr
                 key={file.path}
-                className={selected ? "row selected" : "row"}
+                className={`row ${file.resolved ? "resolved-file" : "unresolved-file"}${selected ? " selected" : ""}`}
                 tabIndex={0}
                 aria-selected={selected}
-                onClick={() => setSelectedPath(file.path)}
-                onDoubleClick={() => openMerge(file.path)}
+                onClick={() => !file.resolved && setSelectedPath(file.path)}
+                onDoubleClick={() => !file.resolved && openMerge(file.path)}
                 onKeyDown={(event) => {
                     if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setSelectedPath(file.path);
+                        if (!file.resolved) setSelectedPath(file.path);
                     }
-                    if (event.key === "Enter") {
+                    if (event.key === "Enter" && !file.resolved) {
                         openMerge(file.path);
                     }
                 }}
             >
                 <td className="name-cell" title={file.path}>
+                    <span className="file-icon" aria-hidden="true">
+                        {file.resolved ? "✓" : "◆"}
+                    </span>
                     <span className="file-name">{fileName(file.path)}</span>
+                    {showCount ? (
+                        <span className={file.resolved ? "count resolved" : "count"}>
+                            {file.resolvedConflictCount}/{file.totalConflictCount}
+                        </span>
+                    ) : null}
                     <span className="file-path">{directoryName(file.path)}</span>
                 </td>
                 <td>{file.ours}</td>
@@ -138,75 +147,83 @@ function App() {
                 <strong>{targetBranch}</strong>
             </div>
 
-            <div className="session-main">
-                <div className="table-wrap">
-                    <div className="table-meta">
-                        {files.length} unresolved file{files.length === 1 ? "" : "s"}
+            <div className="session-toolbar">
+                <button
+                    className="simple-btn"
+                    disabled={simpleConflictsResolved || unresolvedFiles.length === 0}
+                    onClick={resolveAllSimple}
+                >
+                    ✣ Resolve All Simple Conflicts
+                </button>
+                {simpleConflictsResolved ? (
+                    <div className="resolution-summary">
+                        {conflictSummary.resolved} conflicts resolved. {conflictSummary.unresolved}{" "}
+                        conflict{conflictSummary.unresolved === 1 ? "" : "s"} in{" "}
+                        {unresolvedFiles.length} file
+                        {unresolvedFiles.length === 1 ? "" : "s"} still require attention
                     </div>
-                    {error ? <div className="error">{error}</div> : null}
-                    <table className="conflict-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Yours ({targetBranch})</th>
-                                <th>Theirs ({sourceBranch})</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {groupByDirectory
-                                ? groupedFiles.map(([dir, items]) => (
-                                      <React.Fragment key={dir}>
-                                          <tr className="group-row">
-                                              <td colSpan={3}>{dir}</td>
-                                          </tr>
-                                          {items.map(renderRow)}
-                                      </React.Fragment>
-                                  ))
-                                : files.map(renderRow)}
-                        </tbody>
-                    </table>
-                </div>
+                ) : null}
+                <button
+                    className="view-btn"
+                    title="Refresh"
+                    onClick={() => getVsCodeApi().postMessage({ type: "refresh" })}
+                >
+                    ◉
+                </button>
+            </div>
 
-                <div className="action-column">
-                    <button
-                        className="action-btn"
-                        disabled={!selectedFile}
-                        onClick={() => acceptSelected("acceptYours")}
-                    >
-                        Accept Yours
+            <div className="table-wrap">
+                {error ? <div className="error">{error}</div> : null}
+                <table className="conflict-table">
+                    <thead>
+                        <tr>
+                            <th />
+                            <th>Yours ({targetBranch})</th>
+                            <th>Theirs ({sourceBranch})</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr className="group-row unresolved-group">
+                            <td colSpan={3}>
+                                ⌄ ✕ Unresolved {unresolvedFiles.length} file
+                                {unresolvedFiles.length === 1 ? "" : "s"}
+                            </td>
+                        </tr>
+                        {unresolvedFiles.map(renderRow)}
+                        {resolvedFiles.length > 0 ? (
+                            <tr className="group-row resolved-group">
+                                <td colSpan={3}>
+                                    ⌄ ✓ Resolved {resolvedFiles.length} file
+                                    {resolvedFiles.length === 1 ? "" : "s"}
+                                </td>
+                            </tr>
+                        ) : null}
+                        {resolvedFiles.map(renderRow)}
+                    </tbody>
+                </table>
+            </div>
+
+            <div className="session-footer">
+                <span />
+                <div className="footer-actions">
+                    <button className="close-btn" onClick={close}>
+                        Close
                     </button>
                     <button
                         className="action-btn"
-                        disabled={!selectedFile}
-                        onClick={() => acceptSelected("acceptTheirs")}
+                        disabled={unresolvedFiles.length > 0}
+                        onClick={acceptAndFinish}
                     >
-                        Accept Theirs
+                        Accept and Finish
                     </button>
                     <button
                         className="action-btn primary"
                         disabled={!selectedFile}
                         onClick={() => selectedFile && openMerge(selectedFile.path)}
                     >
-                        Merge...
-                    </button>
-                    <button className="action-btn" onClick={refresh}>
-                        Refresh
+                        Resolve Manually
                     </button>
                 </div>
-            </div>
-
-            <div className="session-footer">
-                <label className="group-toggle">
-                    <input
-                        type="checkbox"
-                        checked={groupByDirectory}
-                        onChange={(event) => setGroupByDirectory(event.target.checked)}
-                    />
-                    Group files by directory
-                </label>
-                <button className="close-btn" onClick={close}>
-                    Close
-                </button>
             </div>
         </div>
     );

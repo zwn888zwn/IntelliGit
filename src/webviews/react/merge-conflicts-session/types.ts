@@ -1,10 +1,17 @@
 import type { MergeConflictFile } from "../../../types";
 
+export interface MergeConflictSessionFile extends MergeConflictFile {
+    resolved: boolean;
+    resolvedConflictCount?: number;
+    totalConflictCount?: number;
+}
+
 export interface MergeConflictSessionData {
     sourceBranch: string;
     targetBranch: string;
-    files: MergeConflictFile[];
+    files: MergeConflictSessionFile[];
     selectedPath?: string | null;
+    simpleConflictsResolved: boolean;
 }
 
 export type OutboundMessage =
@@ -13,6 +20,8 @@ export type OutboundMessage =
     | { type: "openMerge"; filePath: string }
     | { type: "acceptYours"; filePath: string }
     | { type: "acceptTheirs"; filePath: string }
+    | { type: "resolveAllSimple" }
+    | { type: "acceptAndFinish" }
     | { type: "close" };
 
 export type InboundMessage =

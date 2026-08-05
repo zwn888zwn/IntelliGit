@@ -95,6 +95,44 @@ describe("reducer", () => {
         expect(state.completedEdits[1]).toBeUndefined();
     });
 
+    it("settles delete/modify conflicts when the non-empty side is accepted", () => {
+        const conflict = makeConflict({ oursLines: [], theirsLines: ["modified"] });
+        const state = reducer(
+            { ...initial, data: makeData([conflict]) },
+            { type: "RESOLVE_HUNK", id: conflict.id, resolution: "theirs" },
+        );
+
+        expect(state.dismissals[conflict.id]).toEqual({ ours: true });
+        expect(
+            allResolved(
+                [conflict],
+                state.resolutions,
+                state.edits,
+                state.dismissals,
+                state.completedEdits,
+            ),
+        ).toBe(true);
+    });
+
+    it("settles modify/delete conflicts when the non-empty side is accepted", () => {
+        const conflict = makeConflict({ oursLines: ["modified"], theirsLines: [] });
+        const state = reducer(
+            { ...initial, data: makeData([conflict]) },
+            { type: "RESOLVE_HUNK", id: conflict.id, resolution: "ours" },
+        );
+
+        expect(state.dismissals[conflict.id]).toEqual({ theirs: true });
+        expect(
+            allResolved(
+                [conflict],
+                state.resolutions,
+                state.edits,
+                state.dismissals,
+                state.completedEdits,
+            ),
+        ).toBe(true);
+    });
+
     it("EDIT_HUNK_RESULT stores manual result lines", () => {
         const state = reducer(initial, {
             type: "EDIT_HUNK_RESULT",

@@ -1,88 +1,90 @@
-
 .session-root {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    padding: 10px;
+    padding: 18px;
     color: var(--vscode-foreground);
     background: var(--vscode-editor-background);
-    gap: 8px;
+    gap: 14px;
 }
 
 .session-header {
-    font-size: 14px;
+    font-size: 17px;
     font-weight: 700;
 }
 
 .session-subtitle {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--vscode-descriptionForeground);
 }
 
-.session-main {
-    display: grid;
-    grid-template-columns: 1fr 132px;
-    gap: 8px;
-    min-height: 0;
-    flex: 1;
+.session-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.simple-btn,
+.view-btn,
+.action-btn,
+.close-btn {
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--vscode-button-border, var(--vscode-widget-border, transparent));
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    cursor: pointer;
+}
+
+.simple-btn:hover,
+.view-btn:hover,
+.action-btn:hover,
+.close-btn:hover {
+    background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.simple-btn:disabled,
+.action-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.resolution-summary {
+    color: var(--vscode-descriptionForeground);
+    font-size: 13px;
+}
+
+.view-btn {
+    margin-left: auto;
+    min-width: 32px;
+    padding: 0;
+    border-color: transparent;
+    background: transparent;
+    font-size: 17px;
 }
 
 .table-wrap {
-    border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
     display: flex;
     flex-direction: column;
     flex: 1;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-}
-
-.table-meta {
-    font-size: 11px;
-    color: var(--vscode-descriptionForeground);
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+    border: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
 }
 
 .error {
-    padding: 6px 8px;
+    padding: 7px 9px;
     color: var(--vscode-errorForeground, #f48771);
-    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
 }
 
 .conflict-table {
-    width: 100%;
     display: flex;
     flex-direction: column;
+    width: 100%;
     min-height: 0;
-    font-size: 12px;
-}
-
-.conflict-table thead th {
-    position: sticky;
-    top: 0;
-    text-align: left;
-    background: var(--vscode-editorGroupHeader-tabsBackground);
-    color: var(--vscode-descriptionForeground);
-    font-weight: 600;
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
-}
-
-.conflict-table thead th:first-child {
-    width: 56%;
-}
-
-.conflict-table thead th:nth-child(2),
-.conflict-table thead th:nth-child(3) {
-    width: 22%;
-}
-
-.conflict-table tbody {
-    display: block;
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
+    font-size: 13px;
 }
 
 .conflict-table thead,
@@ -92,9 +94,33 @@
     table-layout: fixed;
 }
 
+.conflict-table thead th {
+    padding: 7px 10px;
+    text-align: left;
+    color: var(--vscode-descriptionForeground);
+    background: var(--vscode-editorGroupHeader-tabsBackground);
+    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+    font-weight: 500;
+}
+
+.conflict-table thead th:first-child {
+    width: 60%;
+}
+
+.conflict-table thead th:nth-child(2),
+.conflict-table thead th:nth-child(3) {
+    width: 20%;
+}
+
+.conflict-table tbody {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
 .row td {
-    padding: 6px 8px;
-    border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border, #333) 70%, transparent);
+    padding: 7px 10px;
 }
 
 .row:hover {
@@ -106,20 +132,40 @@
     background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, #3a3d41) 80%, transparent);
 }
 
+.resolved-file:hover {
+    cursor: default;
+}
+
 .group-row td {
-    padding: 6px 8px;
-    font-weight: 600;
-    color: var(--vscode-descriptionForeground);
-    background: color-mix(in srgb, var(--vscode-editorGroupHeader-tabsBackground, #2a2d2e) 70%, transparent);
-    border-bottom: 1px solid var(--vscode-panel-border, var(--vscode-widget-border, transparent));
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--vscode-editorGroupHeader-tabsBackground, #2a2d2e) 82%, transparent);
+    font-weight: 700;
+}
+
+.unresolved-group td {
+    color: var(--vscode-foreground);
+}
+
+.resolved-group td {
+    color: var(--vscode-foreground);
 }
 
 .name-cell {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
+    min-width: 0;
     white-space: nowrap;
-    overflow: hidden;
+}
+
+.file-icon {
+    width: 15px;
+    color: var(--vscode-testing-iconPassed, #73c991);
+    text-align: center;
+}
+
+.unresolved-file .file-icon {
+    color: var(--vscode-testing-iconFailed, #f48771);
 }
 
 .file-name {
@@ -134,25 +180,27 @@
     text-overflow: ellipsis;
 }
 
-.action-column {
+.count {
+    padding: 1px 6px;
+    border-radius: 10px;
+    color: var(--vscode-descriptionForeground);
+    background: color-mix(in srgb, var(--vscode-badge-background) 55%, transparent);
+}
+
+.count.resolved {
+    color: var(--vscode-badge-foreground);
+    background: var(--vscode-badge-background);
+}
+
+.session-footer {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
 }
 
-.action-btn,
-.close-btn {
-    height: 30px;
-    border: 1px solid var(--vscode-button-border, transparent);
-    border-radius: 3px;
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-    cursor: pointer;
-}
-
-.action-btn:hover,
-.close-btn:hover {
-    background: var(--vscode-button-secondaryHoverBackground);
+.footer-actions {
+    display: flex;
+    gap: 10px;
 }
 
 .action-btn.primary {
@@ -162,24 +210,4 @@
 
 .action-btn.primary:hover {
     background: var(--vscode-button-hoverBackground);
-}
-
-.action-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.session-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.group-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--vscode-descriptionForeground);
-    font-size: 12px;
 }

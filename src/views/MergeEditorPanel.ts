@@ -26,6 +26,7 @@ export class MergeEditorPanel {
         private readonly filePath: string,
         private readonly oursSourceLabel: string,
         private readonly theirsSourceLabel: string,
+        private applyNonConflicting: boolean,
         private readonly onResolved: () => Promise<void> | void,
     ) {
         this.panel = panel;
@@ -52,13 +53,23 @@ export class MergeEditorPanel {
         gitOps: GitOps,
         workspaceRoot: vscode.Uri,
         filePath: string,
-        labels: { oursSourceLabel?: string; theirsSourceLabel?: string } | undefined,
+        labels:
+            | {
+                  oursSourceLabel?: string;
+                  theirsSourceLabel?: string;
+                  applyNonConflicting?: boolean;
+              }
+            | undefined,
         onResolved: () => Promise<void> | void,
     ): void {
         const panelKey = MergeEditorPanel.getPanelKey(workspaceRoot, filePath);
         const existing = MergeEditorPanel.panels.get(panelKey);
         if (existing && !existing.disposed) {
             existing.panel.reveal();
+            if (labels?.applyNonConflicting && !existing.applyNonConflicting) {
+                existing.applyNonConflicting = true;
+                void existing.loadConflictData();
+            }
             return;
         }
 
@@ -81,6 +92,7 @@ export class MergeEditorPanel {
             filePath,
             labels?.oursSourceLabel?.trim() || "current branch",
             labels?.theirsSourceLabel?.trim() || "incoming branch",
+            labels?.applyNonConflicting === true,
             onResolved,
         );
         MergeEditorPanel.panels.set(panelKey, instance);
@@ -201,12 +213,27 @@ export class MergeEditorPanel {
                 ? detectTextFormatFromText(Buffer.from(workingFileSnapshot).toString("utf8"))
                 : detectTextFormatFromText(versions.ours);
             if (this.disposed || loadId !== this.currentLoadId) return;
-            const segments = parseConflictVersions(
+            const parsedSegments = parseConflictVersions(
                 versions.base,
                 versions.ours,
                 versions.theirs,
                 this.diffOptions,
             );
+            const segments = this.applyNonConflicting
+                ? parsedSegments.map((segment) => {
+                      if (segment.type === "common") return segment;
+                      if (segment.changeKind === "ours-only") {
+                          return { type: "common" as const, lines: segment.oursLines };
+                      }
+                      if (segment.changeKind === "theirs-only") {
+                          return { type: "common" as const, lines: segment.theirsLines };
+                      }
+                      if (segment.autoResolvedLines !== undefined) {
+                          return { type: "common" as const, lines: segment.autoResolvedLines };
+                      }
+                      return segment;
+                  })
+                : parsedSegments;
 
             const data: MergeEditorData = {
                 filePath: this.filePath,

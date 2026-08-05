@@ -83,14 +83,26 @@ export function reducer(state: State, action: Action): State {
             let dismissals = state.dismissals;
             if (action.resolution === "ours" || action.resolution === "theirs") {
                 const acceptedSide = action.resolution;
-                const remaining =
-                    acceptedSide === "ours"
-                        ? currentDismissal?.theirs
-                            ? { theirs: true as const }
-                            : undefined
-                        : currentDismissal?.ours
-                          ? { ours: true as const }
-                          : undefined;
+                const segment = state.data?.segments.find(
+                    (item): item is ConflictSegment =>
+                        item.type === "conflict" && item.id === action.id,
+                );
+                const oppositeIsEmpty =
+                    segment !== undefined &&
+                    (acceptedSide === "ours"
+                        ? segment.theirsLines.length === 0
+                        : segment.oursLines.length === 0);
+                const remaining = oppositeIsEmpty
+                    ? acceptedSide === "ours"
+                        ? { theirs: true as const }
+                        : { ours: true as const }
+                    : acceptedSide === "ours"
+                      ? currentDismissal?.theirs
+                          ? { theirs: true as const }
+                          : undefined
+                      : currentDismissal?.ours
+                        ? { ours: true as const }
+                        : undefined;
                 dismissals = setOrRemoveKey(dismissals, action.id, remaining);
             } else {
                 dismissals = removeKey(dismissals, action.id);

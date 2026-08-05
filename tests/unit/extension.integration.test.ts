@@ -811,6 +811,8 @@ describe("extension integration", () => {
             showQuickPick,
             showTextDocument,
             openTextDocument,
+            readFile,
+            writeFile,
             fsStat,
             executorRun,
             deleteFileWithFallback,
@@ -839,6 +841,8 @@ describe("extension integration", () => {
             uri: arg,
             languageId: "typescript",
         }));
+        readFile.mockResolvedValue(Buffer.from(""));
+        writeFile.mockResolvedValue(undefined);
         fsStat.mockResolvedValue({ type: 1, ctime: 0, mtime: 0, size: 1 });
 
         executorRun.mockImplementation(defaultExecutorRunImpl);
@@ -2060,7 +2064,7 @@ describe("extension integration", () => {
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
-    it("selects the next unresolved file after resolving a session conflict", async () => {
+    it("retains resolved files and selects the next unresolved session conflict", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -2087,9 +2091,171 @@ describe("extension integration", () => {
             type: "setSessionData",
             data: expect.objectContaining({
                 selectedPath: "src/c.ts",
-                files: [a, c],
+                files: [
+                    expect.objectContaining({ ...a, resolved: false }),
+                    expect.objectContaining({ ...b, resolved: true }),
+                    expect.objectContaining({ ...c, resolved: false }),
+                ],
             }),
         });
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("resolves and stages session files that need no manual conflict choice", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+
+        const file = {
+            path: "src/simple.ts",
+            code: "UU",
+            ours: "Modified",
+            theirs: "Modified",
+        } as const;
+        gitOpsState.getConflictFilesDetailed
+            .mockResolvedValueOnce([file])
+            .mockResolvedValueOnce([file])
+            .mockResolvedValueOnce([file])
+            .mockResolvedValue([]);
+        gitOpsState.getConflictFileVersions.mockResolvedValue({
+            base: "base\n",
+            ours: "base\nlocal\n",
+            theirs: "base\n",
+        });
+        readFile.mockResolvedValue(
+            Buffer.from("<<<<<<< ours\nbase\n=======\nbase\n>>>>>>> theirs\n"),
+        );
+
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        expect(latestWebviewPanel).toBeDefined();
+        expect(gitOpsState.getConflictFilesDetailed).toHaveBeenCalled();
+        await latestWebviewPanel?.emitMessage({ type: "resolveAllSimple" });
+
+        expect(gitOpsState.getConflictFileVersions).toHaveBeenCalledWith("src/simple.ts");
+        expect(writeFile).toHaveBeenCalledWith(
+            expect.objectContaining({ fsPath: "/repo-a/src/simple.ts" }),
+            Buffer.from("base\nlocal\n"),
+        );
+        expect(gitOpsState.stageFile).toHaveBeenCalledWith("src/simple.ts");
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenLastCalledWith({
+            type: "setSessionData",
+            data: expect.objectContaining({
+                simpleConflictsResolved: true,
+                files: [
+                    expect.objectContaining({
+                        path: "src/simple.ts",
+                        resolved: true,
+                        resolvedConflictCount: 1,
+                        totalConflictCount: 1,
+                    }),
+                ],
+            }),
+        });
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("opens only the remaining manual hunks after resolving simple conflicts", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        const file = {
+            path: "src/mixed.ts",
+            code: "UU",
+            ours: "Modified",
+            theirs: "Modified",
+        } as const;
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([file]);
+        gitOpsState.getConflictFileVersions.mockResolvedValue({
+            base: "start\nbase-only\nmiddle\nbase-conflict\nend\n",
+            ours: "start\nours-only\nmiddle\nours-conflict\nend\n",
+            theirs: "start\nbase-only\nmiddle\ntheirs-conflict\nend\n",
+        });
+        readFile.mockResolvedValue(Buffer.from("conflict markers\n"));
+
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        const sessionPanel = latestWebviewPanel;
+        await latestWebviewPanel?.emitMessage({ type: "resolveAllSimple" });
+        await latestWebviewPanel?.emitMessage({ type: "openMerge", filePath: file.path });
+        await latestWebviewPanel?.emitMessage({ type: "ready" });
+
+        const conflictDataMessage = latestWebviewPanel?.webview.postMessage.mock.calls
+            .map(([message]) => message)
+            .find((message) => message?.type === "setConflictData");
+        const segments = conflictDataMessage?.data?.segments ?? [];
+        expect(segments.filter((segment: { type: string }) => segment.type === "conflict"))
+            .toHaveLength(1);
+        expect(
+            segments
+                .filter((segment: { type: string }) => segment.type === "common")
+                .flatMap((segment: { lines: string[] }) => segment.lines),
+        ).toContain("ours-only");
+        expect(gitOpsState.stageFile).not.toHaveBeenCalled();
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+        (sessionPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("aborts an active merge when the conflict session is closed", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([
+            {
+                path: "src/conflicted.ts",
+                code: "UU",
+                ours: "Modified",
+                theirs: "Modified",
+            },
+        ]);
+
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        await latestWebviewPanel?.emitMessage({ type: "close" });
+
+        expect(showWarningMessage).toHaveBeenCalledWith(
+            "Abort merge?",
+            { modal: true },
+            "Abort",
+        );
+        expect(gitOpsState.abortMerge).toHaveBeenCalled();
+        expect(showInformationMessage).toHaveBeenCalledWith("Merge aborted.");
+    });
+
+    it("finishes the merge only after the conflict session accepts it", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        const file = {
+            path: "src/final.ts",
+            code: "UU",
+            ours: "Modified",
+            theirs: "Modified",
+        } as const;
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([file]);
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
+        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        gitOpsState.getPendingCommitMessage.mockResolvedValue("Merge feature into main");
+        await latestWebviewPanel?.emitMessage({ type: "acceptAndFinish" });
+
+        expect(gitOpsState.commit).toHaveBeenCalledWith("Merge feature into main", false);
+        expect(showInformationMessage).toHaveBeenCalledWith("Merge committed successfully.");
     });
 
     it("offers restore action after deleting local branch", async () => {
