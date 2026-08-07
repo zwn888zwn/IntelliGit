@@ -108,7 +108,7 @@ describe("BranchColumn integration", () => {
         act(() => {
             headRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(onSelectBranch).toHaveBeenCalledWith(null);
+        expect(onSelectBranch).toHaveBeenCalledWith("main", "abc1234");
 
         act(() => {
             headRow.dispatchEvent(

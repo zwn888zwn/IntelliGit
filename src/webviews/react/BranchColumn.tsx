@@ -359,12 +359,12 @@ export function BranchColumn({
                         className={`branch-row${selectedBranch === null ? " selected" : ""}`}
                         role="button"
                         tabIndex={0}
-                        onClick={() => onSelectBranch(null)}
+                        onClick={() => onSelectBranch(current.name, current.hash)}
                         onContextMenu={(event) => handleBranchContextMenu(event, current)}
                         onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ") {
                                 if (event.key === " ") event.preventDefault();
-                                onSelectBranch(null);
+                                onSelectBranch(current.name, current.hash);
                                 return;
                             }
                             if (
