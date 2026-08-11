@@ -47,9 +47,13 @@ import {
     REPOSITORY_BRANCH_STYLE,
     REPOSITORY_COLOR_STYLE,
     REPOSITORY_LIST_STYLE,
+    REPOSITORY_NAME_LINE_STYLE,
     REPOSITORY_NAME_STYLE,
     REPOSITORY_ROW_STYLE,
     REPOSITORY_TEXT_STYLE,
+    TRACKING_BADGE_STYLE,
+    TRACKING_PULL_STYLE,
+    TRACKING_PUSH_STYLE,
     TREE_INDENT_STEP,
     TREE_SECTION_STYLE,
 } from "./branch-column/styles";
@@ -371,9 +375,10 @@ export function BranchColumn({
             {hasMultipleRepositories && (
                 <div aria-label="Repositories" style={REPOSITORY_LIST_STYLE}>
                     {repositories.map((repo) => {
-                        const currentBranchName = repositoryBranches[repo.root]?.find(
+                        const currentBranch = repositoryBranches[repo.root]?.find(
                             (branch) => branch.isCurrent,
-                        )?.name;
+                        );
+                        const currentBranchName = currentBranch?.name;
                         const selected = repo.root === repository?.root;
                         return (
                             <button
@@ -397,7 +402,36 @@ export function BranchColumn({
                                     style={{ ...REPOSITORY_COLOR_STYLE, background: repo.color }}
                                 />
                                 <span style={REPOSITORY_TEXT_STYLE}>
-                                    <span style={REPOSITORY_NAME_STYLE}>{repo.name}</span>
+                                    <span style={REPOSITORY_NAME_LINE_STYLE}>
+                                        <span style={REPOSITORY_NAME_STYLE}>{repo.name}</span>
+                                        {currentBranch &&
+                                            (currentBranch.ahead > 0 || currentBranch.behind > 0) && (
+                                                <span style={TRACKING_BADGE_STYLE}>
+                                                    {currentBranch.ahead > 0 && (
+                                                        <span
+                                                            className="branch-track-push"
+                                                            aria-label={`${currentBranch.ahead} outgoing commits`}
+                                                            title={`${currentBranch.ahead} outgoing commits`}
+                                                            style={TRACKING_PUSH_STYLE}
+                                                        >
+                                                            {"\u2B06"}
+                                                            {currentBranch.ahead}
+                                                        </span>
+                                                    )}
+                                                    {currentBranch.behind > 0 && (
+                                                        <span
+                                                            className="branch-track-pull"
+                                                            aria-label={`${currentBranch.behind} incoming commits`}
+                                                            title={`${currentBranch.behind} incoming commits`}
+                                                            style={TRACKING_PULL_STYLE}
+                                                        >
+                                                            {"\u2B07"}
+                                                            {currentBranch.behind}
+                                                        </span>
+                                                    )}
+                                                </span>
+                                            )}
+                                    </span>
                                     <span style={REPOSITORY_BRANCH_STYLE}>{currentBranchName}</span>
                                 </span>
                                 <LuChevronRight

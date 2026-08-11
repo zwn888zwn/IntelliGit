@@ -361,8 +361,8 @@ describe("low coverage components", () => {
                 hash: "abc1234",
                 isRemote: false,
                 isCurrent: true,
-                ahead: 0,
-                behind: 0,
+                ahead: 1,
+                behind: 2,
             },
         ];
         const iosBranches: Branch[] = [
@@ -402,8 +402,13 @@ describe("low coverage components", () => {
         expect(picRow.getAttribute("aria-expanded")).toBe("true");
         expect(iosRow.dataset.selected).toBe("false");
         expect(iosRow.getAttribute("aria-expanded")).toBe("false");
-        expect(picRow.textContent).toContain("PicMathpic-current");
+        expect(picRow.textContent).toContain("PicMath");
+        expect(picRow.textContent).toContain("pic-current");
+        expect(picRow.querySelector(".branch-track-push")?.textContent).toBe("⬆1");
+        expect(picRow.querySelector(".branch-track-pull")?.textContent).toBe("⬇2");
         expect(iosRow.textContent).toContain("IosLatexios-current");
+        expect(iosRow.querySelector(".branch-track-push")).toBeNull();
+        expect(iosRow.querySelector(".branch-track-pull")).toBeNull();
 
         act(() => {
             picRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));

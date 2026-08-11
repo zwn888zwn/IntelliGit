@@ -90,12 +90,18 @@ export const REPOSITORY_TEXT_STYLE: CSSProperties = {
     flexDirection: "column",
 };
 
+export const REPOSITORY_NAME_LINE_STYLE: CSSProperties = {
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    lineHeight: "18px",
+};
+
 export const REPOSITORY_NAME_STYLE: CSSProperties = {
     minWidth: 0,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    lineHeight: "18px",
 };
 
 export const REPOSITORY_BRANCH_STYLE: CSSProperties = {
