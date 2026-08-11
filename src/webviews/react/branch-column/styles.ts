@@ -26,6 +26,14 @@ export const BRANCH_ROW_CLASS_CSS = `
     .branch-search-input:focus-visible {
         outline-color: var(--vscode-focusBorder, #007acc);
     }
+    .repository-row:hover {
+        background: var(--vscode-list-hoverBackground) !important;
+    }
+    .repository-row[data-selected="true"],
+    .repository-row[data-selected="true"]:hover {
+        background: var(--vscode-list-activeSelectionBackground) !important;
+        color: var(--vscode-list-activeSelectionForeground) !important;
+    }
 `;
 
 export const PANEL_STYLE: CSSProperties = {
@@ -35,6 +43,75 @@ export const PANEL_STYLE: CSSProperties = {
     fontFamily: SYSTEM_FONT_STACK,
     borderRight: "1px solid var(--vscode-panel-border)",
     userSelect: "none",
+};
+
+export const MULTI_REPOSITORY_PANEL_STYLE: CSSProperties = {
+    ...PANEL_STYLE,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+};
+
+export const REPOSITORY_LIST_STYLE: CSSProperties = {
+    maxHeight: 126,
+    overflowY: "auto",
+    flexShrink: 0,
+    padding: "4px 8px",
+    borderBottom: "1px solid var(--vscode-panel-border)",
+};
+
+export const REPOSITORY_ROW_STYLE: CSSProperties = {
+    width: "100%",
+    height: 38,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "2px 8px",
+    border: "none",
+    borderRadius: 6,
+    background: "transparent",
+    color: "inherit",
+    font: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+};
+
+export const REPOSITORY_COLOR_STYLE: CSSProperties = {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    flexShrink: 0,
+};
+
+export const REPOSITORY_TEXT_STYLE: CSSProperties = {
+    minWidth: 0,
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+};
+
+export const REPOSITORY_NAME_STYLE: CSSProperties = {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    lineHeight: "18px",
+};
+
+export const REPOSITORY_BRANCH_STYLE: CSSProperties = {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    opacity: 0.62,
+    fontSize: 11,
+    lineHeight: "14px",
+};
+
+export const BRANCH_TREE_SCROLL_STYLE: CSSProperties = {
+    minHeight: 0,
+    flex: 1,
+    overflow: "auto",
 };
 
 export const SEARCH_CONTAINER_STYLE: CSSProperties = {
@@ -77,7 +154,7 @@ export const SEARCH_CLEAR_BUTTON_STYLE: CSSProperties = {
 };
 
 export const HEAD_WRAPPER_STYLE: CSSProperties = {
-    padding: "2px 10px 1px",
+    padding: "1px 10px 0",
 };
 
 export const TREE_SECTION_STYLE: CSSProperties = {
@@ -93,17 +170,17 @@ export const NO_MATCH_STYLE: CSSProperties = {
 export const ROW_STYLE: CSSProperties = {
     display: "flex",
     alignItems: "center",
-    padding: "2px 8px",
+    padding: "1px 8px",
     cursor: "pointer",
     whiteSpace: "nowrap",
     overflow: "hidden",
-    lineHeight: "20px",
+    lineHeight: "18px",
 };
 
 export const HEAD_ROW_STYLE: CSSProperties = {
     ...ROW_STYLE,
     fontWeight: 600,
-    fontSize: "13px",
+    fontSize: "11px",
     paddingLeft: 8,
 };
 

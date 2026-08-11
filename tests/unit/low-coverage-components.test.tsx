@@ -306,9 +306,9 @@ describe("low coverage components", () => {
         );
         await flush();
 
-        const iosRow = Array.from(document.querySelectorAll("button")).find((button) =>
-            button.textContent?.includes("IosLatex"),
-        ) as HTMLElement;
+        const iosRow = Array.from(
+            document.querySelectorAll(".intelligit-branch-popup-row"),
+        ).find((button) => button.textContent?.includes("IosLatex")) as HTMLElement;
         act(() => {
             iosRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
@@ -336,6 +336,118 @@ describe("low coverage components", () => {
             "/repos/IosLatex",
             undefined,
         );
+
+        unmount(root, container);
+    });
+
+    it("BranchColumn shows and switches repositories in the persistent sidebar list", () => {
+        const repositories: RepositoryContextInfo[] = [
+            {
+                repoId: "pic",
+                name: "PicMath",
+                root: "/repos/PicMath",
+                color: "#ff5722",
+            },
+            {
+                repoId: "ios",
+                name: "IosLatex",
+                root: "/repos/IosLatex",
+                color: "#8bc34a",
+            },
+        ];
+        const picBranches: Branch[] = [
+            {
+                name: "pic-current",
+                hash: "abc1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const iosBranches: Branch[] = [
+            {
+                name: "ios-current",
+                hash: "def5678",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const onBranchPopupAction = vi.fn();
+        const { root, container } = mount(
+            <BranchColumn
+                branches={picBranches}
+                repositories={repositories}
+                repository={repositories[0]}
+                repositoryBranches={{
+                    [repositories[0].root]: picBranches,
+                    [repositories[1].root]: iosBranches,
+                }}
+                selectedBranch={null}
+                onSelectBranch={vi.fn()}
+                onBranchAction={vi.fn()}
+                onBranchPopupAction={onBranchPopupAction}
+            />,
+        );
+
+        const picRow = container.querySelector(
+            'button[aria-label="Switch to repository PicMath"]',
+        ) as HTMLButtonElement;
+        const iosRow = container.querySelector(
+            'button[aria-label="Switch to repository IosLatex"]',
+        ) as HTMLButtonElement;
+        expect(picRow.dataset.selected).toBe("true");
+        expect(picRow.getAttribute("aria-expanded")).toBe("true");
+        expect(iosRow.dataset.selected).toBe("false");
+        expect(iosRow.getAttribute("aria-expanded")).toBe("false");
+        expect(picRow.textContent).toContain("PicMathpic-current");
+        expect(iosRow.textContent).toContain("IosLatexios-current");
+
+        act(() => {
+            picRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(picRow.getAttribute("aria-expanded")).toBe("false");
+        expect(container.textContent).not.toContain("HEAD");
+
+        act(() => {
+            picRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(picRow.getAttribute("aria-expanded")).toBe("true");
+        expect(container.textContent).toContain("HEAD");
+
+        act(() => {
+            iosRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onBranchPopupAction).toHaveBeenCalledTimes(1);
+        expect(onBranchPopupAction).toHaveBeenCalledWith(
+            "switchRepository",
+            "/repos/IosLatex",
+        );
+
+        unmount(root, container);
+    });
+
+    it("BranchColumn keeps the repository switcher hidden for one repository", () => {
+        const repository: RepositoryContextInfo = {
+            repoId: "pic",
+            name: "PicMath",
+            root: "/repos/PicMath",
+            color: "#ff5722",
+        };
+        const { root, container } = mount(
+            <BranchColumn
+                branches={[]}
+                repositories={[repository]}
+                repository={repository}
+                selectedBranch={null}
+                onSelectBranch={vi.fn()}
+                onBranchAction={vi.fn()}
+            />,
+        );
+
+        expect(container.querySelector('[aria-label="Repositories"]')).toBeNull();
 
         unmount(root, container);
     });
@@ -756,7 +868,7 @@ describe("low coverage components", () => {
         });
 
         const headRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
-            row.textContent?.includes("HEAD (main)"),
+            row.textContent?.trim() === "HEAD",
         ) as HTMLElement;
         // Force the no-icon fallback path so anchor math uses rowRect.left + 20.
         Object.defineProperty(headRow, "querySelector", {

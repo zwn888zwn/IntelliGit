@@ -3,6 +3,7 @@
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { LuChevronRight } from "react-icons/lu";
 import type {
     Branch,
     GitTag,
@@ -36,11 +37,19 @@ import { RepoIcon, TagRightIcon } from "./branch-column/icons";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import {
     BRANCH_ROW_CLASS_CSS,
+    BRANCH_TREE_SCROLL_STYLE,
     HEAD_LABEL_STYLE,
     HEAD_ROW_STYLE,
     HEAD_WRAPPER_STYLE,
+    MULTI_REPOSITORY_PANEL_STYLE,
     NO_MATCH_STYLE,
     PANEL_STYLE,
+    REPOSITORY_BRANCH_STYLE,
+    REPOSITORY_COLOR_STYLE,
+    REPOSITORY_LIST_STYLE,
+    REPOSITORY_NAME_STYLE,
+    REPOSITORY_ROW_STYLE,
+    REPOSITORY_TEXT_STYLE,
     TREE_INDENT_STEP,
     TREE_SECTION_STYLE,
 } from "./branch-column/styles";
@@ -215,7 +224,9 @@ export function BranchColumn({
         allRepositories?: boolean;
     } | null>(null);
     const [branchPopupOpen, setBranchPopupOpen] = useState(false);
+    const [repositoryBranchesExpanded, setRepositoryBranchesExpanded] = useState(true);
 
+    const hasMultipleRepositories = repositories.length > 1;
     const filterNeedle = branchFilter.trim().toLowerCase();
     const actualCurrent = useMemo(() => branches.find((b) => b.isCurrent), [branches]);
 
@@ -298,6 +309,10 @@ export function BranchColumn({
         setBranchPopupOpen(true);
     }, [openPopupRequest]);
 
+    useEffect(() => {
+        setRepositoryBranchesExpanded(true);
+    }, [repository?.root]);
+
     const worktreesDialogRepository = useMemo(() => {
         const repoRoot = worktreesDialogScope?.repoRoot;
         if (!repoRoot) return null;
@@ -344,7 +359,7 @@ export function BranchColumn({
     }, [repositories, repository, worktreesDialogScope]);
 
     return (
-        <div style={PANEL_STYLE}>
+        <div style={hasMultipleRepositories ? MULTI_REPOSITORY_PANEL_STYLE : PANEL_STYLE}>
             <style>{BRANCH_ROW_CLASS_CSS}</style>
 
             <BranchSearchBar
@@ -353,112 +368,167 @@ export function BranchColumn({
                 onClear={() => setBranchFilter("")}
             />
 
-            {current && (
-                <div style={HEAD_WRAPPER_STYLE}>
-                    <div
-                        className={`branch-row${selectedBranch === null ? " selected" : ""}`}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onSelectBranch(current.name, current.hash)}
-                        onContextMenu={(event) => handleBranchContextMenu(event, current)}
-                        onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                                if (event.key === " ") event.preventDefault();
-                                onSelectBranch(current.name, current.hash);
-                                return;
-                            }
-                            if (
-                                event.key === "ContextMenu" ||
-                                (event.shiftKey && event.key === "F10")
-                            ) {
-                                event.preventDefault();
-                                openBranchContextMenuFromRow(
-                                    event.currentTarget as HTMLElement,
-                                    current,
-                                );
-                            }
-                        }}
-                        style={HEAD_ROW_STYLE}
-                    >
-                        <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
-                        <span style={HEAD_LABEL_STYLE}>HEAD ({current.name})</span>
-                    </div>
-                </div>
-            )}
-
-            <BranchSectionHeader
-                label="Local"
-                expanded={expandedSections.has("local")}
-                onToggle={() => toggleSection("local")}
-            />
-            {expandedSections.has("local") && (
-                <div style={TREE_SECTION_STYLE}>
-                    {localTree.map((node, index) => (
-                        <BranchTreeNodeRow
-                            key={`local-${node.branch?.name ?? node.label}-${index}`}
-                            node={node}
-                            depth={1}
-                            selectedBranch={selectedBranch}
-                            expandedFolders={expandedFolders}
-                            onSelectBranch={onSelectBranch}
-                            onToggleFolder={toggleFolder}
-                            onContextMenu={handleBranchContextMenu}
-                            filterNeedle={filterNeedle}
-                            prefix="local"
-                            folderIcon={folderIcon}
-                            folderExpandedIcon={folderExpandedIcon}
-                            folderIconsByName={folderIconsByName}
-                        />
-                    ))}
-                </div>
-            )}
-
-            <BranchSectionHeader
-                label="Remote"
-                expanded={expandedSections.has("remote")}
-                onToggle={() => toggleSection("remote")}
-            />
-            {expandedSections.has("remote") && (
-                <div style={TREE_SECTION_STYLE}>
-                    {Array.from(remoteGroups.entries()).map(([remote, group]) => {
-                        const remoteKey = `remote-${remote}`;
-                        const isExpanded = expandedFolders.has(remoteKey);
+            {hasMultipleRepositories && (
+                <div aria-label="Repositories" style={REPOSITORY_LIST_STYLE}>
+                    {repositories.map((repo) => {
+                        const currentBranchName = repositoryBranches[repo.root]?.find(
+                            (branch) => branch.isCurrent,
+                        )?.name;
+                        const selected = repo.root === repository?.root;
                         return (
-                            <div key={remote}>
-                                <div style={{ paddingLeft: TREE_INDENT_STEP }}>
-                                    <BranchSectionHeader
-                                        label={remote}
-                                        expanded={isExpanded}
-                                        onToggle={() => toggleFolder(remoteKey)}
-                                        leadingIcon={<RepoIcon />}
-                                    />
-                                </div>
-                                {isExpanded &&
-                                    group.tree.map((node, index) => (
-                                        <BranchTreeNodeRow
-                                            key={`remote-${remote}-${node.branch?.name ?? node.label}-${index}`}
-                                            node={node}
-                                            depth={2}
-                                            selectedBranch={selectedBranch}
-                                            expandedFolders={expandedFolders}
-                                            onSelectBranch={onSelectBranch}
-                                            onToggleFolder={toggleFolder}
-                                            onContextMenu={handleBranchContextMenu}
-                                            filterNeedle={filterNeedle}
-                                            prefix={`remote/${remote}`}
-                                            folderIcon={folderIcon}
-                                            folderExpandedIcon={folderExpandedIcon}
-                                            folderIconsByName={folderIconsByName}
-                                        />
-                                    ))}
-                            </div>
+                            <button
+                                key={repo.root}
+                                type="button"
+                                className="repository-row"
+                                data-selected={selected ? "true" : "false"}
+                                aria-label={`Switch to repository ${repo.name}`}
+                                aria-expanded={selected ? repositoryBranchesExpanded : false}
+                                onClick={() => {
+                                    if (selected) {
+                                        setRepositoryBranchesExpanded((expanded) => !expanded);
+                                        return;
+                                    }
+                                    onBranchPopupAction("switchRepository", repo.root);
+                                }}
+                                style={REPOSITORY_ROW_STYLE}
+                            >
+                                <span
+                                    aria-hidden="true"
+                                    style={{ ...REPOSITORY_COLOR_STYLE, background: repo.color }}
+                                />
+                                <span style={REPOSITORY_TEXT_STYLE}>
+                                    <span style={REPOSITORY_NAME_STYLE}>{repo.name}</span>
+                                    <span style={REPOSITORY_BRANCH_STYLE}>{currentBranchName}</span>
+                                </span>
+                                <LuChevronRight
+                                    aria-hidden="true"
+                                    size={14}
+                                    style={{
+                                        flexShrink: 0,
+                                        opacity: 0.65,
+                                        transform:
+                                            selected && repositoryBranchesExpanded
+                                                ? "rotate(90deg)"
+                                                : "rotate(0deg)",
+                                        transition: "transform 0.1s",
+                                    }}
+                                />
+                            </button>
                         );
                     })}
                 </div>
             )}
 
-            {filterNeedle && locals.length === 0 && remotes.length === 0 && !current && (
-                <div style={NO_MATCH_STYLE}>No matching branches</div>
+            {(!hasMultipleRepositories || repositoryBranchesExpanded) && (
+                <div style={hasMultipleRepositories ? BRANCH_TREE_SCROLL_STYLE : undefined}>
+                    {current && (
+                        <div style={HEAD_WRAPPER_STYLE}>
+                            <div
+                                className={`branch-row${selectedBranch === null ? " selected" : ""}`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => onSelectBranch(current.name, current.hash)}
+                                onContextMenu={(event) => handleBranchContextMenu(event, current)}
+                                onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                        if (event.key === " ") event.preventDefault();
+                                        onSelectBranch(current.name, current.hash);
+                                        return;
+                                    }
+                                    if (
+                                        event.key === "ContextMenu" ||
+                                        (event.shiftKey && event.key === "F10")
+                                    ) {
+                                        event.preventDefault();
+                                        openBranchContextMenuFromRow(
+                                            event.currentTarget as HTMLElement,
+                                            current,
+                                        );
+                                    }
+                                }}
+                                style={HEAD_ROW_STYLE}
+                            >
+                                <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
+                                <span style={HEAD_LABEL_STYLE}>HEAD</span>
+                            </div>
+                        </div>
+                    )}
+
+                    <BranchSectionHeader
+                        label="Local"
+                        expanded={expandedSections.has("local")}
+                        onToggle={() => toggleSection("local")}
+                    />
+                    {expandedSections.has("local") && (
+                        <div style={TREE_SECTION_STYLE}>
+                            {localTree.map((node, index) => (
+                                <BranchTreeNodeRow
+                                    key={`local-${node.branch?.name ?? node.label}-${index}`}
+                                    node={node}
+                                    depth={0}
+                                    selectedBranch={selectedBranch}
+                                    expandedFolders={expandedFolders}
+                                    onSelectBranch={onSelectBranch}
+                                    onToggleFolder={toggleFolder}
+                                    onContextMenu={handleBranchContextMenu}
+                                    filterNeedle={filterNeedle}
+                                    prefix="local"
+                                    folderIcon={folderIcon}
+                                    folderExpandedIcon={folderExpandedIcon}
+                                    folderIconsByName={folderIconsByName}
+                                />
+                            ))}
+                        </div>
+                    )}
+
+                    <BranchSectionHeader
+                        label="Remote"
+                        expanded={expandedSections.has("remote")}
+                        onToggle={() => toggleSection("remote")}
+                    />
+                    {expandedSections.has("remote") && (
+                        <div style={TREE_SECTION_STYLE}>
+                            {Array.from(remoteGroups.entries()).map(([remote, group]) => {
+                                const remoteKey = `remote-${remote}`;
+                                const isExpanded = expandedFolders.has(remoteKey);
+                                return (
+                                    <div key={remote}>
+                                        <div style={{ paddingLeft: TREE_INDENT_STEP }}>
+                                            <BranchSectionHeader
+                                                label={remote}
+                                                expanded={isExpanded}
+                                                onToggle={() => toggleFolder(remoteKey)}
+                                                leadingIcon={<RepoIcon />}
+                                            />
+                                        </div>
+                                        {isExpanded &&
+                                            group.tree.map((node, index) => (
+                                                <BranchTreeNodeRow
+                                                    key={`remote-${remote}-${node.branch?.name ?? node.label}-${index}`}
+                                                    node={node}
+                                                    depth={1}
+                                                    selectedBranch={selectedBranch}
+                                                    expandedFolders={expandedFolders}
+                                                    onSelectBranch={onSelectBranch}
+                                                    onToggleFolder={toggleFolder}
+                                                    onContextMenu={handleBranchContextMenu}
+                                                    filterNeedle={filterNeedle}
+                                                    prefix={`remote/${remote}`}
+                                                    folderIcon={folderIcon}
+                                                    folderExpandedIcon={folderExpandedIcon}
+                                                    folderIconsByName={folderIconsByName}
+                                                />
+                                            ))}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {filterNeedle && locals.length === 0 && remotes.length === 0 && !current && (
+                        <div style={NO_MATCH_STYLE}>No matching branches</div>
+                    )}
+                </div>
             )}
 
             {contextMenu && (

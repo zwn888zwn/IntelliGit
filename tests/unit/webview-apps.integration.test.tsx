@@ -785,7 +785,7 @@ describe("CommitGraphApp integration", () => {
         });
 
         const branchRow = Array.from(document.querySelectorAll(".branch-row")).find((row) =>
-            row.textContent?.includes("HEAD (main)"),
+            row.textContent?.trim() === "HEAD",
         ) as HTMLElement;
         fireClick(branchRow);
         act(() => {

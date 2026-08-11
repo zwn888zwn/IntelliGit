@@ -100,10 +100,10 @@ describe("BranchColumn integration", () => {
             />,
         );
 
-        expect(container.textContent).toContain("HEAD (main)");
+        expect(container.textContent).toContain("HEAD");
 
         const headRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
-            row.textContent?.includes("HEAD (main)"),
+            row.textContent?.trim() === "HEAD",
         ) as HTMLElement;
         act(() => {
             headRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
