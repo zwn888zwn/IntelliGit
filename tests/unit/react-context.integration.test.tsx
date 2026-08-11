@@ -105,6 +105,7 @@ describe("BranchColumn integration", () => {
         const headRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
             row.textContent?.trim() === "HEAD",
         ) as HTMLElement;
+        expect(headRow.classList.contains("selected")).toBe(false);
         act(() => {
             headRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });

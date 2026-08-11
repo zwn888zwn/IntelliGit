@@ -424,7 +424,7 @@ export function BranchColumn({
                     {current && (
                         <div style={HEAD_WRAPPER_STYLE}>
                             <div
-                                className={`branch-row${selectedBranch === null ? " selected" : ""}`}
+                                className="branch-row"
                                 role="button"
                                 tabIndex={0}
                                 onClick={() => onSelectBranch(current.name, current.hash)}
