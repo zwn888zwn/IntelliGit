@@ -873,7 +873,7 @@ describe("CommitGraphApp integration", () => {
         );
 
         expect(vscode.postMessage).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "filterBranch", branch: null }),
+            expect.objectContaining({ type: "revealCommit", hash: "a1" }),
         );
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "branchAction", action: "renameBranch" }),

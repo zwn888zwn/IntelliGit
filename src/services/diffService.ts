@@ -794,10 +794,6 @@ export async function openCommitFileDiff(
         }
     }
 
-    const [leftExists, rightExists] = await Promise.all([
-        gitFileExistsAtRef(safePath, parentRef, executor),
-        gitFileExistsAtRef(safePath, commitHash, executor),
-    ]);
     let leftContent: string;
     try {
         leftContent = await gitOps.getFileContentAtRef(safePath, parentRef);

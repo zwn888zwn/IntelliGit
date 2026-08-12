@@ -237,8 +237,9 @@ function App(): React.ReactElement {
                         setCommits((prev) => [...prev, ...data.commits]);
                     } else {
                         setCommits(data.commits);
-                        const targetCommit = pendingRevealHash.current
-                            ? findCommitByHash(data.commits, pendingRevealHash.current)
+                        const pendingHash = pendingRevealHash.current;
+                        const targetCommit = pendingHash
+                            ? findCommitByHash(data.commits, pendingHash)
                             : null;
                         const nextSelectedCommit = targetCommit ?? data.commits[0] ?? null;
                         if (nextSelectedCommit) {
@@ -248,6 +249,13 @@ function App(): React.ReactElement {
                                 hash: nextSelectedCommit.hash,
                                 repoRoot: nextSelectedCommit.repoRoot,
                             });
+                        }
+                        if (pendingHash && !targetCommit) {
+                            pendingRevealHash.current = null;
+                            preserveSelectedBranchOnReveal.current = false;
+                            setSelectedBranch(null);
+                            setRevealHash(null);
+                            setScrollToTopSignal((value) => value + 1);
                         }
                         if (pendingScrollToTop.current) {
                             setScrollToTopSignal((value) => value + 1);

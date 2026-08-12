@@ -1300,8 +1300,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                                     ]);
                                 }
                                 break;
-                            case "pushBranch":
-                                let pushOutput = "";
+                            case "pushBranch": {
+                                let pushOutput: string;
                                 if (target.tracked) {
                                     pushOutput = await target.repository.executor.runWithStderr([
                                         "push",
@@ -1320,6 +1320,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                                 }
                                 pushOutputs.push(pushOutput);
                                 break;
+                            }
                         }
                     }
                 },
