@@ -1080,6 +1080,9 @@ export async function openStageFileDiff(
     const leftDoc = await vscode.workspace.openTextDocument(
         diffProvider.createUri(safePath, leftLabel, leftSnapshot.content, {
             forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+            markAsCommitDiff: true,
+            originalPath: safePath,
+            sourceFsPath: workingTreeUri.fsPath,
         }),
     );
 
@@ -1090,6 +1093,9 @@ export async function openStageFileDiff(
         const rightDoc = await vscode.workspace.openTextDocument(
             diffProvider.createUri(safePath, rightLabel, rightSnapshot.content, {
                 forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+                markAsCommitDiff: true,
+                originalPath: safePath,
+                sourceFsPath: workingTreeUri.fsPath,
             }),
         );
         rightUri = rightDoc.uri;
@@ -1102,6 +1108,9 @@ export async function openStageFileDiff(
         const rightDoc = await vscode.workspace.openTextDocument(
             diffProvider.createUri(safePath, rightLabel, rightSnapshot.content, {
                 forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+                markAsCommitDiff: true,
+                originalPath: safePath,
+                sourceFsPath: workingTreeUri.fsPath,
             }),
         );
         rightUri = rightDoc.uri;

@@ -869,6 +869,15 @@ describe("view providers integration", () => {
             target: { repoRoot: "/repo", path: "src/a.ts" },
             staged: true,
         });
+        const stageDiffDocuments = openTextDocument.mock.calls
+            .map(([uri]) => uri)
+            .filter((uri) => uri?.scheme === "intelligit-diff");
+        expect(stageDiffDocuments).toHaveLength(2);
+        for (const uri of stageDiffDocuments) {
+            expect(uri.query).toContain("intelligitCommitDiff=1");
+            expect(uri.query).toContain("originalPath=src%2Fa.ts");
+            expect(uri.query).toContain("sourceFsPath=%2Frepo%2Fsrc%2Fa.ts");
+        }
         expect(executeCommand).toHaveBeenCalledWith(
             "vscode.diff",
             expect.anything(),
