@@ -376,6 +376,7 @@ describe("low coverage components", () => {
             },
         ];
         const onBranchPopupAction = vi.fn();
+        const onBranchAction = vi.fn();
         const { root, container } = mount(
             <BranchColumn
                 branches={picBranches}
@@ -387,7 +388,7 @@ describe("low coverage components", () => {
                 }}
                 selectedBranch={null}
                 onSelectBranch={vi.fn()}
-                onBranchAction={vi.fn()}
+                onBranchAction={onBranchAction}
                 onBranchPopupAction={onBranchPopupAction}
             />,
         );
@@ -413,14 +414,35 @@ describe("low coverage components", () => {
         act(() => {
             picRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(picRow.getAttribute("aria-expanded")).toBe("false");
-        expect(container.textContent).not.toContain("HEAD");
-
-        act(() => {
-            picRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-        });
         expect(picRow.getAttribute("aria-expanded")).toBe("true");
         expect(container.textContent).toContain("HEAD");
+
+        act(() => {
+            iosRow.dispatchEvent(
+                new MouseEvent("contextmenu", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: 120,
+                    clientY: 40,
+                }),
+            );
+        });
+        const newBranchItem = Array.from(
+            document.querySelectorAll(".intelligit-context-item"),
+        ).find((item) => item.textContent?.includes("New Branch from 'ios-current'"));
+        expect(newBranchItem).toBeTruthy();
+        const pushItem = Array.from(document.querySelectorAll(".intelligit-context-item")).find(
+            (item) => item.textContent?.includes("Push"),
+        ) as HTMLElement;
+        act(() => {
+            pushItem.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onBranchAction).toHaveBeenCalledWith(
+            "pushBranch",
+            "ios-current",
+            "/repos/IosLatex",
+            undefined,
+        );
 
         act(() => {
             iosRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));

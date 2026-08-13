@@ -228,7 +228,6 @@ export function BranchColumn({
         allRepositories?: boolean;
     } | null>(null);
     const [branchPopupOpen, setBranchPopupOpen] = useState(false);
-    const [repositoryBranchesExpanded, setRepositoryBranchesExpanded] = useState(true);
 
     const hasMultipleRepositories = repositories.length > 1;
     const filterNeedle = branchFilter.trim().toLowerCase();
@@ -275,6 +274,17 @@ export function BranchColumn({
         [currentRepositoryRoot],
     );
 
+    const handleRepositoryContextMenu = useCallback(
+        (event: React.MouseEvent, repoRoot: string, branch: Branch) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const row = event.currentTarget as HTMLElement;
+            const { anchorX, anchorY } = computeAnchorPosition(row, event.clientX + 2);
+            setContextMenu({ x: anchorX, y: anchorY, branch, repoRoot });
+        },
+        [],
+    );
+
     const openBranchContextMenuFromRow = useCallback(
         (row: HTMLElement, branch: Branch): void => {
             const rowRect = row.getBoundingClientRect();
@@ -312,10 +322,6 @@ export function BranchColumn({
         if (!openPopupRequest) return;
         setBranchPopupOpen(true);
     }, [openPopupRequest]);
-
-    useEffect(() => {
-        setRepositoryBranchesExpanded(true);
-    }, [repository?.root]);
 
     const worktreesDialogRepository = useMemo(() => {
         const repoRoot = worktreesDialogScope?.repoRoot;
@@ -387,18 +393,24 @@ export function BranchColumn({
                                 className="repository-row"
                                 data-selected={selected ? "true" : "false"}
                                 aria-label={`Switch to repository ${repo.name}`}
-                                aria-expanded={selected ? repositoryBranchesExpanded : false}
+                                aria-expanded={selected}
                                 onClick={() => {
-                                    if (selected) {
-                                        setRepositoryBranchesExpanded((expanded) => !expanded);
-                                        return;
-                                    }
-                                    onBranchPopupAction("switchRepository", repo.root);
+                                    if (!selected)
+                                        onBranchPopupAction("switchRepository", repo.root);
+                                }}
+                                onContextMenu={(event) => {
+                                    if (currentBranch)
+                                        handleRepositoryContextMenu(
+                                            event,
+                                            repo.root,
+                                            currentBranch,
+                                        );
                                 }}
                                 style={REPOSITORY_ROW_STYLE}
                             >
                                 <span
                                     aria-hidden="true"
+                                    data-branch-icon="repository"
                                     style={{ ...REPOSITORY_COLOR_STYLE, background: repo.color }}
                                 />
                                 <span style={REPOSITORY_TEXT_STYLE}>
@@ -440,10 +452,9 @@ export function BranchColumn({
                                     style={{
                                         flexShrink: 0,
                                         opacity: 0.65,
-                                        transform:
-                                            selected && repositoryBranchesExpanded
-                                                ? "rotate(90deg)"
-                                                : "rotate(0deg)",
+                                        transform: selected
+                                            ? "rotate(90deg)"
+                                            : "rotate(0deg)",
                                         transition: "transform 0.1s",
                                     }}
                                 />
@@ -453,7 +464,7 @@ export function BranchColumn({
                 </div>
             )}
 
-            {(!hasMultipleRepositories || repositoryBranchesExpanded) && (
+            {(!hasMultipleRepositories || !!repository) && (
                 <div style={hasMultipleRepositories ? BRANCH_TREE_SCROLL_STYLE : undefined}>
                     {current && (
                         <div style={HEAD_WRAPPER_STYLE}>
@@ -577,7 +588,13 @@ export function BranchColumn({
                               )
                             : getBranchMenuItems(
                                   contextMenu.branch,
-                                  actualCurrent?.name ?? "HEAD",
+                                  (contextMenu.repoRoot
+                                      ? repositoryBranches[contextMenu.repoRoot]?.find(
+                                            (branch) => branch.isCurrent,
+                                        )?.name
+                                      : undefined) ??
+                                      actualCurrent?.name ??
+                                      "HEAD",
                                   {
                                       checkedOutWorktree: getCheckedOutWorktree(
                                           contextMenu.branch,
