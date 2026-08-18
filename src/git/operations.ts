@@ -798,7 +798,7 @@ export class GitOps {
     }
 
     async continueRebase(): Promise<string> {
-        return this.executor.run(["rebase", "--continue"]);
+        return this.executor.run(["-c", "core.editor=true", "rebase", "--continue"]);
     }
 
     async abortMerge(): Promise<string> {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
@@ -799,6 +799,10 @@ async function waitForAsync(): Promise<void> {
 }
 
 describe("extension integration", () => {
+    afterEach(() => {
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
     beforeEach(() => {
         vi.clearAllMocks();
         [
@@ -1893,6 +1897,33 @@ describe("extension integration", () => {
             "Detected 1 unresolved merge conflict file. Opened Conflicts session.",
         );
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+    });
+
+    it("restores a conflict session when a rebase awaits completion after activation", async () => {
+        gitOpsState.isRebaseInProgress.mockResolvedValue(true);
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        await activate(context);
+
+        const vscode = await import("vscode");
+        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
+        expect(createWebviewPanelMock).toHaveBeenCalledWith(
+            "intelligit.mergeConflictSession",
+            "Conflicts",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+
+        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        expect(createWebviewPanelMock).toHaveBeenCalledTimes(2);
+
+        await latestWebviewPanel?.emitMessage({ type: "acceptAndFinish" });
+        expect(gitOpsState.continueRebase).toHaveBeenCalled();
     });
 
     it("auto commits the merge after the final conflict is resolved", async () => {

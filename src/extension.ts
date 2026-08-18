@@ -1660,8 +1660,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             const conflicts = await repository.gitOps.getConflictFilesDetailed();
             if (conflicts.length === 0) {
-                vscode.window.showInformationMessage("No unresolved merge conflicts found.");
-                return;
+                const [mergeInProgress, rebaseInProgress] = await Promise.all([
+                    repository.gitOps.isMergeInProgress(),
+                    repository.gitOps.isRebaseInProgress(),
+                ]);
+                if (!mergeInProgress && !rebaseInProgress) {
+                    vscode.window.showInformationMessage("No unresolved merge conflicts found.");
+                    return;
+                }
             }
             await openConflictSession({ repository });
         }),
@@ -1936,6 +1942,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // --- Initial load ---
 
     await applyCurrentRepositoryContext({ resetGraph: true });
+    const initialRepository = getCurrentRepository();
+    if (initialRepository && !MergeConflictSessionPanel.isOpen(initialRepository.root)) {
+        const [mergeInProgress, rebaseInProgress] = await Promise.all([
+            initialRepository.gitOps.isMergeInProgress(),
+            initialRepository.gitOps.isRebaseInProgress(),
+        ]);
+        if (mergeInProgress || rebaseInProgress) {
+            await openConflictSession({ repository: initialRepository });
+        }
+    }
     commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
     ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(vscode.window.activeTextEditor);
     await updateIntelliGitDiffNavigationContext();
