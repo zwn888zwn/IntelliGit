@@ -174,6 +174,7 @@ function App(): React.ReactElement {
     });
     const [unpushedHashes, setUnpushedHashes] = useState<Set<string>>(new Set());
     const loadingMore = useRef(false);
+    const selectedHashRef = useRef<string | null>(null);
     const pendingRevealHash = useRef<string | null>(null);
     const pendingScrollToTop = useRef(false);
     const preserveSelectedBranchOnReveal = useRef(false);
@@ -241,14 +242,25 @@ function App(): React.ReactElement {
                         const targetCommit = pendingHash
                             ? findCommitByHash(data.commits, pendingHash)
                             : null;
-                        const nextSelectedCommit = targetCommit ?? data.commits[0] ?? null;
+                        const previousSelectedCommit = selectedHashRef.current
+                            ? findCommitByHash(data.commits, selectedHashRef.current)
+                            : null;
+                        const nextSelectedCommit = targetCommit ?? previousSelectedCommit;
                         if (nextSelectedCommit) {
+                            selectedHashRef.current = nextSelectedCommit.hash;
                             setSelectedHash(nextSelectedCommit.hash);
                             vscode.postMessage({
                                 type: "selectCommit",
                                 hash: nextSelectedCommit.hash,
                                 repoRoot: nextSelectedCommit.repoRoot,
                             });
+                        } else {
+                            selectedHashRef.current = null;
+                            setSelectedHash(null);
+                            setSelectedDetail(null);
+                            setCommitFolderIcon(undefined);
+                            setCommitFolderExpandedIcon(undefined);
+                            setCommitFolderIconsByName(undefined);
                         }
                         if (pendingHash && !targetCommit) {
                             pendingRevealHash.current = null;
@@ -359,6 +371,7 @@ function App(): React.ReactElement {
                 case "revealCommit":
                     preserveSelectedBranchOnReveal.current = false;
                     pendingRevealHash.current = null;
+                    selectedHashRef.current = data.hash;
                     setSelectedHash(data.hash);
                     setRevealHash(data.hash);
                     break;
@@ -393,6 +406,7 @@ function App(): React.ReactElement {
     const handleSelectCommit = useCallback((hash: string) => {
         const selectedCommit = commits.find((commit) => commit.hash === hash) ?? null;
         if (!selectedCommit) return;
+        selectedHashRef.current = hash;
         setSelectedHash(hash);
         setRevealHash(null);
         vscode.postMessage({ type: "selectCommit", hash, repoRoot: selectedCommit.repoRoot });
@@ -408,6 +422,7 @@ function App(): React.ReactElement {
                 repoRoot: selectedCommit.repoRoot,
             });
         }
+        selectedHashRef.current = hash;
         setSelectedHash(hash);
         setRevealHash(hash);
         vscode.postMessage({ type: "revealCommit", hash });

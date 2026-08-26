@@ -747,6 +747,15 @@ describe("CommitGraphApp integration", () => {
         });
         await flush();
         expect(document.body.textContent).toContain("Branch: All branches");
+        expect(vscode.postMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "selectCommit" }),
+        );
+        const initialCommitRow = Array.from(document.querySelectorAll("div")).find(
+            (row) =>
+                (row as HTMLDivElement).style.cursor === "pointer" &&
+                row.textContent?.includes("feat: first commit"),
+        ) as HTMLDivElement;
+        expect(initialCommitRow.style.background).toBe("transparent");
         const viewport = document.querySelector(
             '[data-testid="commit-list-viewport"]',
         ) as HTMLDivElement | null;
@@ -877,9 +886,6 @@ describe("CommitGraphApp integration", () => {
         );
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "branchAction", action: "renameBranch" }),
-        );
-        expect(vscode.postMessage).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "selectCommit", hash: "aa11" }),
         );
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({
