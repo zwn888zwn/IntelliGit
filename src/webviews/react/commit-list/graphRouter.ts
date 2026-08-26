@@ -272,8 +272,8 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
     return graph.rows.map((row, rowIndex) => {
         let activeNodeIndex = activeLanes.findIndex((lane) => lane.targetHash === row.node.commitHash);
         if (activeNodeIndex < 0) {
-            activeNodeIndex = findInsertionIndexByLayout(activeLanes, row.node.layoutIndex);
-            activeLanes.splice(activeNodeIndex, 0, {
+            activeNodeIndex = activeLanes.length;
+            activeLanes.push({
                 targetHash: row.node.commitHash,
                 layoutIndex: row.node.layoutIndex,
             });
@@ -382,15 +382,6 @@ function moveNodeLaneLeftByLayout(
     const [lane] = activeLanes.splice(activeNodeIndex, 1);
     activeLanes.splice(insertIndex, 0, lane);
     return insertIndex;
-}
-
-function findInsertionIndexByLayout(activeLanes: ActiveLane[], targetLayoutIndex: number): number {
-    for (let index = 0; index < activeLanes.length; index += 1) {
-        if (activeLanes[index].layoutIndex > targetLayoutIndex) {
-            return index;
-        }
-    }
-    return activeLanes.length;
 }
 
 function getVisibleRowsForEdge(edge: PermanentEdge): number[] {

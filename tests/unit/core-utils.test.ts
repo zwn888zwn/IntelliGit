@@ -5,6 +5,7 @@ import {
     buildPermanentGraph,
     orderCommitsForGraph,
 } from "../../src/webviews/react/commit-list/graphModel";
+import { buildRenderRows } from "../../src/webviews/react/commit-list/graphRouter";
 import { formatDateTime } from "../../src/webviews/react/shared/date";
 import {
     FILE_TYPE_BADGES,
@@ -347,6 +348,29 @@ describe("core utilities", () => {
         expect(
             merge.rows[0].elements.filter((element) => element.type === "edge"),
         ).toHaveLength(2);
+    });
+
+    it("graph appends newly encountered heads after active merge lanes", () => {
+        const commits = [
+            { hash: "merge", parentHashes: ["main", "side"] },
+            { hash: "new-head", parentHashes: ["new-base"] },
+            { hash: "side", parentHashes: ["main"] },
+            { hash: "new-base", parentHashes: ["main"] },
+            { hash: "main", parentHashes: [] },
+        ];
+        const layoutIndexByHash = new Map([
+            ["merge", 0],
+            ["main", 0],
+            ["new-head", 5],
+            ["new-base", 5],
+            ["side", 10],
+        ]);
+
+        const graph = buildRenderRows(
+            buildPermanentGraph(commits, layoutIndexByHash, [0, 1]),
+        );
+
+        expect(graph.rows[1].nodePosition).toBe(2);
     });
 
     it("graph layout keeps the true head path on one layout through the merge base", () => {
