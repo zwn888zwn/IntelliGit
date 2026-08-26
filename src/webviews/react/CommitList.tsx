@@ -33,6 +33,14 @@ import {
 const MIN_PREFIX_LENGTH = 7;
 const MAX_GRAPH_WIDTH = 240;
 const PRELOAD_ROWS = 80;
+const IDEA_GRAPH_TEXT_LANE_LIMIT = 6;
+const IDEA_GRAPH_TEXT_GAP = 2;
+const CURRENT_BRANCH_ROW_BACKGROUND =
+    "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 30%, transparent)";
+
+function commitGraphKey(repoRoot: string, hash: string): string {
+    return `${repoRoot}\u0000${hash}`;
+}
 
 interface Props {
     commits: Commit[];
@@ -100,7 +108,11 @@ export function CommitList({
     const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
     const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
     const repoRailWidth = repoRailExpanded ? 168 : 10;
-    const headerGraphWidth = repoRailWidth + Math.min(graphWidth, 44);
+    const graphTextFloor = Math.min(
+        graphWidth,
+        IDEA_GRAPH_TEXT_LANE_LIMIT * LANE_WIDTH * graphScale + IDEA_GRAPH_TEXT_GAP,
+    );
+    const headerGraphWidth = repoRailWidth + graphTextFloor;
     const repositoryLookup = useMemo(
         () => new Map(repositories.map((item) => [item.root, item])),
         [repositories],
@@ -109,6 +121,35 @@ export function CommitList({
         () => new Map(commits.map((commit) => [commit.hash, commit])),
         [commits],
     );
+    const currentBranchCommitKeys = useMemo(() => {
+        const commitByKey = new Map<string, Commit>();
+        for (const commit of orderedCommits) {
+            commitByKey.set(commitGraphKey(commit.repoRoot, commit.hash), commit);
+            commitByKey.set(commitGraphKey(commit.repoRoot, commit.shortHash), commit);
+        }
+        const visited = new Set<string>();
+        const reachable = new Set<string>();
+
+        for (const currentRef of currentCommitRefs) {
+            const pending = [currentRef.hash];
+            while (pending.length > 0) {
+                const hash = pending.pop();
+                if (!hash) continue;
+
+                const key = commitGraphKey(currentRef.repoRoot, hash);
+                if (visited.has(key)) continue;
+                visited.add(key);
+
+                const commit = commitByKey.get(key);
+                if (!commit) continue;
+
+                reachable.add(commitGraphKey(commit.repoRoot, commit.hash));
+                pending.push(...commit.parentHashes);
+            }
+        }
+
+        return reachable;
+    }, [currentCommitRefs, orderedCommits]);
     const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
     const visibleArrowMarkers = graph.arrowMarkers;
 
@@ -432,18 +473,33 @@ export function CommitList({
                         >
                             {visibleCommits.map((commit, offset) => {
                                 const idx = visibleRange.start + offset;
+                                const isCurrentBranchCommit = currentBranchCommitKeys.has(
+                                    commitGraphKey(commit.repoRoot, commit.hash),
+                                );
                                 return (
-                                    <CommitRow
+                                    <div
                                         key={`${commit.repoRoot}:${commit.hash}:${idx}`}
-                                        commit={commit}
-                                        rowLeftOffset={repoRailWidth}
-                                        messageIndent={(graphRows[idx]?.occupiedWidth ?? 40) * graphScale}
-                                        isSelected={selectedHash === commit.hash}
-                                        isUnpushed={isUnpushedCommit(commit.hash)}
-                                        laneColor={graphRows[idx]?.nodeColor}
-                                        onSelect={onSelectCommit}
-                                        onContextMenu={handleRowContextMenu}
-                                    />
+                                        style={{
+                                            height: ROW_HEIGHT,
+                                            background: isCurrentBranchCommit
+                                                ? CURRENT_BRANCH_ROW_BACKGROUND
+                                                : "transparent",
+                                        }}
+                                    >
+                                        <CommitRow
+                                            commit={commit}
+                                            rowLeftOffset={repoRailWidth}
+                                            messageIndent={Math.max(
+                                                graphTextFloor,
+                                                (graphRows[idx]?.occupiedWidth ?? 40) * graphScale,
+                                            )}
+                                            isSelected={selectedHash === commit.hash}
+                                            isUnpushed={isUnpushedCommit(commit.hash)}
+                                            laneColor={graphRows[idx]?.nodeColor}
+                                            onSelect={onSelectCommit}
+                                            onContextMenu={handleRowContextMenu}
+                                        />
+                                    </div>
                                 );
                             })}
                         </div>

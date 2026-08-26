@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import {
-    DOT_RADIUS,
     LANE_WIDTH,
     ROW_HEIGHT,
     type EdgeAnchor,
@@ -10,8 +9,11 @@ import {
 
 const GRAPH_LEFT_PAD = 0;
 const OVERSCAN_ROWS = 8;
-const EDGE_LINE_WIDTH = 1.25;
-const CURRENT_RING_WIDTH = 1.75;
+const IDEA_BASE_ROW_HEIGHT = 22;
+const EDGE_LINE_WIDTH = (1.5 * ROW_HEIGHT) / IDEA_BASE_ROW_HEIGHT;
+const NODE_RADIUS = (4 * ROW_HEIGHT) / IDEA_BASE_ROW_HEIGHT;
+const HEAD_OUTER_RADIUS = (6 * ROW_HEIGHT) / IDEA_BASE_ROW_HEIGHT;
+const HEAD_INNER_RADIUS = (2 * ROW_HEIGHT) / IDEA_BASE_ROW_HEIGHT;
 
 interface Args {
     canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -147,23 +149,42 @@ export function useCommitGraphCanvas({
                 if (node) {
                     const cx = positionX(node.position);
                     const cy = y + ROW_HEIGHT / 2;
+                    const nodeRadius = Math.max(2.25, NODE_RADIUS * graphScale);
                     if (isCurrentCommit(row)) {
                         ctx.beginPath();
-                        ctx.strokeStyle = node.color;
-                        ctx.lineWidth = Math.max(1.5, CURRENT_RING_WIDTH * graphScale);
+                        ctx.fillStyle = node.color;
                         ctx.arc(
                             cx,
                             cy,
-                            Math.max(6, (DOT_RADIUS + 3) * graphScale),
+                            Math.max(6, HEAD_OUTER_RADIUS * graphScale),
                             0,
                             Math.PI * 2,
                         );
-                        ctx.stroke();
+                        ctx.fill();
+
+                        const previousCompositeOperation = ctx.globalCompositeOperation;
+                        ctx.globalCompositeOperation = "destination-out";
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, nodeRadius, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.globalCompositeOperation = previousCompositeOperation;
+
+                        ctx.beginPath();
+                        ctx.fillStyle = node.color;
+                        ctx.arc(
+                            cx,
+                            cy,
+                            Math.max(2, HEAD_INNER_RADIUS * graphScale),
+                            0,
+                            Math.PI * 2,
+                        );
+                        ctx.fill();
+                    } else {
+                        ctx.beginPath();
+                        ctx.fillStyle = node.color;
+                        ctx.arc(cx, cy, nodeRadius, 0, Math.PI * 2);
+                        ctx.fill();
                     }
-                    ctx.beginPath();
-                    ctx.fillStyle = node.color;
-                    ctx.arc(cx, cy, Math.max(2.25, DOT_RADIUS * graphScale), 0, Math.PI * 2);
-                    ctx.fill();
                 }
             }
         };
