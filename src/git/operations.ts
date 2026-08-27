@@ -9,6 +9,7 @@ import type {
     CommitFile,
     GitBlameLine,
     ProjectComparisonFile,
+    ProjectComparisonTarget,
     WorkingFile,
     StashEntry,
     MergeConflictFile,
@@ -594,7 +595,10 @@ export class GitOps {
         return files;
     }
 
-    async getBranchComparisonFiles(ref: string): Promise<ProjectComparisonFile[]> {
+    async getBranchComparisonFiles(
+        ref: string,
+        target: ProjectComparisonTarget,
+    ): Promise<ProjectComparisonFile[]> {
         const trimmedRef = ref.trim();
         if (!trimmedRef) return [];
 
@@ -628,12 +632,13 @@ export class GitOps {
             return created;
         };
 
+        const diffRefs =
+            target.kind === "current-branch" ? [trimmedRef, "HEAD", "--"] : [trimmedRef, "--"];
         const nameStatus = await this.executor.run([
             "diff",
             "--name-status",
             "--find-renames",
-            trimmedRef,
-            "--",
+            ...diffRefs,
         ]);
 
         for (const line of nameStatus.trim().split("\n")) {
@@ -659,8 +664,7 @@ export class GitOps {
                 "diff",
                 "--numstat",
                 "--find-renames",
-                trimmedRef,
-                "--",
+                ...diffRefs,
             ]);
             for (const line of numstat.trim().split("\n")) {
                 if (!line.trim()) continue;
@@ -681,6 +685,31 @@ export class GitOps {
             }
         } catch (err) {
             logGitOpsWarning("Failed to get branch comparison numstat", err, { notifyUser: true });
+        }
+
+        if (target.kind === "working-tree") {
+            const untracked = await this.executor.run([
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ]);
+            for (const rawPath of untracked.split("\0")) {
+                if (!rawPath) continue;
+                const filePath = rawPath;
+                const existing = files.get(filePath);
+                if (!existing) {
+                    upsertFile(filePath, "A");
+                } else if (existing.status === "D") {
+                    files.set(filePath, {
+                        ...existing,
+                        status: "M",
+                        oldPath: undefined,
+                        additions: 0,
+                        deletions: 0,
+                    });
+                }
+            }
         }
 
         return Array.from(files.values()).sort((a, b) => a.path.localeCompare(b.path));

@@ -1270,6 +1270,153 @@ describe("view providers integration", () => {
         );
     });
 
+    it("openBranchComparisonFileDiff compares renamed text snapshots with HEAD", async () => {
+        const { openBranchComparisonFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async (filePath: string, ref: string) =>
+                `${ref}:${filePath}`,
+            ),
+        };
+
+        await openBranchComparisonFileDiff(
+            {
+                repoId: ".",
+                repoRoot: "/repo",
+                path: "src/new-name.ts",
+                oldPath: "src/old-name.ts",
+                status: "R",
+                additions: 2,
+                deletions: 1,
+            },
+            "feature",
+            { kind: "current-branch", label: "Current Branch" },
+            "/repo",
+            gitOps as unknown as never,
+            undefined,
+            2,
+            "comparison-1",
+        );
+
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(
+            1,
+            "src/old-name.ts",
+            "feature",
+        );
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(
+            2,
+            "src/new-name.ts",
+            "HEAD",
+        );
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("ref=feature"),
+            }),
+            expect.objectContaining({
+                scheme: "intelligit-diff",
+                query: expect.stringContaining("ref=HEAD"),
+            }),
+            "src/new-name.ts (feature ↔ Current Branch)",
+            { viewColumn: 2, preview: true },
+        );
+        const diffCall = executeCommand.mock.calls.find((call) => call[0] === "vscode.diff");
+        expect(diffCall?.[1]?.query).toContain("intelligitProjectComparison=comparison-1");
+        expect(diffCall?.[2]?.query).toContain("intelligitProjectComparison=comparison-1");
+    });
+
+    it("openBranchComparisonFileDiff previews an added HEAD image against a placeholder", async () => {
+        const { openBranchComparisonFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async () => {
+                throw new Error("image text fallback should not run");
+            }),
+        };
+        const executor = {
+            run: vi.fn(async (args: string[]) => {
+                if (args[0] === "cat-file" && args[2] === "HEAD:assets/new-logo.png") {
+                    return "";
+                }
+                throw new Error("missing");
+            }),
+        };
+
+        await openBranchComparisonFileDiff(
+            {
+                repoId: ".",
+                repoRoot: "/repo",
+                path: "assets/new-logo.png",
+                status: "A",
+                additions: 0,
+                deletions: 0,
+            },
+            "feature",
+            { kind: "current-branch", label: "Current Branch" },
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(gitOps.getFileContentAtRef).not.toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/new-logo.png",
+                query: expect.stringContaining('"ref":"HEAD"'),
+            }),
+            "assets/new-logo.png (feature ↔ Current Branch)",
+        );
+        const diffCall = executeCommand.mock.calls.find((call) => call[0] === "vscode.diff");
+        expect(diffCall?.[2]?.query).toContain('"originalPath":"assets/new-logo.png"');
+    });
+
+    it("openBranchComparisonFileDiff previews a working-tree deletion against a placeholder", async () => {
+        const { openBranchComparisonFileDiff } = await import("../../src/services/diffService");
+        const gitOps = {
+            getFileContentAtRef: vi.fn(async () => {
+                throw new Error("image text fallback should not run");
+            }),
+        };
+        const executor = { run: vi.fn(async () => "") };
+        fsStat.mockRejectedValueOnce(new Error("missing"));
+
+        await openBranchComparisonFileDiff(
+            {
+                repoId: ".",
+                repoRoot: "/repo",
+                path: "assets/removed-logo.png",
+                status: "D",
+                additions: 0,
+                deletions: 0,
+            },
+            "feature",
+            { kind: "working-tree", label: "Working Tree" },
+            "/repo",
+            gitOps as unknown as never,
+            executor as unknown as never,
+        );
+
+        expect(gitOps.getFileContentAtRef).not.toHaveBeenCalled();
+        expect(executeCommand).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.objectContaining({
+                scheme: "git",
+                path: "/repo/assets/removed-logo.png",
+                query: expect.stringContaining('"originalPath":"assets/removed-logo.png"'),
+            }),
+            expect.objectContaining({
+                scheme: "file",
+                fsPath: expect.stringContaining("intelligit-image-placeholders"),
+            }),
+            "assets/removed-logo.png (feature ↔ Working Tree)",
+        );
+    });
+
     it("CommitPanelViewProvider opens binary working files as placeholder diffs", async () => {
         const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
         const gitOps = makeGitOpsMock();

@@ -127,6 +127,10 @@ export interface ProjectComparisonFile {
     icon?: ThemeTreeIcon;
 }
 
+export type ProjectComparisonTarget =
+    | { kind: "current-branch"; label: string }
+    | { kind: "working-tree"; label: string };
+
 export interface StashEntry {
     index: number;
     message: string;

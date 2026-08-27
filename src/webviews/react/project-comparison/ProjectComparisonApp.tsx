@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Box, ChakraProvider, Flex } from "@chakra-ui/react";
 import theme from "../commit-panel/theme";
@@ -21,6 +21,7 @@ const INDENT_STEP = 16;
 
 const initialState: ProjectComparisonState = {
     branchName: "",
+    targetLabel: "",
     repository: null,
     files: [],
     iconFonts: [],
@@ -40,6 +41,7 @@ function App(): React.ReactElement {
                 setState((prev) => ({
                     ...prev,
                     branchName: message.branchName,
+                    targetLabel: message.targetLabel,
                     repository: message.repository,
                     files: message.files,
                     folderIcon: message.folderIcon,
@@ -138,7 +140,7 @@ function Header({
         >
             <Box flex={1} minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
                 <Box as="span" fontWeight={600}>
-                    {state.branchName || "Branch"}
+                    {state.branchName || "Branch"} {"\u2194"} {state.targetLabel || "Current"}
                 </Box>
                 {repoLabel && (
                     <Box
@@ -191,9 +193,22 @@ function ComparisonTree({
 }): React.ReactElement {
     const tree = useMemo(() => buildFileTree(files), [files]);
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
+    const seenDirsRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
-        setExpandedDirs(new Set(collectDirPaths(tree)));
+        const allDirs = collectDirPaths(tree);
+        setExpandedDirs((prev) => {
+            const next = new Set(prev);
+            let changed = false;
+            for (const dir of allDirs) {
+                if (!seenDirsRef.current.has(dir)) {
+                    seenDirsRef.current.add(dir);
+                    next.add(dir);
+                    changed = true;
+                }
+            }
+            return changed ? next : prev;
+        });
     }, [tree]);
 
     useEffect(() => {
@@ -290,10 +305,30 @@ function TreeEntryRow({
                 fontSize="13px"
                 fontFamily={SYSTEM_FONT_STACK}
                 cursor="pointer"
+                role="treeitem"
+                aria-expanded={isExpanded}
+                aria-level={depth + 1}
+                tabIndex={0}
                 whiteSpace="nowrap"
                 title={entry.path}
                 _hover={{ bg: "var(--vscode-list-hoverBackground)" }}
                 onClick={() => onToggleDir(entry.path)}
+                onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onToggleDir(entry.path);
+                        return;
+                    }
+                    if (event.key === "ArrowRight") {
+                        event.preventDefault();
+                        if (!isExpanded) onToggleDir(entry.path);
+                        return;
+                    }
+                    if (event.key === "ArrowLeft") {
+                        event.preventDefault();
+                        if (isExpanded) onToggleDir(entry.path);
+                    }
+                }}
             >
                 <Box
                     as="span"
@@ -351,13 +386,20 @@ function ComparisonFileRow({
     isActive: boolean;
     onOpenDiff: (file: ProjectComparisonFile) => void;
 }): React.ReactElement {
+    const rowRef = useRef<HTMLDivElement>(null);
     const fileName = getLeafName(file.path);
     const dir = getParentPath(file.path);
     const statusColor = GIT_STATUS_COLORS[file.status] ?? "var(--vscode-foreground)";
     const rowBackground = isTestFilePath(file.path) ? TEST_FILE_ROW_BACKGROUND : undefined;
 
+    useEffect(() => {
+        if (!isActive || typeof rowRef.current?.scrollIntoView !== "function") return;
+        rowRef.current.scrollIntoView({ block: "nearest" });
+    }, [isActive]);
+
     return (
         <Flex
+            ref={rowRef}
             align="center"
             gap="4px"
             minH="22px"
@@ -369,6 +411,8 @@ function ComparisonFileRow({
             cursor="pointer"
             role="treeitem"
             aria-selected={isActive}
+            aria-level={depth + 1}
+            tabIndex={0}
             bg={isActive ? "var(--vscode-list-activeSelectionBackground)" : rowBackground}
             color={isActive ? "var(--vscode-list-activeSelectionForeground)" : undefined}
             title={file.oldPath && file.oldPath !== file.path ? `${file.oldPath} -> ${file.path}` : file.path}
@@ -378,6 +422,11 @@ function ComparisonFileRow({
                     : "var(--vscode-list-hoverBackground)",
             }}
             onClick={() => onOpenDiff(file)}
+            onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                onOpenDiff(file);
+            }}
         >
             <Box as="span" w="14px" flexShrink={0} />
             <TreeFileIcon status={file.status} icon={file.icon} />

@@ -96,12 +96,17 @@ let registeredDefinitionProvider:
           ) => Promise<unknown> | unknown;
       }
     | undefined;
-let latestWebviewPanel:
-    | {
-          webview: { postMessage: ReturnType<typeof vi.fn> };
-          emitMessage: (message: unknown) => Promise<void>;
-      }
-    | undefined;
+type MockWebviewPanel = {
+    webview: { postMessage: ReturnType<typeof vi.fn> };
+    viewColumn: number | undefined;
+    active: boolean;
+    visible: boolean;
+    emitMessage: (message: unknown) => Promise<void>;
+    emitViewState: (active: boolean, viewColumn?: number) => Promise<void>;
+    dispose: () => void;
+};
+const createdWebviewPanels: MockWebviewPanel[] = [];
+let latestWebviewPanel: MockWebviewPanel | undefined;
 
 let workspaceFolders: Array<{ uri: { fsPath: string; path: string } }> | undefined = [
     { uri: { fsPath: "/repo", path: "/repo" } },
@@ -114,6 +119,7 @@ let activeTextEditor:
           selection?: { active: { line: number; character: number } };
       }
     | undefined = undefined;
+let editorTabGroups: unknown[] = [{}, {}];
 
 class MockDisposable {
     constructor(private readonly fn: () => void) {}
@@ -468,7 +474,7 @@ vi.mock("vscode", () => ({
     StatusBarAlignment: { Left: 1, Right: 2 },
     QuickPickItemKind: { Separator: -1 },
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
-    ViewColumn: { Active: -1, One: 1, Two: 2, Three: 3 },
+    ViewColumn: { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3 },
     ProgressLocation: { Notification: 15 },
     FileType: { File: 1 },
     FileChangeType: { Changed: 1, Created: 2, Deleted: 3 },
@@ -514,6 +520,7 @@ vi.mock("vscode", () => ({
         }),
         executeCommand: vi.fn(async (id: string, ...args: unknown[]) => {
             if (id === "vscode.diff" && args[1] && typeof args[1] === "object") {
+                if (editorTabGroups.length === 1) editorTabGroups = [...editorTabGroups, {}];
                 activeTextEditor = {
                     document: {
                         uri: args[1] as { fsPath: string; path: string; scheme: string },
@@ -530,6 +537,11 @@ vi.mock("vscode", () => ({
         get activeTextEditor() {
             return activeTextEditor;
         },
+        tabGroups: {
+            get all() {
+                return editorTabGroups;
+            },
+        },
         onDidChangeActiveTextEditor: vi.fn((listener: (editor: unknown) => void) => {
             activeEditorListeners.push(listener);
             return { dispose: vi.fn() };
@@ -544,10 +556,24 @@ vi.mock("vscode", () => ({
             badge: undefined,
             dispose: vi.fn(),
         })),
-        createWebviewPanel: vi.fn(() => {
+        createWebviewPanel: vi.fn((_viewType: string, _title: string, showOptions: unknown) => {
             const msgListeners: Array<(msg: unknown) => void> = [];
             const disposeListeners: Array<() => void> = [];
-            const panel = {
+            const viewStateListeners: Array<(event: { webviewPanel: MockWebviewPanel }) => void> = [];
+            let disposed = false;
+            for (const existingPanel of createdWebviewPanels) existingPanel.active = false;
+            const panel: MockWebviewPanel & {
+                webview: MockWebviewPanel["webview"] & Record<string, unknown>;
+                onDidDispose: ReturnType<typeof vi.fn>;
+                onDidChangeViewState: ReturnType<typeof vi.fn>;
+                reveal: ReturnType<typeof vi.fn>;
+            } = {
+                viewColumn:
+                    typeof showOptions === "number"
+                        ? showOptions
+                        : (showOptions as { viewColumn?: number } | undefined)?.viewColumn,
+                active: true,
+                visible: true,
                 webview: {
                     options: {},
                     html: "",
@@ -563,15 +589,31 @@ vi.mock("vscode", () => ({
                     disposeListeners.push(listener);
                     return { dispose: vi.fn() };
                 }),
+                onDidChangeViewState: vi.fn(
+                    (listener: (event: { webviewPanel: MockWebviewPanel }) => void) => {
+                        viewStateListeners.push(listener);
+                        return { dispose: vi.fn() };
+                    },
+                ),
                 reveal: vi.fn(),
                 dispose: vi.fn(() => {
+                    if (disposed) return;
+                    disposed = true;
                     for (const listener of disposeListeners) listener();
                 }),
                 async emitMessage(message: unknown): Promise<void> {
                     for (const listener of msgListeners) await listener(message);
                 },
+                async emitViewState(active: boolean, viewColumn?: number): Promise<void> {
+                    panel.active = active;
+                    if (viewColumn !== undefined) panel.viewColumn = viewColumn;
+                    for (const listener of viewStateListeners) {
+                        await listener({ webviewPanel: panel });
+                    }
+                },
             };
             latestWebviewPanel = panel;
+            createdWebviewPanels.push(panel);
             return panel;
         }),
         showInformationMessage,
@@ -800,7 +842,8 @@ async function waitForAsync(): Promise<void> {
 
 describe("extension integration", () => {
     afterEach(() => {
-        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+        for (const panel of createdWebviewPanels) panel.dispose();
+        createdWebviewPanels.length = 0;
     });
 
     beforeEach(() => {
@@ -840,6 +883,8 @@ describe("extension integration", () => {
         latestCommitPanelProvider = undefined;
         latestBlameController = undefined;
         latestWebviewPanel = undefined;
+        editorTabGroups = [{}, {}];
+        createdWebviewPanels.length = 0;
         createdStatusBarItems.length = 0;
         openTextDocument.mockImplementation(async (arg: unknown) => ({
             uri: arg,
@@ -985,6 +1030,7 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.revealCommitInGraph")).toBe(true);
         expect(registeredCommands.has("intelligit.openCommitDiffSource")).toBe(true);
         expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
+        expect(registeredCommands.has("intelligit.compareCurrentBranchWithBranch")).toBe(true);
         expect(registeredCommands.has("intelligit.showBranchPopup")).toBe(true);
         expect(registeredCommands.has("intelligit.abortMerge")).toBe(true);
         expect(registeredCommands.has("intelligit.previousDiffFile")).toBe(true);
@@ -2480,15 +2526,28 @@ describe("extension integration", () => {
 
         expect(showQuickPick).toHaveBeenCalledWith(
             expect.any(Array),
-            expect.objectContaining({ title: "Compare Project with Branch" }),
+            expect.objectContaining({ title: "Compare Working Tree with Branch" }),
+        );
+        expect(showQuickPick.mock.calls.at(-1)?.[0]).toEqual(
+            expect.arrayContaining([expect.objectContaining({ refName: "main" })]),
         );
         expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
             "intelligit.projectBranchComparison",
-            "Difference Between feature-local and Current",
+            "Difference Between feature-local and Working Tree",
             expect.any(Number),
             expect.objectContaining({ enableScripts: true }),
         );
-        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenCalledWith("feature-local");
+        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenCalledWith("feature-local", {
+            kind: "working-tree",
+            label: "Working Tree",
+        });
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({
+                type: "update",
+                branchName: "feature-local",
+                targetLabel: "Working Tree",
+            }),
+        );
 
         await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/changed.ts" });
         await waitForAsync();
@@ -2502,7 +2561,12 @@ describe("extension integration", () => {
             expect.anything(),
             expect.objectContaining({ fsPath: "/repo-a/src/changed.ts" }),
             expect.stringContaining("feature-local"),
+            expect.objectContaining({ viewColumn: 2 }),
         );
+        expect(executeCommandFallback).toHaveBeenCalledWith("vscode.setEditorLayout", {
+            orientation: 0,
+            groups: [{ size: 0.25 }, { size: 0.75 }],
+        });
         expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith({
             type: "setActiveFile",
             path: "src/changed.ts",
@@ -2546,6 +2610,10 @@ describe("extension integration", () => {
             "intelligit.diffNavigation.hasPrevious",
             true,
         );
+        expect(executeCommandFallback).not.toHaveBeenCalledWith(
+            "vscode.setEditorLayout",
+            expect.anything(),
+        );
         expect(createdStatusBarItems[2]?.text).toBe("2/2 files");
         executeCommandFallback.mockClear();
 
@@ -2568,8 +2636,184 @@ describe("extension integration", () => {
             "intelligit.diffNavigation.hasPrevious",
             false,
         );
+        expect(executeCommandFallback).not.toHaveBeenCalledWith(
+            "vscode.setEditorLayout",
+            expect.anything(),
+        );
         executeCommandFallback.mockClear();
 
+        editorTabGroups = [{}];
+        await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/next.ts" });
+        await waitForAsync();
+
+        expect(executeCommandFallback).toHaveBeenCalledWith("vscode.setEditorLayout", {
+            orientation: 0,
+            groups: [{ size: 0.25 }, { size: 0.75 }],
+        });
+
+    });
+
+    it("compares the current branch with a different selected branch", async () => {
+        const { activate } = await import("../../src/extension");
+        const vscode = await import("vscode");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: mockDisposables,
+        } as unknown as MockExtensionContext;
+        await activate(context);
+
+        showQuickPick.mockImplementationOnce(async (items: Array<Record<string, unknown>>) => {
+            expect(items).not.toEqual(
+                expect.arrayContaining([expect.objectContaining({ refName: "main" })]),
+            );
+            return items.find((item) => item.refName === "feature-local");
+        });
+
+        await registeredCommands.get("intelligit.compareCurrentBranchWithBranch")?.({
+            scheme: "file",
+            fsPath: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+
+        expect(showQuickPick).toHaveBeenCalledWith(
+            expect.any(Array),
+            expect.objectContaining({ title: "Compare Current Branch with Branch" }),
+        );
+        expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+            "intelligit.projectBranchComparison",
+            "Difference Between feature-local and main",
+            expect.any(Number),
+            expect.objectContaining({ enableScripts: true }),
+        );
+        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenCalledWith("feature-local", {
+            kind: "current-branch",
+            label: "main",
+        });
+
+        await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/changed.ts" });
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/changed.ts",
+            "feature-local",
+        );
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith("src/changed.ts", "HEAD");
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.diff",
+            expect.anything(),
+            expect.anything(),
+            expect.stringContaining("feature-local ↔ main"),
+            expect.objectContaining({ viewColumn: 2 }),
+        );
+    });
+
+    it("replays an initial project comparison refresh error when the webview becomes ready", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: mockDisposables,
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        gitOpsState.getBranchComparisonFiles.mockRejectedValueOnce(
+            new Error("comparison refresh failed"),
+        );
+        showQuickPick.mockImplementationOnce(async (items: Array<Record<string, unknown>>) => {
+            return items.find((item) => item.refName === "feature-local");
+        });
+
+        await registeredCommands.get("intelligit.compareProjectWithBranch")?.({
+            scheme: "file",
+            fsPath: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+
+        expect(showErrorMessage).toHaveBeenCalledWith("comparison refresh failed");
+        latestWebviewPanel?.webview.postMessage.mockClear();
+        await latestWebviewPanel?.emitMessage({ type: "ready" });
+
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                type: "update",
+                branchName: "feature-local",
+                targetLabel: "Working Tree",
+            }),
+        );
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenNthCalledWith(2, {
+            type: "error",
+            message: "comparison refresh failed",
+        });
+    });
+
+    it("tracks project comparison panel recency and falls back when the active panel closes", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: mockDisposables,
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        showQuickPick.mockImplementation(async (items: Array<Record<string, unknown>>) => {
+            return items.find((item) => item.refName === "feature-local");
+        });
+
+        await registeredCommands.get("intelligit.compareProjectWithBranch")?.({
+            scheme: "file",
+            fsPath: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+        const workingTreePanel = latestWebviewPanel!;
+        await workingTreePanel.emitMessage({ type: "openDiff", path: "src/changed.ts" });
+        await waitForAsync();
+
+        await registeredCommands.get("intelligit.compareCurrentBranchWithBranch")?.({
+            scheme: "file",
+            fsPath: "/repo-a",
+            path: "/repo-a",
+        });
+        await waitForAsync();
+        const currentBranchPanel = latestWebviewPanel!;
+        await currentBranchPanel.emitMessage({ type: "openDiff", path: "src/changed.ts" });
+        await waitForAsync();
+
+        activeTextEditor = {
+            document: {
+                uri: {
+                    scheme: "file",
+                    fsPath: "/repo-a/src/changed.ts",
+                    path: "/repo-a/src/changed.ts",
+                },
+            },
+        };
+        for (const listener of activeEditorListeners) listener(activeTextEditor);
+        await waitForAsync();
+        gitOpsState.getFileContentAtRef.mockClear();
+
+        await registeredCommands.get("intelligit.nextDiffFile")?.();
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/next.ts",
+            "feature-local",
+        );
+        expect(gitOpsState.getFileContentAtRef).not.toHaveBeenCalledWith("src/next.ts", "HEAD");
+
+        await currentBranchPanel.emitViewState(true);
+        currentBranchPanel.dispose();
+        gitOpsState.getFileContentAtRef.mockClear();
+        await registeredCommands.get("intelligit.previousDiffFile")?.();
+        await waitForAsync();
+
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith(
+            "src/changed.ts",
+            "feature-local",
+        );
+        expect(gitOpsState.getFileContentAtRef).not.toHaveBeenCalledWith(
+            "src/changed.ts",
+            "HEAD",
+        );
     });
 
     it("opens renamed project comparison files against the old path on the compared branch", async () => {
@@ -2621,6 +2865,7 @@ describe("extension integration", () => {
             expect.anything(),
             expect.objectContaining({ fsPath: "/repo-a/src/new.ts" }),
             expect.stringContaining("feature-local"),
+            expect.objectContaining({ viewColumn: 2 }),
         );
     });
 

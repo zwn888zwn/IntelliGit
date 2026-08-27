@@ -12,7 +12,7 @@ import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
 import { MergeEditorPanel } from "./views/MergeEditorPanel";
 import { NoWorkspaceViewProvider } from "./views/NoWorkspaceViewProvider";
 import { ProjectBranchComparisonPanel } from "./views/ProjectBranchComparisonPanel";
-import type { Branch, CommitDetail, GitWorktree } from "./types";
+import type { Branch, CommitDetail, GitWorktree, ProjectComparisonTarget } from "./types";
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
@@ -273,6 +273,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             return repositoryService.getRepositoryForUri(fileUri) ?? getCurrentRepository();
         }
         return getCurrentRepository();
+    };
+    const pickProjectComparisonBranch = async (
+        repository: RepositoryEntry,
+        targetKind: ProjectComparisonTarget["kind"],
+    ): Promise<{ refName: string; target: ProjectComparisonTarget } | null> => {
+        const branches = await repository.gitOps.getBranches();
+        const currentBranch = branches.find((branch) => branch.isCurrent);
+        const target: ProjectComparisonTarget =
+            targetKind === "current-branch"
+                ? { kind: targetKind, label: currentBranch?.name ?? "HEAD" }
+                : { kind: targetKind, label: "Working Tree" };
+        const picks = branches
+            .filter((branch) => targetKind !== "current-branch" || !branch.isCurrent)
+            .slice()
+            .sort((a, b) => {
+                if (a.isRemote !== b.isRemote) return a.isRemote ? 1 : -1;
+                if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            })
+            .map((branch) => ({
+                label: branch.isCurrent ? `${branch.name} (current)` : branch.name,
+                description: branch.isRemote ? "remote branch" : "local branch",
+                detail: branch.hash,
+                refName: branch.name,
+            }));
+        const targetName =
+            targetKind === "current-branch" ? "Current Branch" : "Working Tree";
+        const picked = await vscode.window.showQuickPick(picks, {
+            title: `Compare ${targetName} with Branch`,
+            placeHolder: `Select a branch for ${repository.info.relativePath ?? repository.info.name}`,
+            ignoreFocusOut: true,
+            matchOnDescription: true,
+            matchOnDetail: true,
+        });
+        return picked ? { refName: picked.refName, target } : null;
     };
     let commitDiffSourceContextSeq = 0;
     const updateCommitDiffSourceContext = async (
@@ -1614,34 +1649,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
 
                 try {
-                    const branches = await repository.gitOps.getBranches();
-                    const picks = branches
-                        .slice()
-                        .sort((a, b) => {
-                            if (a.isRemote !== b.isRemote) return a.isRemote ? 1 : -1;
-                            if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
-                            return a.name.localeCompare(b.name);
-                        })
-                        .map((branch) => ({
-                            label: branch.isCurrent ? `${branch.name} (current)` : branch.name,
-                            description: branch.isRemote ? "remote branch" : "local branch",
-                            detail: branch.hash,
-                            refName: branch.name,
-                        }));
-
-                    const picked = await vscode.window.showQuickPick(picks, {
-                        title: "Compare Project with Branch",
-                        placeHolder: `Select a branch for ${repository.info.relativePath ?? repository.info.name}`,
-                        ignoreFocusOut: true,
-                        matchOnDescription: true,
-                        matchOnDetail: true,
-                    });
+                    const picked = await pickProjectComparisonBranch(repository, "working-tree");
                     if (!picked) return;
 
                     ProjectBranchComparisonPanel.open(
                         context.extensionUri,
                         repository,
                         picked.refName,
+                        picked.target,
                         () => {
                             void updateIntelliGitDiffNavigationContext();
                         },
@@ -1649,6 +1664,36 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 } catch (error) {
                     const message = getErrorMessage(error);
                     vscode.window.showErrorMessage(`Compare project with branch failed: ${message}`);
+                }
+            },
+        ),
+        vscode.commands.registerCommand(
+            "intelligit.compareCurrentBranchWithBranch",
+            async (ctx?: unknown) => {
+                const repository = resolveRepositoryForResourceContext(ctx);
+                if (!repository) {
+                    vscode.window.showWarningMessage("No git repository found for the selected resource.");
+                    return;
+                }
+
+                try {
+                    const picked = await pickProjectComparisonBranch(repository, "current-branch");
+                    if (!picked) return;
+
+                    ProjectBranchComparisonPanel.open(
+                        context.extensionUri,
+                        repository,
+                        picked.refName,
+                        picked.target,
+                        () => {
+                            void updateIntelliGitDiffNavigationContext();
+                        },
+                    );
+                } catch (error) {
+                    const message = getErrorMessage(error);
+                    vscode.window.showErrorMessage(
+                        `Compare current branch with branch failed: ${message}`,
+                    );
                 }
             },
         ),
@@ -1953,7 +1998,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
     }
     commitPanel.syncActiveEditor(vscode.window.activeTextEditor);
-    ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(vscode.window.activeTextEditor);
+    ProjectBranchComparisonPanel.syncActiveEditor(vscode.window.activeTextEditor);
     await updateIntelliGitDiffNavigationContext();
     await blameController.initialize();
 
@@ -1962,18 +2007,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (await repositoryService.followActiveEditor(editor)) {
                 await applyCurrentRepositoryContext({ resetGraph: true });
                 commitPanel.syncActiveEditor(editor);
-                ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(editor);
+                ProjectBranchComparisonPanel.syncActiveEditor(editor);
                 await updateIntelliGitDiffNavigationContext();
                 return;
             }
             commitPanel.syncActiveEditor(editor);
-            ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(editor);
+            ProjectBranchComparisonPanel.syncActiveEditor(editor);
             await updateCommitDiffSourceContext(editor);
             await updateIntelliGitDiffNavigationContext();
         }),
         vscode.window.onDidChangeTextEditorSelection((event) => {
             commitPanel.syncActiveEditor(event.textEditor);
-            ProjectBranchComparisonPanel.getActivePanel()?.syncActiveEditor(event.textEditor);
+            ProjectBranchComparisonPanel.syncActiveEditor(event.textEditor);
             void updateIntelliGitDiffNavigationContext();
         }),
         vscode.workspace.onDidCloseTextDocument((document) => {

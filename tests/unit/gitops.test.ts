@@ -114,7 +114,10 @@ describe("GitOps", () => {
                 repoRoot: "/repo",
             });
 
-            const files = await ops.getBranchComparisonFiles("feature");
+            const files = await ops.getBranchComparisonFiles("feature", {
+                kind: "working-tree",
+                label: "Working Tree",
+            });
 
             expect(files).toEqual([
                 {
@@ -163,7 +166,12 @@ describe("GitOps", () => {
             });
             const ops = new GitOps(executor);
 
-            await expect(ops.getBranchComparisonFiles("main")).resolves.toEqual([]);
+            await expect(
+                ops.getBranchComparisonFiles("main", {
+                    kind: "working-tree",
+                    label: "Working Tree",
+                }),
+            ).resolves.toEqual([]);
         });
 
         it("decodes git quoted paths in branch comparisons", async () => {
@@ -174,7 +182,12 @@ describe("GitOps", () => {
             });
             const ops = new GitOps(executor);
 
-            await expect(ops.getBranchComparisonFiles("feature")).resolves.toEqual([
+            await expect(
+                ops.getBranchComparisonFiles("feature", {
+                    kind: "working-tree",
+                    label: "Working Tree",
+                }),
+            ).resolves.toEqual([
                 {
                     repoId: ".",
                     repoRoot: "",
@@ -185,6 +198,102 @@ describe("GitOps", () => {
                     deletions: 0,
                 },
             ]);
+        });
+
+        it("compares the selected ref with HEAD without inspecting the working tree", async () => {
+            const run = vi.fn(async (args: string[]) => {
+                if (
+                    args.join("\0") ===
+                    ["diff", "--name-status", "--find-renames", "feature", "HEAD", "--"].join(
+                        "\0",
+                    )
+                ) {
+                    return "M\tsrc/changed.ts\n";
+                }
+                if (
+                    args.join("\0") ===
+                    ["diff", "--numstat", "--find-renames", "feature", "HEAD", "--"].join(
+                        "\0",
+                    )
+                ) {
+                    return "2\t1\tsrc/changed.ts\n";
+                }
+                throw new Error(`Unexpected args: ${args.join(" ")}`);
+            });
+            const ops = new GitOps({ run } as unknown as GitExecutor);
+
+            await expect(
+                ops.getBranchComparisonFiles("feature", {
+                    kind: "current-branch",
+                    label: "Current Branch",
+                }),
+            ).resolves.toEqual([
+                expect.objectContaining({
+                    path: "src/changed.ts",
+                    status: "M",
+                    additions: 2,
+                    deletions: 1,
+                }),
+            ]);
+            expect(run.mock.calls.map(([args]) => args)).toEqual([
+                ["diff", "--name-status", "--find-renames", "feature", "HEAD", "--"],
+                ["diff", "--numstat", "--find-renames", "feature", "HEAD", "--"],
+            ]);
+            expect(run).not.toHaveBeenCalledWith(
+                expect.arrayContaining(["ls-files"]),
+            );
+        });
+
+        it("adds NUL-delimited untracked paths and reconciles deleted collisions", async () => {
+            const run = vi.fn(async (args: string[]) => {
+                if (args[0] === "diff" && args[1] === "--name-status") {
+                    return "D\tsrc/recreated.ts\nM\tsrc/tracked.ts\n";
+                }
+                if (args[0] === "diff" && args[1] === "--numstat") {
+                    return "0\t9\tsrc/recreated.ts\n3\t1\tsrc/tracked.ts\n";
+                }
+                if (args[0] === "ls-files") {
+                    return 'src/new file.ts\0src/line\nbreak.ts\0"src/quoted.ts"\0src/recreated.ts\0';
+                }
+                throw new Error(`Unexpected args: ${args.join(" ")}`);
+            });
+            const ops = new GitOps({ run } as unknown as GitExecutor);
+
+            const files = await ops.getBranchComparisonFiles("feature", {
+                kind: "working-tree",
+                label: "Working Tree",
+            });
+            const byPath = new Map(files.map((file) => [file.path, file]));
+
+            expect(byPath.get("src/new file.ts")).toEqual(
+                expect.objectContaining({ status: "A", additions: 0, deletions: 0 }),
+            );
+            expect(byPath.get("src/line\nbreak.ts")).toEqual(
+                expect.objectContaining({ status: "A", additions: 0, deletions: 0 }),
+            );
+            expect(byPath.get('"src/quoted.ts"')).toEqual(
+                expect.objectContaining({ status: "A", additions: 0, deletions: 0 }),
+            );
+            expect(byPath.get("src/recreated.ts")).toEqual(
+                expect.objectContaining({
+                    status: "M",
+                    oldPath: undefined,
+                    additions: 0,
+                    deletions: 0,
+                }),
+            );
+            expect(byPath.get("src/tracked.ts")).toEqual(
+                expect.objectContaining({ status: "M", additions: 3, deletions: 1 }),
+            );
+            expect(run).toHaveBeenCalledWith([
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ]);
+            expect(
+                run.mock.calls.filter(([args]) => args[0] === "ls-files"),
+            ).toHaveLength(1);
         });
     });
 

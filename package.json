@@ -224,7 +224,13 @@
             },
             {
                 "command": "intelligit.compareProjectWithBranch",
-                "title": "Compare Project with Branch...",
+                "title": "Compare Working Tree with Branch...",
+                "category": "IntelliGit",
+                "icon": "$(git-branch)"
+            },
+            {
+                "command": "intelligit.compareCurrentBranchWithBranch",
+                "title": "Compare Current Branch with Branch...",
                 "category": "IntelliGit",
                 "icon": "$(git-branch)"
             },
@@ -325,6 +331,11 @@
                     "command": "intelligit.compareProjectWithBranch",
                     "when": "resourceScheme == file",
                     "group": "navigation@9"
+                },
+                {
+                    "command": "intelligit.compareCurrentBranchWithBranch",
+                    "when": "resourceScheme == file",
+                    "group": "navigation@10"
                 }
             ],
             "editor/context": [

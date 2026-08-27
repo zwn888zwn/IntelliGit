@@ -8,7 +8,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
-import type { ProjectComparisonFile, WorkingFile } from "../types";
+import type { ProjectComparisonFile, ProjectComparisonTarget, WorkingFile } from "../types";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
 import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from "./gitHelpers";
@@ -20,6 +20,7 @@ const DIFF_EDITABLE_SCHEME = "intelligit-diff-editable";
 const GIT_SCHEME = "git";
 const COMMIT_DIFF_GIT_QUERY_KEY = "intelligitCommitDiff";
 const COMMIT_DIFF_TEXT_QUERY_KEY = "intelligitCommitDiff";
+const PROJECT_COMPARISON_QUERY_KEY = "intelligitProjectComparison";
 
 const BINARY_FILE_EXTENSIONS = new Set([
     ".7z",
@@ -70,6 +71,7 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
             markAsCommitDiff?: boolean;
             originalPath?: string;
             sourceFsPath?: string;
+            projectComparisonId?: string;
         } = {},
     ): vscode.Uri {
         const id = String(this.nextId++);
@@ -80,6 +82,9 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
         });
         if (options.markAsCommitDiff) {
             query.set(COMMIT_DIFF_TEXT_QUERY_KEY, "1");
+        }
+        if (options.projectComparisonId) {
+            query.set(PROJECT_COMPARISON_QUERY_KEY, options.projectComparisonId);
         }
         if (options.originalPath) {
             query.set("originalPath", normalizeGitPath(options.originalPath));
@@ -312,7 +317,11 @@ function isPreviewableImageFilePath(filePath: string): boolean {
 function createGitResourceUri(
     fileUri: vscode.Uri,
     ref: string,
-    options: { markAsCommitDiff?: boolean; originalPath?: string } = {},
+    options: {
+        markAsCommitDiff?: boolean;
+        originalPath?: string;
+        projectComparisonId?: string;
+    } = {},
 ): vscode.Uri {
     return vscode.Uri.from({
         scheme: GIT_SCHEME,
@@ -322,13 +331,22 @@ function createGitResourceUri(
             ref,
             ...(options.originalPath ? { originalPath: options.originalPath } : {}),
             ...(options.markAsCommitDiff ? { [COMMIT_DIFF_GIT_QUERY_KEY]: true } : {}),
+            ...(options.projectComparisonId
+                ? { [PROJECT_COMPARISON_QUERY_KEY]: options.projectComparisonId }
+                : {}),
         }),
     });
 }
 
 function parseGitResourceQuery(
     uri: vscode.Uri,
-): { path?: string; ref?: string; originalPath?: string; intelligitCommitDiff?: boolean } | null {
+): {
+    path?: string;
+    ref?: string;
+    originalPath?: string;
+    intelligitCommitDiff?: boolean;
+    intelligitProjectComparison?: string;
+} | null {
     if (uri.scheme !== GIT_SCHEME || !uri.query) return null;
     try {
         const parsed = JSON.parse(uri.query) as {
@@ -336,6 +354,7 @@ function parseGitResourceQuery(
             ref?: unknown;
             originalPath?: unknown;
             intelligitCommitDiff?: unknown;
+            intelligitProjectComparison?: unknown;
         };
         return {
             path: typeof parsed.path === "string" ? parsed.path : undefined,
@@ -344,6 +363,10 @@ function parseGitResourceQuery(
             intelligitCommitDiff:
                 typeof parsed.intelligitCommitDiff === "boolean"
                     ? parsed.intelligitCommitDiff
+                    : undefined,
+            intelligitProjectComparison:
+                typeof parsed.intelligitProjectComparison === "string"
+                    ? parsed.intelligitProjectComparison
                     : undefined,
         };
     } catch {
@@ -354,6 +377,22 @@ function parseGitResourceQuery(
 function parseDiffDocumentQuery(uri: vscode.Uri): URLSearchParams | null {
     if (uri.scheme !== DIFF_DOCUMENT_SCHEME && uri.scheme !== DIFF_EDITABLE_SCHEME) return null;
     return new URLSearchParams(uri.query);
+}
+
+export function getDiffRefFromUri(uri: vscode.Uri): string | null {
+    const ref =
+        uri.scheme === GIT_SCHEME
+            ? parseGitResourceQuery(uri)?.ref
+            : parseDiffDocumentQuery(uri)?.get("ref");
+    return ref?.trim() || null;
+}
+
+export function getProjectComparisonIdFromUri(uri: vscode.Uri): string | null {
+    const id =
+        uri.scheme === GIT_SCHEME
+            ? parseGitResourceQuery(uri)?.intelligitProjectComparison
+            : parseDiffDocumentQuery(uri)?.get(PROJECT_COMPARISON_QUERY_KEY);
+    return id?.trim() || null;
 }
 
 function sanitizeTempFileSegment(value: string): string {
@@ -893,31 +932,56 @@ export async function openShelvedFileDiff(
 export async function openBranchComparisonFileDiff(
     file: ProjectComparisonFile,
     ref: string,
+    target: ProjectComparisonTarget,
     repoRoot: string,
     gitOps: GitOps,
     executor?: GitExecutor,
+    viewColumn?: vscode.ViewColumn,
+    projectComparisonId?: string,
 ): Promise<void> {
     const safePath = assertRepoRelativePath(file.path);
     const leftPath = file.oldPath ? assertRepoRelativePath(file.oldPath) : safePath;
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
+    const title = `${safePath} (${trimmedRef} ↔ ${target.label})`;
+    const openDiff = async (leftUri: vscode.Uri, rightUri: vscode.Uri): Promise<void> => {
+        if (viewColumn === undefined) {
+            await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
+            return;
+        }
+        await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title, {
+            viewColumn,
+            preview: true,
+        });
+    };
 
-    if (
-        executor &&
-        isPreviewableImageFilePath(safePath) &&
-        file.status !== "D" &&
-        (await fileExists(workingTreeUri)) &&
-        (await gitFileExistsAtRef(leftPath, trimmedRef, executor))
-    ) {
-        const title = `${safePath} (${trimmedRef} ↔ Current)`;
-        await vscode.commands.executeCommand(
-            "vscode.diff",
-            createGitResourceUri(vscode.Uri.file(path.join(repoRoot, leftPath)), trimmedRef),
-            workingTreeUri,
-            title,
-        );
-        return;
+    if (executor && isPreviewableImageFilePath(safePath)) {
+        const [leftExists, rightExists] = await Promise.all([
+            gitFileExistsAtRef(leftPath, trimmedRef, executor),
+            target.kind === "current-branch"
+                ? gitFileExistsAtRef(safePath, "HEAD", executor)
+                : fileExists(workingTreeUri),
+        ]);
+        if (leftExists || rightExists) {
+            const leftUri = leftExists
+                ? createGitResourceUri(
+                      vscode.Uri.file(path.join(repoRoot, leftPath)),
+                      trimmedRef,
+                      { originalPath: leftPath, projectComparisonId },
+                  )
+                : await createTransparentImagePlaceholderUri(leftPath, "left");
+            const rightUri = rightExists
+                ? target.kind === "current-branch"
+                    ? createGitResourceUri(workingTreeUri, "HEAD", {
+                          originalPath: safePath,
+                          projectComparisonId,
+                      })
+                    : workingTreeUri
+                : await createTransparentImagePlaceholderUri(safePath, "right");
+            await openDiff(leftUri, rightUri);
+            return;
+        }
     }
 
     const leftSnapshot = makeTextDiffSnapshot(
@@ -929,10 +993,30 @@ export async function openBranchComparisonFileDiff(
     const leftDoc = await vscode.workspace.openTextDocument(
         getDiffContentProvider().createUri(leftPath, trimmedRef, leftSnapshot.content, {
             forcePlainTextUri: leftSnapshot.forcePlainTextUri,
+            originalPath: leftPath,
+            projectComparisonId,
         }),
     );
     let rightUri: vscode.Uri;
-    if (file.status !== "D" && (await fileExists(workingTreeUri)) && !isBinaryFilePath(safePath)) {
+    if (target.kind === "current-branch") {
+        const rightSnapshot = makeTextDiffSnapshot(
+            safePath,
+            await gitOps.getFileContentAtRef(safePath, "HEAD").catch(() => ""),
+            "HEAD",
+        );
+        const rightDoc = await vscode.workspace.openTextDocument(
+            getDiffContentProvider().createUri(safePath, "HEAD", rightSnapshot.content, {
+                forcePlainTextUri: rightSnapshot.forcePlainTextUri,
+                originalPath: safePath,
+                projectComparisonId,
+            }),
+        );
+        rightUri = rightDoc.uri;
+    } else if (
+        file.status !== "D" &&
+        (await fileExists(workingTreeUri)) &&
+        !isBinaryFilePath(safePath)
+    ) {
         rightUri = workingTreeUri;
     } else {
         const rightContent =
@@ -942,16 +1026,19 @@ export async function openBranchComparisonFileDiff(
         const rightDoc = await vscode.workspace.openTextDocument(
             getDiffContentProvider().createUri(
                 safePath,
-                "current",
+                "working-tree",
                 rightContent,
-                { forcePlainTextUri: rightContent.length > 0 },
+                {
+                    forcePlainTextUri: rightContent.length > 0,
+                    originalPath: safePath,
+                    projectComparisonId,
+                },
             ),
         );
         rightUri = rightDoc.uri;
     }
 
-    const title = `${safePath} (${trimmedRef} ↔ Current)`;
-    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
+    await openDiff(leftDoc.uri, rightUri);
 }
 
 export async function openWorkingTreeFileDiff(

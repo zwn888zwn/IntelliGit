@@ -7,6 +7,7 @@ import { flush } from "./utils/reactDomTestUtils";
 const mountedAppRoots = vi.hoisted(
     () => new Set<{ root: { unmount: () => void }; container: Element | DocumentFragment }>(),
 );
+const scrollIntoViewMock = vi.fn();
 
 vi.mock("react-dom/client", async (importOriginal) => {
     const actual = await importOriginal<typeof import("react-dom/client")>();
@@ -42,6 +43,15 @@ function fireClick(el: Element | null): void {
     }
     act(() => {
         el.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+}
+
+function fireKey(el: Element | null, key: string): void {
+    if (!el) {
+        throw new Error(`expected element to exist for ${key} key`);
+    }
+    act(() => {
+        el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
     });
 }
 
@@ -98,6 +108,10 @@ beforeAll(() => {
     }
     Object.defineProperty(globalThis, "ResizeObserver", {
         value: ResizeObserverMock,
+        configurable: true,
+    });
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+        value: scrollIntoViewMock,
         configurable: true,
     });
 
@@ -1442,5 +1456,182 @@ describe("MergeConflictSessionApp integration", () => {
             ) ?? null,
         );
         expect(vscode.postMessage).toHaveBeenCalledWith({ type: "close" });
+    });
+});
+
+describe("ProjectComparisonApp integration", () => {
+    const repository = {
+        repoId: ".",
+        name: "IntelliGit",
+        root: "/workspace/IntelliGit",
+        relativePath: "packages/IntelliGit",
+        color: "#4CAF50",
+    };
+    const files = [
+        {
+            repoId: ".",
+            repoRoot: repository.root,
+            path: "src/a.ts",
+            status: "M",
+            additions: 2,
+            deletions: 1,
+        },
+        {
+            repoId: ".",
+            repoRoot: repository.root,
+            path: "src/nested/b.ts",
+            status: "A",
+            additions: 4,
+            deletions: 0,
+        },
+    ];
+
+    function sendUpdate(updatedFiles: typeof files): void {
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: {
+                        type: "update",
+                        branchName: "feature/tree-ux",
+                        targetLabel: "main",
+                        repository,
+                        files: updatedFiles,
+                    },
+                }),
+            );
+        });
+    }
+
+    it("renders comparison context and supports keyboard tree interaction", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/project-comparison/ProjectComparisonApp");
+        await flush();
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "ready" });
+
+        sendUpdate(files);
+        await flush();
+
+        expect(document.body.textContent).toContain("feature/tree-ux ↔ main");
+        expect(document.body.textContent).toContain("packages/IntelliGit");
+
+        let srcFolder = document.querySelector('[role="treeitem"][title="src"]');
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("true");
+        expect(srcFolder?.getAttribute("aria-level")).toBe("1");
+        expect((srcFolder as HTMLElement).tabIndex).toBe(0);
+
+        fireKey(srcFolder, "Enter");
+        await flush();
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("false");
+        expect(document.querySelector('[role="treeitem"][title="src/a.ts"]')).toBeNull();
+
+        const docsFile = {
+            repoId: ".",
+            repoRoot: repository.root,
+            path: "docs/readme.md",
+            status: "A" as const,
+            additions: 1,
+            deletions: 0,
+        };
+        sendUpdate([...files.map((file) => ({ ...file })), docsFile]);
+        await flush();
+
+        srcFolder = document.querySelector('[role="treeitem"][title="src"]');
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("false");
+        expect(document.querySelector('[role="treeitem"][title="src/a.ts"]')).toBeNull();
+        expect(
+            document.querySelector('[role="treeitem"][title="docs"]')?.getAttribute(
+                "aria-expanded",
+            ),
+        ).toBe("true");
+        expect(document.querySelector('[role="treeitem"][title="docs/readme.md"]')).not.toBeNull();
+
+        fireKey(srcFolder, "ArrowRight");
+        await flush();
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("true");
+
+        fireKey(srcFolder, "ArrowLeft");
+        await flush();
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("false");
+
+        fireKey(srcFolder, " ");
+        await flush();
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("true");
+
+        const fileRow = document.querySelector('[role="treeitem"][title="src/a.ts"]');
+        expect(fileRow?.getAttribute("aria-level")).toBe("2");
+        expect((fileRow as HTMLElement).tabIndex).toBe(0);
+
+        vscode.postMessage.mockClear();
+        fireKey(fileRow, "Enter");
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "openDiff", path: "src/a.ts" });
+
+        vscode.postMessage.mockClear();
+        fireKey(fileRow, " ");
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "openDiff", path: "src/a.ts" });
+    });
+
+    it("reopens and scrolls to the active file while refresh is disabled", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/project-comparison/ProjectComparisonApp");
+        await flush();
+        sendUpdate(files);
+        await flush();
+
+        let srcFolder = document.querySelector('[role="treeitem"][title="src"]');
+        fireKey(srcFolder, "ArrowLeft");
+        await flush();
+        expect(document.querySelector('[role="treeitem"][title="src/nested/b.ts"]')).toBeNull();
+
+        scrollIntoViewMock.mockClear();
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", {
+                    data: { type: "setActiveFile", path: "src/nested/b.ts" },
+                }),
+            );
+        });
+        await flush();
+
+        srcFolder = document.querySelector('[role="treeitem"][title="src"]');
+        const nestedFolder = document.querySelector(
+            '[role="treeitem"][title="src/nested"]',
+        );
+        const activeFile = document.querySelector(
+            '[role="treeitem"][title="src/nested/b.ts"]',
+        );
+        expect(srcFolder?.getAttribute("aria-expanded")).toBe("true");
+        expect(nestedFolder?.getAttribute("aria-expanded")).toBe("true");
+        expect(activeFile?.getAttribute("aria-selected")).toBe("true");
+        expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
+
+        const refreshButton = document.querySelector(
+            'button[aria-label="Refresh"]',
+        ) as HTMLButtonElement;
+        vscode.postMessage.mockClear();
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", { data: { type: "refreshing", active: true } }),
+            );
+        });
+        await flush();
+        expect(refreshButton.disabled).toBe(true);
+        act(() => refreshButton.click());
+        expect(vscode.postMessage).not.toHaveBeenCalledWith({ type: "refresh" });
+
+        act(() => {
+            window.dispatchEvent(
+                new MessageEvent("message", { data: { type: "refreshing", active: false } }),
+            );
+        });
+        await flush();
+        expect(refreshButton.disabled).toBe(false);
+        act(() => refreshButton.click());
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "refresh" });
     });
 });
