@@ -939,6 +939,92 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
+    it("BranchColumn expands folders for search results and selected branches", async () => {
+        const branches: Branch[] = [
+            {
+                name: "main",
+                hash: "feed1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "codex/web-page-domain-redirect",
+                hash: "a1b2c3d4",
+                isRemote: false,
+                isCurrent: false,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "origin/codex/web-page-domain-redirect",
+                hash: "a1b2c3d4",
+                isRemote: true,
+                isCurrent: false,
+                remote: "origin",
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const { root, container } = mount(
+            <BranchColumn
+                branches={branches}
+                selectedBranch={null}
+                onSelectBranch={vi.fn()}
+                onBranchAction={vi.fn()}
+            />,
+        );
+
+        expect(container.textContent).not.toContain("web-page-domain-redirect");
+        const searchInput = container.querySelector(
+            'input[placeholder="Search branches"]',
+        ) as HTMLInputElement;
+        act(() => {
+            const valueSetter = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                "value",
+            )?.set;
+            valueSetter?.call(searchInput, "domain");
+            searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+            searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await flush();
+
+        expect(
+            Array.from(container.querySelectorAll(".branch-row")).filter((row) =>
+                row.textContent?.includes("web-page-domain-redirect"),
+            ),
+        ).toHaveLength(2);
+
+        unmount(root, container);
+
+        const selected = mount(
+            <BranchColumn
+                branches={branches}
+                selectedBranch={null}
+                onSelectBranch={vi.fn()}
+                onBranchAction={vi.fn()}
+            />,
+        );
+        act(() => {
+            selected.root.render(
+                <BranchColumn
+                    branches={branches}
+                    selectedBranch="origin/codex/web-page-domain-redirect"
+                    onSelectBranch={vi.fn()}
+                    onBranchAction={vi.fn()}
+                />,
+            );
+        });
+        await flush();
+        expect(selected.container.querySelector(".branch-row.selected")?.textContent).toContain(
+            "web-page-domain-redirect",
+        );
+
+        unmount(selected.root, selected.container);
+    });
+
     it("BranchColumn persists and restores expansion/filter state", async () => {
         mockVscodeApi.getState.mockReturnValue({
             branchColumn: {

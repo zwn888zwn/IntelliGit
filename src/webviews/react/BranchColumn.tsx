@@ -23,6 +23,7 @@ import {
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getBranchMenuItems } from "./branch-column/menu";
 import { buildPrefixTree, buildRemoteGroups } from "./branch-column/treeModel";
+import type { TreeNode } from "./branch-column/types";
 import {
     BranchTreeNodeRow,
     TrackingBadge,
@@ -152,6 +153,39 @@ function toggleSetKey(
     });
 }
 
+function expandSetKeys(
+    setState: React.Dispatch<React.SetStateAction<Set<string>>>,
+    keys: Set<string>,
+): void {
+    if (keys.size === 0) return;
+    setState((prev) => {
+        const next = new Set(prev);
+        for (const key of keys) next.add(key);
+        return next.size === prev.size ? prev : next;
+    });
+}
+
+function collectMatchingFolderKeys(
+    nodes: TreeNode[],
+    prefix: string,
+    keys: Set<string>,
+    branchName?: string,
+): boolean {
+    let containsMatch = false;
+    for (const node of nodes) {
+        if (node.branch) {
+            if (!branchName || node.branch.name === branchName) containsMatch = true;
+            continue;
+        }
+        const folderKey = `${prefix}/${node.label}`;
+        if (collectMatchingFolderKeys(node.children, folderKey, keys, branchName)) {
+            keys.add(folderKey);
+            containsMatch = true;
+        }
+    }
+    return containsMatch;
+}
+
 function getIconAnchorX(row: HTMLElement): number {
     const rowRect = row.getBoundingClientRect();
     const firstIcon = row.querySelector("[data-branch-icon], svg, img");
@@ -251,6 +285,34 @@ export function BranchColumn({
     const remotes = useMemo(() => filteredBranches.filter((b) => b.isRemote), [filteredBranches]);
     const localTree = useMemo(() => buildPrefixTree(locals), [locals]);
     const remoteGroups = useMemo(() => buildRemoteGroups(remotes), [remotes]);
+
+    useEffect(() => {
+        if (!filterNeedle && !selectedBranch) return;
+
+        const foldersToExpand = new Set<string>();
+        const sectionsToExpand = new Set<string>();
+        const targetBranch = filterNeedle ? undefined : (selectedBranch ?? undefined);
+
+        if (collectMatchingFolderKeys(localTree, "local", foldersToExpand, targetBranch)) {
+            sectionsToExpand.add("local");
+        }
+        for (const [remote, group] of remoteGroups) {
+            if (
+                collectMatchingFolderKeys(
+                    group.tree,
+                    `remote/${remote}`,
+                    foldersToExpand,
+                    targetBranch,
+                )
+            ) {
+                foldersToExpand.add(`remote-${remote}`);
+                sectionsToExpand.add("remote");
+            }
+        }
+
+        expandSetKeys(setExpandedSections, sectionsToExpand);
+        expandSetKeys(setExpandedFolders, foldersToExpand);
+    }, [filterNeedle, localTree, remoteGroups, selectedBranch]);
 
     const toggleSection = useCallback(
         (key: string) => {
