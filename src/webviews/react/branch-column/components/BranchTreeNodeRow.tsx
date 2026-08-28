@@ -33,7 +33,7 @@ interface Props {
     folderIconsByName?: ThemeFolderIconMap;
 }
 
-function TrackingBadge({ branch }: { branch: Branch }): React.ReactElement | null {
+export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElement | null {
     if (branch.ahead <= 0 && branch.behind <= 0) return null;
     const tooltipParts: string[] = [];
     if (branch.behind > 0) {

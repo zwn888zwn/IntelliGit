@@ -23,7 +23,10 @@ import {
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getBranchMenuItems } from "./branch-column/menu";
 import { buildPrefixTree, buildRemoteGroups } from "./branch-column/treeModel";
-import { BranchTreeNodeRow } from "./branch-column/components/BranchTreeNodeRow";
+import {
+    BranchTreeNodeRow,
+    TrackingBadge,
+} from "./branch-column/components/BranchTreeNodeRow";
 import { BranchSectionHeader } from "./branch-column/components/BranchSectionHeader";
 import { BranchSearchBar } from "./branch-column/components/BranchSearchBar";
 import { BranchPopupOverlay } from "./branch-column/components/BranchPopupOverlay";
@@ -495,6 +498,7 @@ export function BranchColumn({
                             >
                                 <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
                                 <span style={HEAD_LABEL_STYLE}>HEAD</span>
+                                <TrackingBadge branch={current} />
                             </div>
                         </div>
                     )}

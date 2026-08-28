@@ -35,6 +35,11 @@ const MAX_GRAPH_WIDTH = 240;
 const PRELOAD_ROWS = 80;
 const IDEA_GRAPH_TEXT_LANE_LIMIT = 6;
 const IDEA_GRAPH_TEXT_GAP = 2;
+const DATE_COLUMN_MIN_WIDTH = 480;
+const REPOSITORY_SCOPE_MIN_WIDTH = 520;
+const AUTHOR_COLUMN_MIN_WIDTH = 620;
+const BRANCH_SCOPE_MIN_WIDTH = 680;
+const HASH_COLUMN_MIN_WIDTH = 760;
 const CURRENT_BRANCH_ROW_BACKGROUND =
     "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 30%, transparent)";
 
@@ -95,6 +100,7 @@ export function CommitList({
     } | null>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
+    const [viewportWidth, setViewportWidth] = useState(0);
 
     const graph = useMemo(() => computeGraph(commits), [commits]);
     const graphRows = graph.rows;
@@ -152,6 +158,12 @@ export function CommitList({
     }, [currentCommitRefs, orderedCommits]);
     const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
     const visibleArrowMarkers = graph.arrowMarkers;
+    const hasMeasuredWidth = viewportWidth > 0;
+    const showDateColumn = !hasMeasuredWidth || viewportWidth >= DATE_COLUMN_MIN_WIDTH;
+    const showRepositoryScope = !hasMeasuredWidth || viewportWidth >= REPOSITORY_SCOPE_MIN_WIDTH;
+    const showAuthorColumn = !hasMeasuredWidth || viewportWidth >= AUTHOR_COLUMN_MIN_WIDTH;
+    const showBranchScope = !hasMeasuredWidth || viewportWidth >= BRANCH_SCOPE_MIN_WIDTH;
+    const showHashColumn = !hasMeasuredWidth || viewportWidth >= HASH_COLUMN_MIN_WIDTH;
 
     const handleJumpNavigate = useCallback(
         (targetHash: string, targetRowIndex: number) => {
@@ -183,14 +195,19 @@ export function CommitList({
         const viewport = viewportRef.current;
         if (!viewport) return;
 
-        const updateHeight = () => setViewportHeight(viewport.clientHeight);
-        updateHeight();
+        const updateSize = () => {
+            setViewportHeight(viewport.clientHeight);
+            setViewportWidth(viewport.clientWidth);
+        };
+        updateSize();
 
-        const observer = new ResizeObserver(updateHeight);
+        const observer = new ResizeObserver(updateSize);
         observer.observe(viewport);
+        window.addEventListener("resize", updateSize);
 
         return () => {
             observer.disconnect();
+            window.removeEventListener("resize", updateSize);
         };
     }, []);
 
@@ -341,40 +358,58 @@ export function CommitList({
                         </button>
                     )}
                 </div>
-                <span
-                    style={BRANCH_SCOPE_STYLE}
-                    title={
-                        repository
-                            ? `Repository: ${repository.relativePath ?? repository.root}`
-                            : "No repository selected"
-                    }
-                >
-                    Repo: {repository?.relativePath ?? repository?.name ?? "No repository"}
-                </span>
-                <span
-                    style={BRANCH_SCOPE_STYLE}
-                    title={selectedBranch ? `Branch: ${selectedBranch}` : "Branch: All branches"}
-                >
-                    Branch: {selectedBranch ?? "All branches"}
-                </span>
+                {showRepositoryScope && (
+                    <span
+                        style={BRANCH_SCOPE_STYLE}
+                        title={
+                            repository
+                                ? `Repository: ${repository.relativePath ?? repository.root}`
+                                : "No repository selected"
+                        }
+                    >
+                        Repo: {repository?.relativePath ?? repository?.name ?? "No repository"}
+                    </span>
+                )}
+                {showBranchScope && (
+                    <span
+                        style={BRANCH_SCOPE_STYLE}
+                        title={
+                            selectedBranch ? `Branch: ${selectedBranch}` : "Branch: All branches"
+                        }
+                    >
+                        Branch: {selectedBranch ?? "All branches"}
+                    </span>
+                )}
             </div>
 
             <div style={headerRowStyle(headerGraphWidth)}>
                 <span style={{ flex: 1 }}>Commit</span>
-                <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
-                <span style={{ width: DATE_COL_WIDTH, textAlign: "right", marginLeft: META_COL_GAP }}>
-                    Date
-                </span>
-                <span
-                    style={{
-                        width: HASH_COL_WIDTH,
-                        textAlign: "right",
-                        marginLeft: META_COL_GAP,
-                        fontFamily: "var(--vscode-editor-font-family, monospace)",
-                    }}
-                >
-                    Hash
-                </span>
+                {showAuthorColumn && (
+                    <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
+                )}
+                {showDateColumn && (
+                    <span
+                        style={{
+                            width: DATE_COL_WIDTH,
+                            textAlign: "right",
+                            marginLeft: META_COL_GAP,
+                        }}
+                    >
+                        Date
+                    </span>
+                )}
+                {showHashColumn && (
+                    <span
+                        style={{
+                            width: HASH_COL_WIDTH,
+                            textAlign: "right",
+                            marginLeft: META_COL_GAP,
+                            fontFamily: "var(--vscode-editor-font-family, monospace)",
+                        }}
+                    >
+                        Hash
+                    </span>
+                )}
             </div>
 
             <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
@@ -496,6 +531,9 @@ export function CommitList({
                                             isSelected={selectedHash === commit.hash}
                                             isUnpushed={isUnpushedCommit(commit.hash)}
                                             laneColor={graphRows[idx]?.nodeColor}
+                                            showAuthor={showAuthorColumn}
+                                            showDate={showDateColumn}
+                                            showHash={showHashColumn}
                                             onSelect={onSelectCommit}
                                             onContextMenu={handleRowContextMenu}
                                         />

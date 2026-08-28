@@ -208,6 +208,22 @@ describe("CommitList integration", () => {
         expect(filterInput).toBeTruthy();
         expect(container.textContent).toContain("Hash");
         expect(container.textContent).toContain("aaa1111");
+
+        const viewport = container.querySelector(
+            '[data-testid="commit-list-viewport"]',
+        ) as HTMLDivElement;
+        Object.defineProperty(viewport, "clientWidth", { value: 460, configurable: true });
+        act(() => {
+            window.dispatchEvent(new Event("resize"));
+        });
+        expect(container.textContent).not.toContain("Author");
+        expect(container.textContent).not.toContain("Date");
+        expect(container.textContent).not.toContain("Hash");
+        expect(container.textContent).not.toContain("Mahesh");
+        expect(container.textContent).not.toContain("aaa1111");
+        expect(container.textContent).not.toContain("Repo: repo-a");
+        expect(container.textContent).not.toContain("Branch: main");
+
         const valueSetter = Object.getOwnPropertyDescriptor(
             HTMLInputElement.prototype,
             "value",
@@ -248,9 +264,6 @@ describe("CommitList integration", () => {
         });
         expect(onCommitAction).toHaveBeenCalledWith("copyRevision", "aaa1111");
 
-        const viewport = container.querySelector(
-            '[data-testid="commit-list-viewport"]',
-        ) as HTMLDivElement;
         Object.defineProperty(viewport, "clientHeight", { value: 240, configurable: true });
         Object.defineProperty(viewport, "scrollHeight", { value: 300, configurable: true });
         Object.defineProperty(viewport, "scrollTop", { value: 90, configurable: true });

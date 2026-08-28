@@ -21,6 +21,9 @@ interface Props {
     isSelected: boolean;
     isUnpushed: boolean;
     laneColor?: string;
+    showAuthor?: boolean;
+    showDate?: boolean;
+    showHash?: boolean;
     onSelect: (hash: string) => void;
     onContextMenu: (event: React.MouseEvent, commit: Commit) => void;
 }
@@ -213,6 +216,9 @@ function CommitRowInner({
     isSelected,
     isUnpushed,
     laneColor,
+    showAuthor = true,
+    showDate = true,
+    showHash = true,
     onSelect,
     onContextMenu,
 }: Props): React.ReactElement {
@@ -262,51 +268,57 @@ function CommitRowInner({
                 <CommitMessageCell message={commit.message} refs={commit.refs} />
             </span>
 
-            <span
-                style={{
-                    width: AUTHOR_COL_WIDTH,
-                    textAlign: "right",
-                    opacity: isMergeCommit ? 1 : 0.7,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    flexShrink: 0,
-                    marginLeft: META_COL_GAP,
-                }}
-            >
-                {commit.author}
-            </span>
+            {showAuthor && (
+                <span
+                    style={{
+                        width: AUTHOR_COL_WIDTH,
+                        textAlign: "right",
+                        opacity: isMergeCommit ? 1 : 0.7,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        flexShrink: 0,
+                        marginLeft: META_COL_GAP,
+                    }}
+                >
+                    {commit.author}
+                </span>
+            )}
 
-            <span
-                style={{
-                    width: DATE_COL_WIDTH,
-                    textAlign: "right",
-                    opacity: isMergeCommit ? 0.8 : 0.5,
-                    flexShrink: 0,
-                    marginLeft: META_COL_GAP,
-                    fontSize: "11px",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                }}
-            >
-                {formatDateTime(commit.date)}
-            </span>
+            {showDate && (
+                <span
+                    style={{
+                        width: DATE_COL_WIDTH,
+                        textAlign: "right",
+                        opacity: isMergeCommit ? 0.8 : 0.5,
+                        flexShrink: 0,
+                        marginLeft: META_COL_GAP,
+                        fontSize: "11px",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                    }}
+                >
+                    {formatDateTime(commit.date)}
+                </span>
+            )}
 
-            <span
-                style={{
-                    width: HASH_COL_WIDTH,
-                    textAlign: "right",
-                    opacity: isMergeCommit ? 0.78 : 0.62,
-                    flexShrink: 0,
-                    marginLeft: META_COL_GAP,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    fontFamily: "var(--vscode-editor-font-family, monospace)",
-                    fontSize: "11px",
-                }}
-                title={commit.hash}
-            >
-                {commit.shortHash || commit.hash.slice(0, 8)}
-            </span>
+            {showHash && (
+                <span
+                    style={{
+                        width: HASH_COL_WIDTH,
+                        textAlign: "right",
+                        opacity: isMergeCommit ? 0.78 : 0.62,
+                        flexShrink: 0,
+                        marginLeft: META_COL_GAP,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        fontFamily: "var(--vscode-editor-font-family, monospace)",
+                        fontSize: "11px",
+                    }}
+                    title={commit.hash}
+                >
+                    {commit.shortHash || commit.hash.slice(0, 8)}
+                </span>
+            )}
         </div>
     );
 }
@@ -322,6 +334,9 @@ function areEqual(prev: Props, next: Props): boolean {
         prev.isSelected === next.isSelected &&
         prev.isUnpushed === next.isUnpushed &&
         prev.laneColor === next.laneColor &&
+        prev.showAuthor === next.showAuthor &&
+        prev.showDate === next.showDate &&
+        prev.showHash === next.showHash &&
         prev.rowLeftOffset === next.rowLeftOffset &&
         prev.messageIndent === next.messageIndent &&
         prev.onSelect === next.onSelect &&

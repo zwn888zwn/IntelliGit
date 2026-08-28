@@ -1004,8 +1004,8 @@ describe("low coverage components", () => {
                 hash: "feed1234",
                 isRemote: false,
                 isCurrent: true,
-                ahead: 0,
-                behind: 0,
+                ahead: 1,
+                behind: 4,
             },
             {
                 name: "feature-demo",
@@ -1044,6 +1044,12 @@ describe("low coverage components", () => {
         expect(badge?.getAttribute("data-branch-tooltip")).toBe(
             "3 incoming commits and 2 outgoing commits",
         );
+
+        const headRow = Array.from(container.querySelectorAll(".branch-row")).find(
+            (row) => row.textContent?.includes("HEAD"),
+        ) as HTMLElement;
+        expect(headRow.querySelector(".branch-track-push")?.textContent).toBe("\u2B061");
+        expect(headRow.querySelector(".branch-track-pull")?.textContent).toBe("\u2B074");
 
         unmount(root, container);
     });
