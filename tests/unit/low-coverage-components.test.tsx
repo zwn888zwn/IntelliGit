@@ -1090,6 +1090,7 @@ describe("low coverage components", () => {
                 hash: "feed1234",
                 isRemote: false,
                 isCurrent: true,
+                upstream: "origin/main",
                 ahead: 1,
                 behind: 4,
             },
@@ -1098,6 +1099,7 @@ describe("low coverage components", () => {
                 hash: "a1b2c3d4",
                 isRemote: false,
                 isCurrent: false,
+                upstream: "origin/feature-demo",
                 ahead: 2,
                 behind: 3,
             },
@@ -1136,6 +1138,64 @@ describe("low coverage components", () => {
         ) as HTMLElement;
         expect(headRow.querySelector(".branch-track-push")?.textContent).toBe("\u2B061");
         expect(headRow.querySelector(".branch-track-pull")?.textContent).toBe("\u2B074");
+
+        unmount(root, container);
+    });
+
+    it("BranchColumn marks local branches without an upstream", () => {
+        const branches: Branch[] = [
+            {
+                name: "main",
+                hash: "feed1234",
+                isRemote: false,
+                isCurrent: true,
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "tracked-feature",
+                hash: "a1b2c3d4",
+                isRemote: false,
+                isCurrent: false,
+                upstream: "origin/tracked-feature",
+                ahead: 0,
+                behind: 0,
+            },
+            {
+                name: "origin/main",
+                hash: "feed1234",
+                isRemote: true,
+                isCurrent: false,
+                remote: "origin",
+                ahead: 0,
+                behind: 0,
+            },
+        ];
+        const { root, container } = mount(
+            <BranchColumn
+                branches={branches}
+                selectedBranch={null}
+                onSelectBranch={vi.fn()}
+                onBranchAction={vi.fn()}
+            />,
+        );
+
+        const headRow = Array.from(container.querySelectorAll(".branch-row")).find(
+            (row) => row.textContent?.trim() === "HEAD",
+        ) as HTMLElement;
+        const mainRow = Array.from(container.querySelectorAll(".branch-row")).find(
+            (row) => row.textContent?.trim() === "main",
+        ) as HTMLElement;
+        const trackedRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
+            row.textContent?.includes("tracked-feature"),
+        ) as HTMLElement;
+
+        expect(headRow.querySelector(".branch-no-upstream")).toBeTruthy();
+        expect(mainRow.querySelector(".branch-no-upstream")).toBeTruthy();
+        expect(trackedRow.querySelector(".branch-no-upstream")).toBeNull();
+        expect(
+            headRow.querySelector("[data-branch-tooltip]")?.getAttribute("data-branch-tooltip"),
+        ).toBe("No upstream configured. Push… will publish and set upstream.");
 
         unmount(root, container);
     });

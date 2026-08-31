@@ -1,4 +1,5 @@
 import React from "react";
+import { LuCloudUpload } from "react-icons/lu";
 import type { Branch, ThemeFolderIconMap, ThemeTreeIcon } from "../../../../types";
 import { renderHighlightedLabel } from "../highlight";
 import { ChevronIcon, GitBranchIcon, StarIcon, TagRightIcon } from "../icons";
@@ -34,7 +35,10 @@ interface Props {
 }
 
 export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElement | null {
-    if (branch.ahead <= 0 && branch.behind <= 0) return null;
+    const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
+    const hasNoUpstream = !branch.isRemote && !branch.upstream;
+    if (!hasNoUpstream && branch.ahead <= 0 && branch.behind <= 0) return null;
+
     const tooltipParts: string[] = [];
     if (branch.behind > 0) {
         tooltipParts.push(`${branch.behind} incoming commit${branch.behind === 1 ? "" : "s"}`);
@@ -42,8 +46,13 @@ export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElemen
     if (branch.ahead > 0) {
         tooltipParts.push(`${branch.ahead} outgoing commit${branch.ahead === 1 ? "" : "s"}`);
     }
-    const tooltipText = tooltipParts.join(" and ");
-    const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
+    const trackingText = tooltipParts.join(" and ");
+    const tooltipText = [
+        hasNoUpstream ? "No upstream configured. Push… will publish and set upstream." : "",
+        trackingText,
+    ]
+        .filter(Boolean)
+        .join(" ");
 
     const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
         const rect = event.currentTarget.getBoundingClientRect();
@@ -63,6 +72,20 @@ export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElemen
             onPointerMove={showTooltip}
             onPointerLeave={hideTooltip}
         >
+            {hasNoUpstream && (
+                <span
+                    className="branch-no-upstream"
+                    aria-label="No upstream configured"
+                    style={{
+                        color: "var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        opacity: 0.9,
+                    }}
+                >
+                    <LuCloudUpload aria-hidden="true" size={13} />
+                </span>
+            )}
             {branch.ahead > 0 && (
                 <span className="branch-track-push" style={TRACKING_PUSH_STYLE}>
                     {"\u2B06"}
