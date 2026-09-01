@@ -129,6 +129,20 @@ export class RefreshService implements vscode.Disposable {
         return dotGit;
     }
 
+    private resolveCommonGitDir(gitDir: string): string {
+        try {
+            const commonDir = fs.readFileSync(path.join(gitDir, "commondir"), "utf8").trim();
+            if (commonDir) {
+                return path.isAbsolute(commonDir)
+                    ? commonDir
+                    : path.resolve(gitDir, commonDir);
+            }
+        } catch {
+            // Normal repositories keep refs in gitDir and have no commondir file.
+        }
+        return gitDir;
+    }
+
     private registerGitDirWatchers(): void {
         const gitStateFiles = new Set([
             "HEAD",
@@ -141,6 +155,7 @@ export class RefreshService implements vscode.Disposable {
 
         for (const repoRoot of this.repoRoots) {
             const gitDir = this.resolveGitDir(repoRoot);
+            const commonGitDir = this.resolveCommonGitDir(gitDir);
             try {
                 const dirWatcher = fs.watch(gitDir, (_event, filename) => {
                     if (!filename) {
@@ -161,7 +176,7 @@ export class RefreshService implements vscode.Disposable {
             }
 
             try {
-                const refsPath = path.join(gitDir, "refs");
+                const refsPath = path.join(commonGitDir, "refs");
                 if (process.platform === "linux") {
                     const pattern = new vscode.RelativePattern(vscode.Uri.file(refsPath), "**/*");
                     const watcher = vscode.workspace.createFileSystemWatcher(pattern);

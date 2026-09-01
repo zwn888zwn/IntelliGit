@@ -88,6 +88,9 @@ const editorSelectionListeners: Array<(event: { textEditor: unknown }) => void> 
 const workspaceFolderListeners: Array<() => void> = [];
 type FsWatchCallback = (...args: unknown[]) => void;
 const fsWatchCallbacks: FsWatchCallback[] = [];
+const fsWatchPaths: string[] = [];
+const fsStatSync = vi.fn();
+const fsReadFileSync = vi.fn();
 let registeredDefinitionProvider:
     | {
           provideDefinition: (
@@ -453,10 +456,13 @@ class MockEditorBlameController {
 
 vi.mock("fs", () => ({
     watch: vi.fn((...args: unknown[]) => {
+        fsWatchPaths.push(String(args[0]));
         const callback = args[args.length - 1];
         if (typeof callback === "function") fsWatchCallbacks.push(callback);
         return { close: vi.fn() };
     }),
+    statSync: (...args: unknown[]) => fsStatSync(...args),
+    readFileSync: (...args: unknown[]) => fsReadFileSync(...args),
 }));
 
 vi.mock("vscode", () => ({
@@ -876,6 +882,13 @@ describe("extension integration", () => {
         activeEditorListeners.length = 0;
         workspaceFolderListeners.length = 0;
         fsWatchCallbacks.length = 0;
+        fsWatchPaths.length = 0;
+        fsStatSync.mockReset();
+        fsReadFileSync.mockReset();
+        fsStatSync.mockImplementation(() => ({ isFile: () => false }));
+        fsReadFileSync.mockImplementation(() => {
+            throw new Error("ENOENT");
+        });
         workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
         activeTextEditor = undefined;
         currentRepositoryRoot = repositoryEntries[0].root;
@@ -3303,6 +3316,59 @@ describe("extension integration", () => {
 
             expect(latestCommitPanelProvider!.refresh).toHaveBeenCalled();
             expect(latestCommitGraphProvider!.refresh).toHaveBeenCalled();
+            deactivate();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("refreshes branch metadata when a linked worktree ref changes", async () => {
+        const { activate, deactivate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+
+        fsStatSync.mockImplementation((target: unknown) => ({
+            isFile: () => String(target) === "/repo-a/.git",
+        }));
+        fsReadFileSync.mockImplementation((target: unknown) => {
+            if (String(target) === "/repo-a/.git") {
+                return "gitdir: /common/.git/worktrees/repo-a\n";
+            }
+            if (String(target) === "/common/.git/worktrees/repo-a/commondir") {
+                return "../..\n";
+            }
+            throw new Error("ENOENT");
+        });
+
+        vi.useFakeTimers();
+        try {
+            await activate(context);
+
+            const refsWatcherIndex = fsWatchPaths.indexOf("/common/.git/refs");
+            expect(refsWatcherIndex).toBeGreaterThanOrEqual(0);
+
+            const updatedBranches = [
+                {
+                    name: "main",
+                    hash: "feed5678",
+                    isRemote: false,
+                    isCurrent: true,
+                    upstream: "origin/main",
+                    ahead: 1,
+                    behind: 0,
+                },
+            ];
+            gitOpsState.getBranches.mockResolvedValue(updatedBranches);
+            fsWatchCallbacks[refsWatcherIndex]?.("change", "heads/main");
+
+            vi.advanceTimersByTime(600);
+            await waitForAsync();
+
+            expect(latestCommitGraphProvider!.setBranches).toHaveBeenLastCalledWith(
+                updatedBranches,
+            );
             deactivate();
         } finally {
             vi.useRealTimers();
