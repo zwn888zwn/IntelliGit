@@ -58,6 +58,8 @@ import {
     buildWorktreeAddArgs,
     buildWorktreeRemoveArgs,
     copyWorktreeLocalFiles,
+    copyWorktreeWorkspaceFile,
+    findWorktreeWorkspacePath,
     findWorktreeForBranch,
     getDefaultWorktreeLocation,
     getDefaultWorktreeProjectName,
@@ -112,6 +114,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         return;
     }
+    const workspaceFilePath =
+        vscode.workspace.workspaceFile?.scheme === "file"
+            ? vscode.workspace.workspaceFile.fsPath
+            : null;
 
     const repositoryService = new RepositoryContextService(workspaceFolder.uri);
     await repositoryService.initialize();
@@ -1027,8 +1033,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
     }
 
-    async function openWorktreePath(worktreePath: string): Promise<void> {
-        await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(worktreePath), true);
+    async function openWorktreePath(
+        worktreePath: string,
+        preferredWorkspacePath?: string | null,
+    ): Promise<void> {
+        let targetWorkspacePath = preferredWorkspacePath;
+        if (targetWorkspacePath === undefined) {
+            const isOpenInCurrentWorkspace = repositoryService
+                .listRepositories()
+                .some((repository) => sameFsPath(repository.root, worktreePath));
+            targetWorkspacePath =
+                isOpenInCurrentWorkspace && workspaceFilePath
+                    ? workspaceFilePath
+                    : await findWorktreeWorkspacePath(worktreePath);
+        }
+        await vscode.commands.executeCommand(
+            "vscode.openFolder",
+            vscode.Uri.file(targetWorkspacePath ?? worktreePath),
+            true,
+        );
     }
 
     function findWorktreeByPath(worktrees: GitWorktree[], worktreePath: string): GitWorktree | null {
@@ -1124,10 +1147,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
             }
 
+            let createdWorkspacePath: string | null = null;
+            if (workspaceFilePath) {
+                try {
+                    createdWorkspacePath = await copyWorktreeWorkspaceFile(
+                        workspaceFilePath,
+                        repository.root,
+                        targetPath,
+                    );
+                } catch (error) {
+                    vscode.window.showWarningMessage(
+                        `Worktree created, but failed to copy the workspace file: ${getErrorMessage(error)}`,
+                    );
+                }
+            }
+
             commitGraph.setWorktreeCreateResult({ success: true, path: targetPath });
             await refreshRepositoryWorktrees(repository);
             vscode.window.showInformationMessage(`Created worktree at ${targetPath}.`);
-            await openWorktreePath(targetPath);
+            await openWorktreePath(targetPath, createdWorkspacePath);
         } catch (error) {
             const message = getErrorMessage(error);
             commitGraph.setWorktreeCreateResult({ success: false, message });

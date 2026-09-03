@@ -591,6 +591,25 @@ describe("CommitGraphApp integration", () => {
         ) as HTMLButtonElement;
         expect(createButton.disabled).toBe(true);
 
+        const fromBranch = document.querySelector(
+            'input[aria-label="From branch"]',
+        ) as HTMLInputElement;
+        expect(fromBranch.getAttribute("role")).toBe("combobox");
+        fireInput(fromBranch, "feature");
+        await flush();
+        expect(document.body.textContent).toContain("Select an existing branch");
+        expect(createButton.disabled).toBe(true);
+        const matchingBranch = document.querySelector(
+            '#intelligit-worktree-branch-list [role="option"]',
+        ) as HTMLButtonElement;
+        expect(matchingBranch.textContent).toContain("feature/demo");
+        expect(document.querySelectorAll('[role="option"]')).toHaveLength(1);
+        fireClick(matchingBranch);
+        await flush();
+        expect(fromBranch.value).toBe("feature/demo");
+        expect(document.body.textContent).not.toContain("Select an existing branch");
+        expect(createButton.disabled).toBe(false);
+
         fireClick(document.querySelector('button[aria-label="Choose location"]'));
         expect(vscode.postMessage).toHaveBeenCalledWith({
             type: "chooseWorktreeLocation",
@@ -598,10 +617,14 @@ describe("CommitGraphApp integration", () => {
         });
 
         fireClick(document.querySelector('input[aria-label="New branch"]'));
-        fireInput(
-            document.querySelector('input[aria-label="New branch name"]') as HTMLInputElement,
-            "feature/worktree",
-        );
+        const newBranchName = document.querySelector(
+            'input[aria-label="New branch name"]',
+        ) as HTMLInputElement;
+        fireInput(newBranchName, "feature/demo");
+        await flush();
+        expect(document.body.textContent).toContain("Local branch 'feature/demo' already exists");
+        expect(createButton.disabled).toBe(true);
+        fireInput(newBranchName, "feature/worktree");
         await flush();
 
         const projectName = document.querySelector(
@@ -614,7 +637,7 @@ describe("CommitGraphApp integration", () => {
             type: "createWorktree",
             payload: {
                 repoRoot: "/repo",
-                branchName: "main",
+                branchName: "feature/demo",
                 createBranch: true,
                 newBranchName: "feature/worktree",
                 projectName: "repo-feature-worktree",
@@ -632,6 +655,11 @@ describe("CommitGraphApp integration", () => {
         await flush();
         expect(document.body.textContent).toContain("failed");
         expect(document.body.textContent).toContain("New Worktree");
+
+        fireInput(newBranchName, "feature/worktree-2");
+        await flush();
+        expect(document.body.textContent).not.toContain("failed");
+        expect(createButton.disabled).toBe(false);
     });
 
     it("handles host messages, filtering, branch actions, and commit actions", async () => {

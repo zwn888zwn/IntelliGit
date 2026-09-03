@@ -1,5 +1,13 @@
 import * as fs from "fs/promises";
 import * as path from "path";
+import {
+    getNodePath,
+    parseTree,
+    printParseErrorCode,
+    type Edit,
+    type Node,
+    type ParseError,
+} from "jsonc-parser";
 import type { Branch, GitWorktree } from "../types";
 
 export interface WorktreeAddArgsInput {
@@ -36,6 +44,15 @@ export async function copyWorktreeLocalFiles(
     repoRoot: string,
     targetPath: string,
 ): Promise<void> {
+    const targetSettingsPath = path.join(targetPath, ".vscode", "settings.json");
+    let targetSettingsExisted = false;
+    try {
+        await fs.stat(targetSettingsPath);
+        targetSettingsExisted = true;
+    } catch (error) {
+        if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    }
+
     await Promise.all(
         WORKTREE_LOCAL_PATHS.map(async (relativePath) => {
             const source = path.join(repoRoot, relativePath);
@@ -52,6 +69,80 @@ export async function copyWorktreeLocalFiles(
             }
         }),
     );
+    if (!targetSettingsExisted) {
+        await rewriteCopiedVsCodeSettings(targetSettingsPath, repoRoot, targetPath);
+    }
+}
+
+export function getWorktreeWorkspacePath(worktreePath: string): string {
+    return `${path.resolve(worktreePath)}.code-workspace`;
+}
+
+export async function findWorktreeWorkspacePath(worktreePath: string): Promise<string | null> {
+    const workspacePath = getWorktreeWorkspacePath(worktreePath);
+    try {
+        const stat = await fs.stat(workspacePath);
+        return stat.isFile() ? workspacePath : null;
+    } catch {
+        return null;
+    }
+}
+
+export async function copyWorktreeWorkspaceFile(
+    sourceWorkspacePath: string,
+    repoRoot: string,
+    targetPath: string,
+): Promise<string> {
+    const sourceText = await fs.readFile(sourceWorkspacePath, "utf8");
+    const errors: ParseError[] = [];
+    const root = parseTree(sourceText, errors, {
+        allowTrailingComma: true,
+        disallowComments: false,
+    });
+    if (!root || errors.length > 0) {
+        const detail = errors[0] ? printParseErrorCode(errors[0].error) : "Empty workspace file";
+        throw new Error(`Invalid workspace file: ${detail}`);
+    }
+
+    const targetWorkspacePath = getWorktreeWorkspacePath(targetPath);
+    const edits: Edit[] = [];
+    visitWorkspaceValues(root, (node) => {
+        const value = node.value;
+        if (typeof value !== "string") return;
+
+        const nodePath = getNodePath(node);
+        const isFolderPath =
+            nodePath.length === 3 &&
+            nodePath[0] === "folders" &&
+            typeof nodePath[1] === "number" &&
+            nodePath[2] === "path";
+        const nextValue = isFolderPath
+            ? mapWorkspaceFolderPath(
+                  value,
+                  sourceWorkspacePath,
+                  targetWorkspacePath,
+                  repoRoot,
+                  targetPath,
+              )
+            : replaceRepositoryPathReferences(value, repoRoot, targetPath);
+        if (nextValue === value) return;
+
+        edits.push({
+            offset: node.offset,
+            length: node.length,
+            content: JSON.stringify(nextValue),
+        });
+    });
+
+    let targetText = sourceText;
+    for (const edit of edits.sort((left, right) => right.offset - left.offset)) {
+        targetText =
+            targetText.slice(0, edit.offset) +
+            edit.content +
+            targetText.slice(edit.offset + edit.length);
+    }
+    await fs.writeFile(targetWorkspacePath, targetText, { encoding: "utf8", flag: "wx" });
+    return targetWorkspacePath;
 }
 
 export function validateWorktreeProjectName(projectName: string): string | null {
@@ -240,6 +331,106 @@ function containsControlChars(value: string): boolean {
         if (code <= 0x1f || code === 0x7f) return true;
     }
     return false;
+}
+
+function visitWorkspaceValues(node: Node, visitor: (node: Node) => void): void {
+    const isPropertyKey =
+        node.parent?.type === "property" && node.parent.children?.[0] === node;
+    if (!isPropertyKey) visitor(node);
+    node.children?.forEach((child) => visitWorkspaceValues(child, visitor));
+}
+
+function mapWorkspaceFolderPath(
+    folderPath: string,
+    sourceWorkspacePath: string,
+    targetWorkspacePath: string,
+    repoRoot: string,
+    targetPath: string,
+): string {
+    const sourceFolderPath = path.isAbsolute(folderPath)
+        ? path.resolve(folderPath)
+        : path.resolve(path.dirname(sourceWorkspacePath), folderPath);
+    const relativeToRepo = path.relative(path.resolve(repoRoot), sourceFolderPath);
+    if (
+        relativeToRepo.startsWith(`..${path.sep}`) ||
+        relativeToRepo === ".." ||
+        path.isAbsolute(relativeToRepo)
+    ) {
+        return folderPath;
+    }
+
+    const mappedFolderPath = path.join(path.resolve(targetPath), relativeToRepo);
+    if (path.isAbsolute(folderPath)) return mappedFolderPath;
+
+    const relativeToWorkspace = path.relative(path.dirname(targetWorkspacePath), mappedFolderPath);
+    return (relativeToWorkspace || ".").replace(/\\/g, "/");
+}
+
+function replaceRepositoryPathReferences(
+    value: string,
+    repoRoot: string,
+    targetPath: string,
+): string {
+    const resolvedRepoRoot = path.resolve(repoRoot);
+    const resolvedTargetPath = path.resolve(targetPath);
+    const escapedRepoRoot = JSON.stringify(resolvedRepoRoot).slice(1, -1);
+    const escapedTargetPath = JSON.stringify(resolvedTargetPath).slice(1, -1);
+    const variants = new Map<string, string>([
+        [resolvedRepoRoot, resolvedTargetPath],
+        [resolvedRepoRoot.replace(/\\/g, "/"), resolvedTargetPath.replace(/\\/g, "/")],
+        [escapedRepoRoot, escapedTargetPath],
+    ]);
+
+    let result = value;
+    for (const [source, target] of variants) {
+        result = replacePathReference(result, source, target);
+    }
+    return result;
+}
+
+async function rewriteCopiedVsCodeSettings(
+    settingsPath: string,
+    repoRoot: string,
+    targetPath: string,
+): Promise<void> {
+    try {
+        const sourceText = await fs.readFile(settingsPath, "utf8");
+        const targetText = replaceRepositoryPathReferences(sourceText, repoRoot, targetPath);
+        if (targetText !== sourceText) await fs.writeFile(settingsPath, targetText, "utf8");
+    } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") return;
+        throw error;
+    }
+}
+
+function replacePathReference(value: string, source: string, target: string): string {
+    const compareValue = process.platform === "win32" ? value.toLowerCase() : value;
+    const compareSource = process.platform === "win32" ? source.toLowerCase() : source;
+    let result = "";
+    let cursor = 0;
+
+    while (cursor < value.length) {
+        const index = compareValue.indexOf(compareSource, cursor);
+        if (index < 0) break;
+        const previous = value[index - 1];
+        const next = value[index + source.length];
+        const hasStartBoundary =
+            previous === undefined ||
+            previous === "/" ||
+            previous === "\\" ||
+            /[\s=:;,([{'"}]/.test(previous);
+        const hasEndBoundary =
+            next === undefined || next === "/" || next === "\\" || next === ":" || next === ";";
+        if (!hasStartBoundary || !hasEndBoundary) {
+            result += value.slice(cursor, index + source.length);
+            cursor = index + source.length;
+            continue;
+        }
+        result += value.slice(cursor, index) + target;
+        cursor = index + source.length;
+    }
+
+    return cursor === 0 ? value : result + value.slice(cursor);
 }
 
 function normalizePath(value: string): string {

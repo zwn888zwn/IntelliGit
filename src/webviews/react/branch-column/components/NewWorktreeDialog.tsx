@@ -50,6 +50,9 @@ export function NewWorktreeDialog({
     const [location, setLocation] = useState(defaultLocation);
     const [projectNameDirty, setProjectNameDirty] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
+    const [createErrorDismissed, setCreateErrorDismissed] = useState(false);
+    const [branchPickerOpen, setBranchPickerOpen] = useState(false);
+    const [activeBranchIndex, setActiveBranchIndex] = useState(0);
 
     useEffect(() => {
         setSelectedBranchName(initialBranch.name);
@@ -59,15 +62,22 @@ export function NewWorktreeDialog({
         setLocation(defaultLocation);
         setProjectNameDirty(false);
         setIsCreating(false);
+        setCreateErrorDismissed(false);
+        setBranchPickerOpen(false);
+        setActiveBranchIndex(0);
     }, [initialBranch.name, defaultLocation, defaultProjectName]);
 
     useEffect(() => {
         if (!locationSelection) return;
         setLocation(locationSelection.location);
+        setCreateErrorDismissed(true);
     }, [locationSelection]);
 
     useEffect(() => {
-        if (createError) setIsCreating(false);
+        if (createError) {
+            setIsCreating(false);
+            setCreateErrorDismissed(false);
+        }
     }, [createError]);
 
     const selectableBranches = useMemo(() => {
@@ -78,23 +88,57 @@ export function NewWorktreeDialog({
     }, [branches, initialBranch]);
 
     const selectedBranch = useMemo(
-        () => selectableBranches.find((branch) => branch.name === selectedBranchName) ?? initialBranch,
-        [initialBranch, selectableBranches, selectedBranchName],
+        () => selectableBranches.find((branch) => branch.name === selectedBranchName) ?? null,
+        [selectableBranches, selectedBranchName],
     );
+    const filteredBranches = useMemo(() => {
+        const query = selectedBranchName.trim().toLowerCase();
+        if (!query) return selectableBranches;
+        return selectableBranches.filter((branch) => branch.name.toLowerCase().includes(query));
+    }, [selectableBranches, selectedBranchName]);
+
+    useEffect(() => {
+        setActiveBranchIndex(0);
+    }, [selectedBranchName]);
+
+    const selectBranch = (branch: Branch): void => {
+        setSelectedBranchName(branch.name);
+        setBranchPickerOpen(false);
+        setCreateErrorDismissed(true);
+    };
 
     useEffect(() => {
         if (projectNameDirty) return;
-        const nameSource = createBranch && newBranchName.trim() ? newBranchName : selectedBranch.name;
+        const nameSource =
+            createBranch && newBranchName.trim()
+                ? newBranchName
+                : (selectedBranch?.name ?? selectedBranchName);
         setProjectName(defaultProjectNameFor(repository.name, nameSource));
-    }, [createBranch, newBranchName, projectNameDirty, repository.name, selectedBranch.name]);
+    }, [
+        createBranch,
+        newBranchName,
+        projectNameDirty,
+        repository.name,
+        selectedBranch?.name,
+        selectedBranchName,
+    ]);
 
     const localBranchCheckedOut =
+        selectedBranch !== null &&
         !selectedBranch.isRemote &&
         worktrees.some((worktree) => worktree.branch === selectedBranch.name);
+    const branchSelectionError = selectedBranch ? null : "Select an existing branch.";
+    const newBranchAlreadyExists =
+        createBranch &&
+        selectableBranches.some(
+            (branch) => !branch.isRemote && branch.name === newBranchName.trim(),
+        );
     const branchNameError =
         createBranch && !isValidBranchName(newBranchName.trim())
             ? "Enter a valid new branch name."
-            : null;
+            : newBranchAlreadyExists
+              ? `Local branch '${newBranchName.trim()}' already exists.`
+              : null;
     const projectNameError = validateProjectName(projectName);
     const locationError = location.trim() ? null : "Location is required.";
     const mustCreateBranchError =
@@ -102,13 +146,18 @@ export function NewWorktreeDialog({
             ? "This local branch is already checked out. Enable New branch to create a worktree."
             : null;
     const validationMessage =
-        branchNameError || projectNameError || locationError || mustCreateBranchError || createError?.message;
+        branchSelectionError ||
+        branchNameError ||
+        projectNameError ||
+        locationError ||
+        mustCreateBranchError ||
+        (!createErrorDismissed ? createError?.message : null);
     const canCreate = !validationMessage && !isCreating;
     const targetPath = joinPath(location.trim(), projectName.trim());
 
     const submit = (event?: React.FormEvent): void => {
         event?.preventDefault();
-        if (!canCreate) return;
+        if (!canCreate || !selectedBranch) return;
         setIsCreating(true);
         onCreate({
             repoRoot: repository.root,
@@ -130,18 +179,101 @@ export function NewWorktreeDialog({
             >
                 <div style={TITLE_STYLE}>New Worktree</div>
                 <Field label="From branch:">
-                    <select
-                        value={selectedBranch.name}
-                        onChange={(event) => setSelectedBranchName(event.target.value)}
-                        style={SELECT_STYLE}
-                        aria-label="From branch"
+                    <div
+                        style={BRANCH_PICKER_STYLE}
+                        onBlur={(event) => {
+                            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                                setBranchPickerOpen(false);
+                            }
+                        }}
                     >
-                        {selectableBranches.map((branch) => (
-                            <option key={`${branch.isRemote ? "remote" : "local"}-${branch.name}`} value={branch.name}>
-                                {branch.name}    {repository.name}
-                            </option>
-                        ))}
-                    </select>
+                        <input
+                            value={selectedBranchName}
+                            onFocus={(event) => {
+                                setBranchPickerOpen(true);
+                                event.currentTarget.select();
+                            }}
+                            onChange={(event) => {
+                                setSelectedBranchName(event.target.value);
+                                setBranchPickerOpen(true);
+                                setCreateErrorDismissed(true);
+                            }}
+                            onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                    setBranchPickerOpen(false);
+                                    return;
+                                }
+                                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                                    event.preventDefault();
+                                    setBranchPickerOpen(true);
+                                    setActiveBranchIndex((current) => {
+                                        const offset = event.key === "ArrowDown" ? 1 : -1;
+                                        return Math.max(
+                                            0,
+                                            Math.min(filteredBranches.length - 1, current + offset),
+                                        );
+                                    });
+                                    return;
+                                }
+                                if (event.key === "Enter" && branchPickerOpen) {
+                                    const branch = filteredBranches[activeBranchIndex];
+                                    if (branch) {
+                                        event.preventDefault();
+                                        selectBranch(branch);
+                                    }
+                                }
+                            }}
+                            placeholder="Search branches"
+                            autoComplete="off"
+                            role="combobox"
+                            aria-expanded={branchPickerOpen}
+                            aria-controls="intelligit-worktree-branch-list"
+                            aria-autocomplete="list"
+                            aria-activedescendant={
+                                branchPickerOpen && filteredBranches[activeBranchIndex]
+                                    ? `intelligit-worktree-branch-option-${activeBranchIndex}`
+                                    : undefined
+                            }
+                            style={INPUT_STYLE}
+                            aria-label="From branch"
+                        />
+                        {branchPickerOpen && (
+                            <div
+                                id="intelligit-worktree-branch-list"
+                                role="listbox"
+                                style={BRANCH_LIST_STYLE}
+                            >
+                                {filteredBranches.length > 0 ? (
+                                    filteredBranches.map((branch, index) => (
+                                        <button
+                                            key={`${branch.isRemote ? "remote" : "local"}-${branch.name}`}
+                                            id={`intelligit-worktree-branch-option-${index}`}
+                                            type="button"
+                                            role="option"
+                                            aria-selected={index === activeBranchIndex}
+                                            tabIndex={-1}
+                                            onMouseDown={(event) => event.preventDefault()}
+                                            onMouseEnter={() => setActiveBranchIndex(index)}
+                                            onClick={() => selectBranch(branch)}
+                                            style={{
+                                                ...BRANCH_OPTION_STYLE,
+                                                ...(index === activeBranchIndex
+                                                    ? BRANCH_OPTION_ACTIVE_STYLE
+                                                    : null),
+                                            }}
+                                        >
+                                            <span style={BRANCH_NAME_STYLE}>{branch.name}</span>
+                                            <span style={BRANCH_KIND_STYLE}>
+                                                {branch.isRemote ? "Remote" : "Local"}
+                                            </span>
+                                        </button>
+                                    ))
+                                ) : (
+                                    <div style={EMPTY_BRANCH_LIST_STYLE}>No matching branches</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </Field>
                 <Field label="New branch:">
                     <div style={CHECKBOX_INPUT_ROW_STYLE}>
@@ -149,12 +281,18 @@ export function NewWorktreeDialog({
                             aria-label="New branch"
                             type="checkbox"
                             checked={createBranch}
-                            onChange={(event) => setCreateBranch(event.target.checked)}
+                            onChange={(event) => {
+                                setCreateBranch(event.target.checked);
+                                setCreateErrorDismissed(true);
+                            }}
                             style={CHECKBOX_STYLE}
                         />
                         <input
                             value={newBranchName}
-                            onChange={(event) => setNewBranchName(event.target.value)}
+                            onChange={(event) => {
+                                setNewBranchName(event.target.value);
+                                setCreateErrorDismissed(true);
+                            }}
                             disabled={!createBranch}
                             placeholder="branch-name"
                             style={{
@@ -171,6 +309,7 @@ export function NewWorktreeDialog({
                         onChange={(event) => {
                             setProjectNameDirty(true);
                             setProjectName(event.target.value);
+                            setCreateErrorDismissed(true);
                         }}
                         style={INPUT_STYLE}
                         aria-label="Project name"
@@ -180,7 +319,10 @@ export function NewWorktreeDialog({
                     <div style={LOCATION_ROW_STYLE}>
                         <input
                             value={location}
-                            onChange={(event) => setLocation(event.target.value)}
+                            onChange={(event) => {
+                                setLocation(event.target.value);
+                                setCreateErrorDismissed(true);
+                            }}
                             style={INPUT_STYLE}
                             aria-label="Location"
                         />
@@ -378,9 +520,65 @@ const INPUT_STYLE: React.CSSProperties = {
     outline: "none",
 };
 
-const SELECT_STYLE: React.CSSProperties = {
-    ...INPUT_STYLE,
-    appearance: "auto",
+const BRANCH_PICKER_STYLE: React.CSSProperties = {
+    position: "relative",
+};
+
+const BRANCH_LIST_STYLE: React.CSSProperties = {
+    position: "absolute",
+    zIndex: 2,
+    top: CONTROL_HEIGHT + 4,
+    left: 0,
+    right: 0,
+    maxHeight: 220,
+    overflowY: "auto",
+    padding: 4,
+    borderRadius: 6,
+    border: "1px solid var(--vscode-widget-border, rgba(255,255,255,0.18))",
+    background: "var(--vscode-dropdown-background, #2f3136)",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.42)",
+};
+
+const BRANCH_OPTION_STYLE: React.CSSProperties = {
+    width: "100%",
+    minHeight: 30,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    padding: "4px 8px",
+    border: "none",
+    borderRadius: 4,
+    background: "transparent",
+    color: "var(--vscode-dropdown-foreground, #d7d7d7)",
+    fontFamily: SYSTEM_FONT_STACK,
+    fontSize: 13,
+    textAlign: "left",
+    cursor: "pointer",
+};
+
+const BRANCH_OPTION_ACTIVE_STYLE: React.CSSProperties = {
+    background: "var(--vscode-list-activeSelectionBackground, #3467c8)",
+    color: "var(--vscode-list-activeSelectionForeground, #fff)",
+};
+
+const BRANCH_NAME_STYLE: React.CSSProperties = {
+    minWidth: 0,
+    flex: 1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+};
+
+const BRANCH_KIND_STYLE: React.CSSProperties = {
+    flexShrink: 0,
+    opacity: 0.72,
+    fontSize: 11,
+};
+
+const EMPTY_BRANCH_LIST_STYLE: React.CSSProperties = {
+    padding: "7px 8px",
+    color: "var(--vscode-descriptionForeground, #8d929b)",
+    fontSize: 12,
 };
 
 const CHECKBOX_INPUT_ROW_STYLE: React.CSSProperties = {

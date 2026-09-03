@@ -114,6 +114,9 @@ let latestWebviewPanel: MockWebviewPanel | undefined;
 let workspaceFolders: Array<{ uri: { fsPath: string; path: string } }> | undefined = [
     { uri: { fsPath: "/repo", path: "/repo" } },
 ];
+let workspaceFile:
+    | { scheme: string; fsPath: string; path: string }
+    | undefined;
 let activeTextEditor:
     | {
           document: {
@@ -636,6 +639,9 @@ vi.mock("vscode", () => ({
         withProgress,
     },
     workspace: {
+        get workspaceFile() {
+            return workspaceFile;
+        },
         get workspaceFolders() {
             return workspaceFolders;
         },
@@ -890,6 +896,7 @@ describe("extension integration", () => {
             throw new Error("ENOENT");
         });
         workspaceFolders = [{ uri: { fsPath: "/repo", path: "/repo" } }];
+        workspaceFile = undefined;
         activeTextEditor = undefined;
         currentRepositoryRoot = repositoryEntries[0].root;
         latestCommitGraphProvider = undefined;
@@ -1694,6 +1701,108 @@ describe("extension integration", () => {
         expect(executeCommandFallback).toHaveBeenCalledWith(
             "vscode.openFolder",
             expect.objectContaining({ fsPath: target }),
+            true,
+        );
+    });
+
+    it("copies, rewrites, and opens a saved workspace for a new worktree", async () => {
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-workspace-copy-"));
+        const sourceWorkspacePath = path.join(parent, "repo-a.code-workspace");
+        const relativeRepoPath = path.relative(parent, "/repo-a").replace(/\\/g, "/");
+        await fs.writeFile(
+            sourceWorkspacePath,
+            [
+                "{",
+                "  // Preserve workspace comments.",
+                '  "folders": [',
+                `    { "path": ${JSON.stringify(relativeRepoPath)} },`,
+                `    { "path": ${JSON.stringify(`${relativeRepoPath}/src`)} },`,
+                "  ],",
+                '  "settings": {',
+                '    "go.gopath": "/repo-a:/Users/me/go",',
+                '    "go.goroot": "/Users/me/go/go1.19.2",',
+                "  },",
+                "}",
+            ].join("\n"),
+        );
+        workspaceFile = {
+            scheme: "file",
+            fsPath: sourceWorkspacePath,
+            path: sourceWorkspacePath,
+        };
+
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        executeCommandFallback.mockClear();
+
+        const target = path.join(parent, "repo-a-feature-workspace");
+        await latestCommitGraphProvider!.emitCreateWorktree({
+            repoRoot: "/repo-a",
+            branchName: "main",
+            createBranch: true,
+            newBranchName: "feature/workspace",
+            projectName: path.basename(target),
+            location: parent,
+        });
+        await waitForAsync();
+
+        const targetWorkspacePath = `${target}.code-workspace`;
+        const targetWorkspace = await fs.readFile(targetWorkspacePath, "utf8");
+        expect(targetWorkspace).toContain("// Preserve workspace comments.");
+        expect(targetWorkspace).toContain(`"path": ${JSON.stringify(path.basename(target))}`);
+        expect(targetWorkspace).toContain(
+            `"path": ${JSON.stringify(`${path.basename(target)}/src`)}`,
+        );
+        expect(targetWorkspace).toContain(`${target}:/Users/me/go`);
+        expect(targetWorkspace).toContain('"go.goroot": "/Users/me/go/go1.19.2"');
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.openFolder",
+            expect.objectContaining({ fsPath: targetWorkspacePath }),
+            true,
+        );
+    });
+
+    it("opens an existing worktree workspace from the worktrees dialog", async () => {
+        const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-workspace-open-"));
+        const worktreePath = path.join(parent, "repo-a-feature");
+        const worktreeWorkspacePath = `${worktreePath}.code-workspace`;
+        await fs.writeFile(worktreeWorkspacePath, '{ "folders": [] }\n');
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "worktree" && args[1] === "list") {
+                return [
+                    "worktree /repo-a",
+                    "HEAD feed1234",
+                    "branch refs/heads/main",
+                    "",
+                    `worktree ${worktreePath}`,
+                    "HEAD a1b2c3d4",
+                    "branch refs/heads/feature-local",
+                    "",
+                ].join("\n");
+            }
+            return defaultExecutorRunImpl(args);
+        });
+
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        executeCommandFallback.mockClear();
+
+        await latestCommitGraphProvider!.emitOpenWorktree({
+            repoRoot: "/repo-a",
+            path: worktreePath,
+        });
+
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.openFolder",
+            expect.objectContaining({ fsPath: worktreeWorkspacePath }),
             true,
         );
     });
