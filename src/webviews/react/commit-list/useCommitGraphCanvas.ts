@@ -75,23 +75,52 @@ export function useCommitGraphCanvas({
                 const sameRepo = row.repoRoot ? ref.repoRoot === row.repoRoot : true;
                 return sameRepo && isHashMatch(row.commitHash, ref.hash);
             });
+        const strokeSeparatedLine = (
+            ctx2d: CanvasRenderingContext2D,
+            fromX: number,
+            fromY: number,
+            toX: number,
+            toY: number,
+            color: string,
+            separate: boolean,
+        ): void => {
+            const lineWidth = Math.max(1, EDGE_LINE_WIDTH * graphScale);
+            const stroke = (): void => {
+                ctx2d.beginPath();
+                ctx2d.moveTo(fromX, fromY);
+                ctx2d.lineTo(toX, toY);
+                ctx2d.stroke();
+            };
+
+            if (separate) {
+                // Clear only previously drawn graph pixels so crossing lanes remain visually
+                // distinct over regular and selected-row backgrounds.
+                ctx2d.save();
+                ctx2d.globalCompositeOperation = "destination-out";
+                ctx2d.lineWidth = lineWidth + 4;
+                stroke();
+                ctx2d.restore();
+            }
+
+            ctx2d.strokeStyle = color;
+            ctx2d.lineWidth = lineWidth;
+            stroke();
+        };
         const drawEdgeElement = (
             ctx2d: CanvasRenderingContext2D,
             rowTop: number,
             element: Extract<PrintElement, { type: "edge" }>,
+            separate: boolean,
         ) => {
-            ctx2d.beginPath();
-            ctx2d.strokeStyle = element.color;
-            ctx2d.lineWidth = Math.max(1, EDGE_LINE_WIDTH * graphScale);
-            ctx2d.moveTo(
+            strokeSeparatedLine(
+                ctx2d,
                 positionX(element.fromPosition),
                 anchorY(rowTop, element.fromAnchor),
-            );
-            ctx2d.lineTo(
                 positionX(element.toPosition),
                 anchorY(rowTop, element.toAnchor),
+                element.color,
+                separate,
             );
-            ctx2d.stroke();
         };
         const drawTerminalElement = (
             ctx2d: CanvasRenderingContext2D,
@@ -99,17 +128,27 @@ export function useCommitGraphCanvas({
             element: Extract<PrintElement, { type: "terminal" }>,
         ) => {
             const x = positionX(element.position);
-            ctx2d.beginPath();
-            ctx2d.strokeStyle = element.color;
-            ctx2d.lineWidth = Math.max(1, EDGE_LINE_WIDTH * graphScale);
             if (element.direction === "down") {
-                ctx2d.moveTo(x, rowTop);
-                ctx2d.lineTo(x, rowTop + ROW_HEIGHT / 2);
+                strokeSeparatedLine(
+                    ctx2d,
+                    x,
+                    rowTop,
+                    x,
+                    rowTop + ROW_HEIGHT / 2,
+                    element.color,
+                    false,
+                );
             } else {
-                ctx2d.moveTo(x, rowTop + ROW_HEIGHT / 2);
-                ctx2d.lineTo(x, rowTop + ROW_HEIGHT);
+                strokeSeparatedLine(
+                    ctx2d,
+                    x,
+                    rowTop + ROW_HEIGHT / 2,
+                    x,
+                    rowTop + ROW_HEIGHT,
+                    element.color,
+                    false,
+                );
             }
-            ctx2d.stroke();
         };
         const draw = () => {
             raf = 0;
@@ -137,9 +176,34 @@ export function useCommitGraphCanvas({
             for (let i = drawStart; i < drawEnd; i++) {
                 const row = rows[i];
                 const y = (i - drawStart) * ROW_HEIGHT;
+                const rowEdges = row.elements.filter(
+                    (element): element is Extract<PrintElement, { type: "edge" }> =>
+                        element.type === "edge",
+                );
+                const crossingEdges = new Set<Extract<PrintElement, { type: "edge" }>>();
+                for (let firstIndex = 0; firstIndex < rowEdges.length; firstIndex += 1) {
+                    const first = rowEdges[firstIndex];
+                    if (first.fromAnchor !== "center" || first.toAnchor !== "nextCenter") continue;
+                    for (
+                        let secondIndex = firstIndex + 1;
+                        secondIndex < rowEdges.length;
+                        secondIndex += 1
+                    ) {
+                        const second = rowEdges[secondIndex];
+                        if (
+                            second.fromAnchor === "center" &&
+                            second.toAnchor === "nextCenter" &&
+                            (first.fromPosition - second.fromPosition) *
+                                (first.toPosition - second.toPosition) <
+                                0
+                        ) {
+                            crossingEdges.add(second);
+                        }
+                    }
+                }
                 for (const element of row.elements) {
                     if (element.type === "edge") {
-                        drawEdgeElement(ctx, y, element);
+                        drawEdgeElement(ctx, y, element, crossingEdges.has(element));
                     } else if (element.type === "terminal") {
                         drawTerminalElement(ctx, y, element);
                     }

@@ -3,7 +3,15 @@
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
 import React, { useMemo, useState, useCallback, useEffect } from "react";
-import { LuChevronRight } from "react-icons/lu";
+import { createPortal } from "react-dom";
+import {
+    LuChevronsDown,
+    LuChevronsUp,
+    LuChevronRight,
+    LuFolderGit2,
+    LuGitBranch,
+    LuListTree,
+} from "react-icons/lu";
 import type {
     Branch,
     GitTag,
@@ -38,6 +46,7 @@ import {
     type WorktreeDialogRepository,
 } from "./branch-column/components/WorktreesDialog";
 import { RepoIcon, TagRightIcon } from "./branch-column/icons";
+import { renderHighlightedLabel } from "./branch-column/highlight";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import {
     BRANCH_ROW_CLASS_CSS,
@@ -112,6 +121,7 @@ interface CommitGraphViewState {
 
 const DEFAULT_EXPANDED_SECTIONS = ["local", "remote"];
 const CURRENT_BRANCH_ICON_TEAL = "#7fd4cf";
+const TAG_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 const ALL_REPOSITORIES_BRANCH_ACTIONS = new Set<string>([
     "checkout",
     "checkoutAndRebase",
@@ -285,6 +295,13 @@ export function BranchColumn({
     const remotes = useMemo(() => filteredBranches.filter((b) => b.isRemote), [filteredBranches]);
     const localTree = useMemo(() => buildPrefixTree(locals), [locals]);
     const remoteGroups = useMemo(() => buildRemoteGroups(remotes), [remotes]);
+    const activeRepositoryRoot =
+        repository?.root ?? (repositories.length === 1 ? repositories[0].root : undefined);
+    const filteredTags = useMemo(() => {
+        const tags = activeRepositoryRoot ? (repositoryTags[activeRepositoryRoot] ?? []) : [];
+        if (!filterNeedle) return tags;
+        return tags.filter((tag) => tag.name.toLowerCase().includes(filterNeedle));
+    }, [activeRepositoryRoot, filterNeedle, repositoryTags]);
 
     useEffect(() => {
         if (!filterNeedle && !selectedBranch) return;
@@ -309,10 +326,13 @@ export function BranchColumn({
                 sectionsToExpand.add("remote");
             }
         }
+        if (filterNeedle && filteredTags.length > 0) {
+            sectionsToExpand.add("tags");
+        }
 
         expandSetKeys(setExpandedSections, sectionsToExpand);
         expandSetKeys(setExpandedFolders, foldersToExpand);
-    }, [filterNeedle, localTree, remoteGroups, selectedBranch]);
+    }, [filterNeedle, filteredTags.length, localTree, remoteGroups, selectedBranch]);
 
     const toggleSection = useCallback(
         (key: string) => {
@@ -326,6 +346,22 @@ export function BranchColumn({
         },
         [setExpandedFolders],
     );
+
+    const expandAll = useCallback(() => {
+        const folders = new Set<string>();
+        collectMatchingFolderKeys(localTree, "local", folders);
+        for (const [remote, group] of remoteGroups) {
+            folders.add(`remote-${remote}`);
+            collectMatchingFolderKeys(group.tree, `remote/${remote}`, folders);
+        }
+        setExpandedSections(new Set(["local", "remote", "tags"]));
+        setExpandedFolders(folders);
+    }, [localTree, remoteGroups]);
+
+    const collapseAll = useCallback(() => {
+        setExpandedSections(new Set());
+        setExpandedFolders(new Set());
+    }, []);
 
     const currentRepositoryRoot = repository?.root;
     const handleBranchContextMenu = useCallback(
@@ -434,14 +470,78 @@ export function BranchColumn({
     }, [repositories, repository, worktreesDialogScope]);
 
     return (
-        <div style={hasMultipleRepositories ? MULTI_REPOSITORY_PANEL_STYLE : PANEL_STYLE}>
-            <style>{BRANCH_ROW_CLASS_CSS}</style>
+        <div style={{ display: "flex", height: "100%", minWidth: 0, overflow: "hidden" }}>
+            <style>{`${BRANCH_ROW_CLASS_CSS}
+                .branch-tool-button:hover {
+                    background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08)) !important;
+                }
+                .branch-tool-button:focus-visible {
+                    outline: 1px solid var(--vscode-focusBorder);
+                    outline-offset: 1px;
+                }
+            `}</style>
 
-            <BranchSearchBar
-                value={branchFilter}
-                onChange={setBranchFilter}
-                onClear={() => setBranchFilter("")}
-            />
+            <div
+                aria-label="Branch tools"
+                style={{
+                    width: 30,
+                    flexShrink: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "5px 3px",
+                    borderRight: "1px solid var(--vscode-panel-border)",
+                    color: "var(--vscode-icon-foreground)",
+                }}
+            >
+                <BranchToolButton
+                    label="Branches and actions"
+                    onClick={() => setBranchPopupOpen(true)}
+                    icon={<LuGitBranch size={16} />}
+                />
+                <BranchToolButton
+                    label="Show all branches"
+                    onClick={() => {
+                        setBranchFilter("");
+                        onSelectBranch(null);
+                    }}
+                    icon={<LuListTree size={16} />}
+                />
+                <BranchToolButton
+                    label="Expand all"
+                    onClick={expandAll}
+                    icon={<LuChevronsDown size={16} />}
+                />
+                <BranchToolButton
+                    label="Collapse all"
+                    onClick={collapseAll}
+                    icon={<LuChevronsUp size={16} />}
+                />
+                <div style={{ flex: 1 }} />
+                <BranchToolButton
+                    label="Worktrees"
+                    onClick={() => onBranchPopupAction("worktrees", repository?.root)}
+                    icon={<LuFolderGit2 size={16} />}
+                />
+            </div>
+
+            <div
+                style={{
+                    ...(hasMultipleRepositories ? MULTI_REPOSITORY_PANEL_STYLE : PANEL_STYLE),
+                    flex: 1,
+                    minWidth: 0,
+                    borderRight: "none",
+                }}
+            >
+
+                <div title="Search branches and tags">
+                    <BranchSearchBar
+                        value={branchFilter}
+                        onChange={setBranchFilter}
+                        onClear={() => setBranchFilter("")}
+                    />
+                </div>
 
             {hasMultipleRepositories && (
                 <div aria-label="Repositories" style={REPOSITORY_LIST_STYLE}>
@@ -636,9 +736,58 @@ export function BranchColumn({
                         </div>
                     )}
 
-                    {filterNeedle && locals.length === 0 && remotes.length === 0 && !current && (
-                        <div style={NO_MATCH_STYLE}>No matching branches</div>
+                    <BranchSectionHeader
+                        label="Tags"
+                        expanded={expandedSections.has("tags")}
+                        onToggle={() => toggleSection("tags")}
+                    />
+                    {expandedSections.has("tags") && (
+                        <div style={TREE_SECTION_STYLE}>
+                            {filteredTags.map((tag) => (
+                                <div
+                                    key={tag.name}
+                                    className="branch-row"
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-label={`Reveal tag ${tag.name}`}
+                                    title={tag.hash}
+                                    onClick={() => onSelectBranch(null, tag.hash)}
+                                    onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                            if (event.key === " ") event.preventDefault();
+                                            onSelectBranch(null, tag.hash);
+                                        }
+                                    }}
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        minWidth: 0,
+                                        padding: "1px 8px 1px 22px",
+                                        lineHeight: "18px",
+                                        cursor: "pointer",
+                                    }}
+                                >
+                                    <TagRightIcon color={TAG_ICON_YELLOW} />
+                                    <span
+                                        style={{
+                                            minWidth: 0,
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {renderHighlightedLabel(tag.name, filterNeedle)}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
                     )}
+
+                    {filterNeedle &&
+                        locals.length === 0 &&
+                        remotes.length === 0 &&
+                        filteredTags.length === 0 &&
+                        !current && <div style={NO_MATCH_STYLE}>No matching branches or tags</div>}
                 </div>
             )}
 
@@ -735,7 +884,80 @@ export function BranchColumn({
                     onClose={onCloseWorktreesDialog}
                 />
             )}
+            </div>
         </div>
+    );
+}
+
+function BranchToolButton({
+    label,
+    icon,
+    onClick,
+}: {
+    label: string;
+    icon: React.ReactNode;
+    onClick: () => void;
+}): React.ReactElement {
+    const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
+    const showTooltip = (element: HTMLElement): void => {
+        const rect = element.getBoundingClientRect();
+        setTooltipPosition({ x: rect.right + 7, y: rect.top + rect.height / 2 });
+    };
+
+    return (
+        <>
+            <button
+                type="button"
+                className="branch-tool-button"
+                aria-label={label}
+                onClick={onClick}
+                onPointerEnter={(event) => showTooltip(event.currentTarget)}
+                onPointerLeave={() => setTooltipPosition(null)}
+                onFocus={(event) => showTooltip(event.currentTarget)}
+                onBlur={() => setTooltipPosition(null)}
+                style={{
+                    width: 24,
+                    height: 24,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: 0,
+                    border: "none",
+                    borderRadius: 4,
+                    background: "transparent",
+                    color: "inherit",
+                    cursor: "pointer",
+                }}
+            >
+                {icon}
+            </button>
+            {tooltipPosition &&
+                createPortal(
+                    <span
+                        role="tooltip"
+                        style={{
+                            position: "fixed",
+                            left: tooltipPosition.x,
+                            top: tooltipPosition.y,
+                            transform: "translateY(-50%)",
+                            padding: "4px 7px",
+                            border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.14))",
+                            borderRadius: 4,
+                            background: "var(--vscode-editorHoverWidget-background, #2f3646)",
+                            color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
+                            boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+                            fontSize: 11,
+                            lineHeight: "15px",
+                            whiteSpace: "nowrap",
+                            pointerEvents: "none",
+                            zIndex: 9999,
+                        }}
+                    >
+                        {label}
+                    </span>,
+                    document.body,
+                )}
+        </>
     );
 }
 

@@ -113,7 +113,8 @@ export function CommitList({
     }, [commits, graph.orderedHashes]);
     const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
     const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
-    const repoRailWidth = repoRailExpanded ? 168 : 10;
+    const hasRepositoryRail = repositories.length > 1;
+    const repoRailWidth = hasRepositoryRail ? (repoRailExpanded ? 168 : 10) : 0;
     const graphTextFloor = Math.min(
         graphWidth,
         IDEA_GRAPH_TEXT_LANE_LIMIT * LANE_WIDTH * graphScale + IDEA_GRAPH_TEXT_GAP,
@@ -422,65 +423,67 @@ export function CommitList({
                     <div style={contentContainerStyle(orderedCommits.length + (hasMore ? 1 : 0))}>
                         <canvas ref={canvasRef} style={CANVAS_STYLE} />
 
-                        <div
-                            style={{
-                                position: "absolute",
-                                left: 0,
-                                top: 0,
-                                transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)`,
-                                width: repoRailWidth,
-                                zIndex: 3,
-                            }}
-                        >
-                            {visibleCommits.map((commit, offset) => {
-                                const repo = repositoryLookup.get(commit.repoRoot);
-                                const top = offset * ROW_HEIGHT;
-                                return (
-                                    <button
-                                        key={`repo-rail:${commit.repoRoot}:${commit.hash}:${top}`}
-                                        type="button"
-                                        title={repo?.root ?? commit.repoRoot}
-                                        onClick={onToggleRepoRail}
-                                        style={{
-                                            position: "absolute",
-                                            left: 0,
-                                            top,
-                                            width: repoRailWidth,
-                                            height: ROW_HEIGHT,
-                                            border: "none",
-                                            borderRight: "1px solid rgba(255,255,255,0.08)",
-                                            borderLeft: repoRailExpanded
-                                                ? "none"
-                                                : `4px solid ${repo?.color ?? "#666"}`,
-                                            background: repoRailExpanded
-                                                ? (repo?.color ?? "#666")
-                                                : "transparent",
-                                            color: "rgba(255,255,255,0.92)",
-                                            padding: repoRailExpanded ? "0 8px" : 0,
-                                            textAlign: "left",
-                                            overflow: "hidden",
-                                            cursor: "pointer",
-                                            opacity: selectedHash === commit.hash ? 1 : 0.72,
-                                        }}
-                                    >
-                                        {repoRailExpanded && (
-                                            <span
-                                                style={{
-                                                    display: "block",
-                                                    overflow: "hidden",
-                                                    textOverflow: "ellipsis",
-                                                    whiteSpace: "nowrap",
-                                                    fontSize: "11px",
-                                                    fontWeight: 700,
-                                                }}
-                                            >
-                                                {repo?.name ?? commit.repoId}
-                                            </span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
+                        {hasRepositoryRail && (
+                            <div
+                                style={{
+                                    position: "absolute",
+                                    left: 0,
+                                    top: 0,
+                                    transform: `translateY(${visibleRange.start * ROW_HEIGHT}px)`,
+                                    width: repoRailWidth,
+                                    zIndex: 3,
+                                }}
+                            >
+                                {visibleCommits.map((commit, offset) => {
+                                    const repo = repositoryLookup.get(commit.repoRoot);
+                                    const top = offset * ROW_HEIGHT;
+                                    return (
+                                        <button
+                                            key={`repo-rail:${commit.repoRoot}:${commit.hash}:${top}`}
+                                            type="button"
+                                            title={repo?.root ?? commit.repoRoot}
+                                            onClick={onToggleRepoRail}
+                                            style={{
+                                                position: "absolute",
+                                                left: 0,
+                                                top,
+                                                width: repoRailWidth,
+                                                height: ROW_HEIGHT,
+                                                border: "none",
+                                                borderRight: "1px solid rgba(255,255,255,0.08)",
+                                                borderLeft: repoRailExpanded
+                                                    ? "none"
+                                                    : `4px solid ${repo?.color ?? "#666"}`,
+                                                background: repoRailExpanded
+                                                    ? (repo?.color ?? "#666")
+                                                    : "transparent",
+                                                color: "rgba(255,255,255,0.92)",
+                                                padding: repoRailExpanded ? "0 8px" : 0,
+                                                textAlign: "left",
+                                                overflow: "hidden",
+                                                cursor: "pointer",
+                                                opacity: selectedHash === commit.hash ? 1 : 0.72,
+                                            }}
+                                        >
+                                            {repoRailExpanded && (
+                                                <span
+                                                    style={{
+                                                        display: "block",
+                                                        overflow: "hidden",
+                                                        textOverflow: "ellipsis",
+                                                        whiteSpace: "nowrap",
+                                                        fontSize: "11px",
+                                                        fontWeight: 700,
+                                                    }}
+                                                >
+                                                    {repo?.name ?? commit.repoId}
+                                                </span>
+                                            )}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
 
                         {!repository && orderedCommits.length === 0 && (
                             <div
@@ -696,31 +699,41 @@ export function CommitList({
                     </div>
                 </div>
 
-                <button
-                    type="button"
-                    aria-label={repoRailExpanded ? "Collapse repository rail" : "Expand repository rail"}
-                    title={repoRailExpanded ? "Collapse repository rail" : "Expand repository rail"}
-                    onClick={onToggleRepoRail}
-                    style={{
-                        position: "absolute",
-                        left: 0,
-                        bottom: 8,
-                        width: repoRailExpanded ? 22 : repoRailWidth,
-                        height: 22,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: 0,
-                        border: "none",
-                        borderRadius: 4,
-                        background: "rgba(255,255,255,0.06)",
-                        color: "var(--vscode-foreground)",
-                        zIndex: 4,
-                        cursor: "pointer",
-                    }}
-                >
-                    {repoRailExpanded ? <LuPanelLeftClose size={12} /> : <LuPanelLeftOpen size={12} />}
-                </button>
+                {hasRepositoryRail && (
+                    <button
+                        type="button"
+                        aria-label={
+                            repoRailExpanded ? "Collapse repository rail" : "Expand repository rail"
+                        }
+                        title={
+                            repoRailExpanded ? "Collapse repository rail" : "Expand repository rail"
+                        }
+                        onClick={onToggleRepoRail}
+                        style={{
+                            position: "absolute",
+                            left: 0,
+                            bottom: 8,
+                            width: repoRailExpanded ? 22 : repoRailWidth,
+                            height: 22,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            padding: 0,
+                            border: "none",
+                            borderRadius: 4,
+                            background: "rgba(255,255,255,0.06)",
+                            color: "var(--vscode-foreground)",
+                            zIndex: 4,
+                            cursor: "pointer",
+                        }}
+                    >
+                        {repoRailExpanded ? (
+                            <LuPanelLeftClose size={12} />
+                        ) : (
+                            <LuPanelLeftOpen size={12} />
+                        )}
+                    </button>
+                )}
             </div>
 
             {contextMenu && (

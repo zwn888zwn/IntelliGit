@@ -939,6 +939,85 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
+    it("BranchColumn searches and reveals tags and exposes practical tree tools", async () => {
+        const repository: RepositoryContextInfo = {
+            repoId: "repo-a",
+            name: "repo-a",
+            root: "/repo-a",
+            color: "#4caf50",
+        };
+        const onSelectBranch = vi.fn();
+        const onBranchPopupAction = vi.fn();
+        const { root, container } = mount(
+            <BranchColumn
+                branches={[
+                    {
+                        name: "main",
+                        hash: "feed1234",
+                        isRemote: false,
+                        isCurrent: true,
+                        ahead: 0,
+                        behind: 0,
+                    },
+                ]}
+                repository={repository}
+                repositories={[repository]}
+                repositoryTags={{
+                    [repository.root]: [{ name: "release/v1.2.0", hash: "abc1234" }],
+                }}
+                selectedBranch={null}
+                onSelectBranch={onSelectBranch}
+                onBranchAction={vi.fn()}
+                onBranchPopupAction={onBranchPopupAction}
+            />,
+        );
+
+        expect(container.querySelector('[aria-label="Branch tools"]')).toBeTruthy();
+        expect(container.textContent).toContain("Tags");
+        expect(container.textContent).not.toContain("release/v1.2.0");
+
+        const searchInput = container.querySelector(
+            'input[placeholder="Search branches"]',
+        ) as HTMLInputElement;
+        act(() => {
+            const valueSetter = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                "value",
+            )?.set;
+            valueSetter?.call(searchInput, "v1.2");
+            searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+            searchInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+        await flush();
+
+        const tagRow = container.querySelector(
+            '[aria-label="Reveal tag release/v1.2.0"]',
+        ) as HTMLElement;
+        expect(tagRow).toBeTruthy();
+        expect(container.textContent).not.toContain("No matching branches or tags");
+        act(() => {
+            tagRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(onSelectBranch).toHaveBeenCalledWith(null, "abc1234");
+
+        const collapseAll = container.querySelector('[aria-label="Collapse all"]') as HTMLElement;
+        const expandAll = container.querySelector('[aria-label="Expand all"]') as HTMLElement;
+        act(() => {
+            collapseAll.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        });
+        expect(container.querySelector('[aria-label="Reveal tag release/v1.2.0"]')).toBeNull();
+        act(() => {
+            expandAll.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+            (container.querySelector('[aria-label="Worktrees"]') as HTMLElement).dispatchEvent(
+                new MouseEvent("click", { bubbles: true }),
+            );
+        });
+        expect(container.querySelector('[aria-label="Reveal tag release/v1.2.0"]')).toBeTruthy();
+        expect(onBranchPopupAction).toHaveBeenCalledWith("worktrees", repository.root);
+
+        unmount(root, container);
+    });
+
     it("BranchColumn expands folders for search results and selected branches", async () => {
         const branches: Branch[] = [
             {
@@ -1255,6 +1334,7 @@ describe("low coverage components", () => {
                 (el as HTMLDivElement).style.cursor === "pointer" &&
                 el.textContent?.includes("feat: commit list coverage"),
         ) as HTMLElement;
+        expect(container.querySelector('[aria-label="Expand repository rail"]')).toBeNull();
         act(() => {
             row.dispatchEvent(
                 new MouseEvent("contextmenu", {
