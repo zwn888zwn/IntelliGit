@@ -133,19 +133,24 @@ function renderLongEdge(
     edge: PermanentEdge,
     arrowMarkers: ArrowMarker[],
 ): void {
+    const external = isExternalEdge(graph, edge);
     const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
     const bottomStubRow = edge.downRowIndex - LONG_EDGE_VISIBLE_PART_SIZE;
 
-    const startElement = edgeSegmentForRow(rowRenderPositions, edge, edge.upRowIndex);
-    if (startElement) {
-        rows[edge.upRowIndex].elements.push(startElement);
+    if (!external || topStubRow < rows.length) {
+        const startElement = edgeSegmentForRow(rowRenderPositions, edge, edge.upRowIndex);
+        if (startElement) {
+            rows[edge.upRowIndex].elements.push(startElement);
+        }
     }
-    const endElement = edgeSegmentForRow(rowRenderPositions, edge, edge.downRowIndex);
-    if (endElement) {
-        rows[edge.downRowIndex].elements.push(endElement);
+    if (!external) {
+        const endElement = edgeSegmentForRow(rowRenderPositions, edge, edge.downRowIndex);
+        if (endElement) {
+            rows[edge.downRowIndex].elements.push(endElement);
+        }
     }
 
-    if (topStubRow < edge.downRowIndex) {
+    if (topStubRow < edge.downRowIndex && topStubRow < rows.length) {
         const position = getEdgePosition(rowRenderPositions, topStubRow, edge.edgeId);
         rows[topStubRow].elements.push({
             type: "terminal",
@@ -165,9 +170,19 @@ function renderLongEdge(
             targetRowIndex: edge.downRowIndex,
             color: edge.color,
         });
+    } else if (external) {
+        arrowMarkers.push({
+            edgeId: edge.edgeId,
+            rowIndex: edge.upRowIndex,
+            position: getNodePosition(rowRenderPositions, edge.upRowIndex),
+            direction: "down",
+            targetHash: edge.targetHash,
+            targetRowIndex: edge.downRowIndex,
+            color: edge.color,
+        });
     }
 
-    if (bottomStubRow > edge.upRowIndex) {
+    if (!external && bottomStubRow > edge.upRowIndex) {
         const sourceRow = graph.rows[edge.upRowIndex];
         const position = getNodePosition(rowRenderPositions, edge.downRowIndex);
         rows[bottomStubRow].elements.push({
@@ -262,7 +277,7 @@ function buildRowRenderPositions(graph: PermanentGraphModel): RowRenderPositions
     const edgeBySourceRow = new Map<number, PermanentEdge[]>();
     for (const edge of graph.edges) {
         if (edge.downRowIndex <= edge.upRowIndex) continue;
-        visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge));
+        visibleRowsByEdge.set(edge.edgeId, getVisibleRowsForEdge(edge, graph.rows.length));
         const sourceEdges = edgeBySourceRow.get(edge.upRowIndex) ?? [];
         sourceEdges.push(edge);
         edgeBySourceRow.set(edge.upRowIndex, sourceEdges);
@@ -384,8 +399,16 @@ function moveNodeLaneLeftByLayout(
     return insertIndex;
 }
 
-function getVisibleRowsForEdge(edge: PermanentEdge): number[] {
+function getVisibleRowsForEdge(edge: PermanentEdge, rowCount: number): number[] {
     const rows = new Set<number>();
+
+    if (edge.downRowIndex >= rowCount) {
+        const topStubRow = edge.upRowIndex + LONG_EDGE_VISIBLE_PART_SIZE;
+        if (topStubRow < rowCount) {
+            rows.add(topStubRow);
+        }
+        return [...rows];
+    }
 
     if (!isLongEdge(edge)) {
         for (let rowIndex = edge.upRowIndex + 1; rowIndex < edge.downRowIndex; rowIndex += 1) {
@@ -421,6 +444,10 @@ function getEdgePosition(
 
 function isLongEdge(edge: PermanentEdge): boolean {
     return edge.downRowIndex - edge.upRowIndex >= LONG_EDGE_SIZE;
+}
+
+function isExternalEdge(graph: PermanentGraphModel, edge: PermanentEdge): boolean {
+    return edge.downRowIndex >= graph.rows.length;
 }
 
 function calculateReservedWidth(rowRenderPositions: RowRenderPositions[]): number {

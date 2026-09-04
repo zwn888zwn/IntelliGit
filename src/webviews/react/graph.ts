@@ -1,4 +1,8 @@
-import { buildPermanentGraph, orderCommitsForGraph } from "./commit-list/graphModel";
+import {
+    buildPermanentGraph,
+    orderCommitsForGraph,
+    type PermanentEdge,
+} from "./commit-list/graphModel";
 import { buildRenderRows, type CommitGraphLayoutResult } from "./commit-list/graphRouter";
 import type { GraphRefInfo } from "../../types";
 
@@ -29,29 +33,37 @@ export function computeGraph(
 ): CommitGraphLayoutResult {
     const { commits: orderedCommits, layoutIndexByHash, headRows } = orderCommitsForGraph(commits);
     const permanentGraph = buildPermanentGraph(orderedCommits, layoutIndexByHash, headRows);
-    const result = buildRenderRows(permanentGraph);
     const knownHashes = new Set(orderedCommits.map((commit) => commit.hash));
-    const externalParentArrows = orderedCommits.flatMap((commit, rowIndex) =>
+    const externalParentEdges: PermanentEdge[] = orderedCommits.flatMap((commit, rowIndex) =>
         commit.parentHashes.flatMap((parentHash, parentIndex) => {
             if (knownHashes.has(parentHash)) {
                 return [];
             }
+            const sourceRow = permanentGraph.rows[rowIndex];
+            if (!sourceRow) return [];
             return [
                 {
                     edgeId: `${commit.hash}:${parentHash}:${parentIndex}:external-parent`,
-                    rowIndex,
-                    position: result.rows[rowIndex]?.nodePosition ?? 0,
-                    direction: "down" as const,
+                    laneId: sourceRow.node.laneId,
+                    fromLaneId: sourceRow.node.laneId,
+                    toLaneId: sourceRow.node.laneId,
                     targetHash: parentHash,
-                    targetRowIndex: orderedCommits.length,
-                    color: result.rows[rowIndex]?.nodeColor ?? "#4CAF50",
+                    upRowIndex: rowIndex,
+                    downRowIndex: Number.MAX_SAFE_INTEGER,
+                    upLayoutIndex: sourceRow.node.layoutIndex,
+                    downLayoutIndex: sourceRow.node.layoutIndex,
+                    color: sourceRow.node.color,
+                    isPrimary: parentIndex === 0,
                 },
             ];
         }),
     );
+    const result = buildRenderRows({
+        ...permanentGraph,
+        edges: [...permanentGraph.edges, ...externalParentEdges],
+    });
     return {
         ...result,
-        arrowMarkers: [...result.arrowMarkers, ...externalParentArrows],
         orderedHashes: orderedCommits.map((commit) => commit.hash),
         rows: result.rows.map((row, index) => ({
             ...row,

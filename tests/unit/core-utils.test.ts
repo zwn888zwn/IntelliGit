@@ -1160,12 +1160,55 @@ describe("core utilities", () => {
             expect.arrayContaining([
                 expect.objectContaining({
                     direction: "down",
-                    rowIndex: 0,
-                    position: partial.rows[0].nodePosition,
+                    rowIndex: 1,
                     targetHash: "missing-parent",
                 }),
             ]),
         );
+        expect(
+            partial.rows[0].elements.some(
+                (element) => element.type === "edge" && element.edgeId.includes("external-parent"),
+            ),
+        ).toBe(true);
+        expect(
+            partial.rows[1].elements.some(
+                (element) => element.type === "terminal" && element.targetHash === "missing-parent",
+            ),
+        ).toBe(true);
+    });
+
+    it("graph compute routes an external primary parent beside the next visible head", () => {
+        const visibleCommits = [
+            { hash: "topic-head", parentHashes: ["topic"], refs: ["origin/topic"] },
+            { hash: "topic", parentHashes: ["missing-parent", "main"] },
+            { hash: "main", parentHashes: [], refs: ["origin/master"] },
+        ];
+        const partial = computeGraph(visibleCommits);
+        const marker = partial.arrowMarkers.find(
+            (arrow) => arrow.targetHash === "missing-parent",
+        );
+        const expanded = computeGraph([
+            ...visibleCommits,
+            ...Array.from({ length: 30 }, (_item, index) => ({
+                hash: `filler-${index}`,
+                parentHashes: [],
+            })),
+            { hash: "missing-parent", parentHashes: [] },
+        ]);
+        const expandedMarker = expanded.arrowMarkers.find(
+            (arrow) => arrow.targetHash === "missing-parent",
+        );
+
+        expect(marker).toEqual(
+            expect.objectContaining({
+                direction: "down",
+                rowIndex: 2,
+                position: 1,
+            }),
+        );
+        expect(marker?.rowIndex).toBe(expandedMarker?.rowIndex);
+        expect(marker?.position).toBe(expandedMarker?.position);
+        expect(partial.rows[2].nodePosition).toBe(0);
     });
 
     it("graph compute routes merge edges without fake jump markers", () => {
