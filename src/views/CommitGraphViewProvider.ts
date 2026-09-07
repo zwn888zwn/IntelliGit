@@ -699,12 +699,13 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
             ),
         );
 
-        const merged =
+        const merged = this.decorateCommitsWithGraphRefs(
             pages.length === 1
                 ? pages[0]
-                : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+                : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date)),
+        );
         return {
-            commits: this.decorateCommitsWithGraphRefs(merged.slice(0, limit)),
+            commits: merged.slice(0, limit),
             hasMore: merged.length > limit,
         };
     }
@@ -758,7 +759,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         return this.decorateCommitsWithGraphRefs((pages.length === 1
             ? pages[0]
             : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-        ).slice(skip, skip + this.PAGE_SIZE));
+        )).slice(skip, skip + this.PAGE_SIZE);
     }
 
     private async getUnpushedHashes(): Promise<string[]> {
@@ -793,11 +794,18 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         return this.decorateCommitsWithGraphRefs((pages.length === 1
             ? pages[0]
             : pages.flat().sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
-        ).slice(0, limit + 1));
+        )).slice(0, limit + 1);
     }
 
     private decorateCommitsWithGraphRefs(commits: Commit[]): Commit[] {
-        return commits.map((commit) => ({
+        // Shared histories can appear in several repositories. Deduplicate before
+        // pagination so each hash has exactly one row and one graph node.
+        const seenHashes = new Set<string>();
+        return commits.filter((commit) => {
+            if (seenHashes.has(commit.hash)) return false;
+            seenHashes.add(commit.hash);
+            return true;
+        }).map((commit) => ({
             ...commit,
             graphRefs: this.buildGraphRefs(commit),
         }));

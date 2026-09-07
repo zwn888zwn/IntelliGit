@@ -735,6 +735,89 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("CommitGraphViewProvider deduplicates shared history before pagination, refresh, and hash search", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        const otherGitOps = { ...makeGitOpsMock(), getBranches: vi.fn(async () => []) };
+        const sharedCommits = Array.from({ length: 502 }, (_, index) => ({
+            hash: `abcd${index.toString().padStart(4, "0")}`.padEnd(40, "0"),
+            shortHash: `abcd${index.toString().padStart(4, "0")}`,
+            message: `shared commit ${index}`,
+            author: "Mahesh",
+            email: "m@example.com",
+            date: new Date(Date.UTC(2026, 5, 1) - index * 60_000).toISOString(),
+            parentHashes: index < 501
+                ? [`abcd${(index + 1).toString().padStart(4, "0")}`.padEnd(40, "0")]
+                : [],
+            refs: [],
+            repoId: "repo",
+            repoRoot: "/repo",
+        }));
+        const firstHistory = [{
+            ...sharedCommits[0],
+            hash: "first-only",
+            message: "first repository only",
+            date: "2026-06-02T00:00:00Z",
+            parentHashes: [sharedCommits[0].hash],
+        }, ...sharedCommits];
+        const otherHistory = [{
+            ...sharedCommits[0],
+            hash: "other-only",
+            message: "other repository only",
+            date: "2026-06-01T12:00:00Z",
+            parentHashes: [sharedCommits[0].hash],
+        }, ...sharedCommits].map((commit) => ({ ...commit, repoId: "other", repoRoot: "/other" }));
+        for (const [ops, history] of [[gitOps, firstHistory], [otherGitOps, otherHistory]] as const) {
+            ops.getLog.mockImplementation(async (limit = 500, _branch, _text, skip = 0) =>
+                history.slice(skip, skip + limit),
+            );
+            ops.findCommitsByHashPrefix.mockImplementation(async (prefix, limit = 500) =>
+                history.filter((commit) => commit.hash.startsWith(prefix)).slice(0, limit),
+            );
+        }
+        const entries = [
+            { root: "/repo", info: testRepository, gitOps },
+            { root: "/other", info: { name: "other", root: "/other" }, gitOps: otherGitOps },
+        ];
+        const provider = new CommitGraphViewProvider(
+            { fsPath: "/ext", path: "/ext" } as never,
+            gitOps as never,
+            () => entries as never,
+        );
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+        const lastCommitMessage = () => postMessageSpy.mock.calls
+            .map((call) => call[0])
+            .filter((message) => message?.type === "loadCommits")
+            .at(-1);
+
+        await webview.send({ type: "ready" });
+        const firstPage = lastCommitMessage();
+        const expectedHashes = ["first-only", "other-only", ...sharedCommits.map((commit) => commit.hash)];
+        expect(firstPage.commits.map((commit) => commit.hash)).toEqual(expectedHashes.slice(0, 500));
+        expect(firstPage.hasMore).toBe(true);
+        expect(firstPage.commits.find((commit) => commit.hash === "other-only").repoRoot).toBe("/other");
+        expect(firstPage.commits.find((commit) => commit.hash === sharedCommits[0].hash).repoRoot).toBe("/repo");
+
+        await webview.send({ type: "loadMore" });
+        const nextPage = lastCommitMessage();
+        expect(nextPage.append).toBe(true);
+        expect(nextPage.commits.map((commit) => commit.hash)).toEqual(expectedHashes.slice(500));
+        expect(nextPage.hasMore).toBe(false);
+
+        await provider.refresh();
+        expect(lastCommitMessage().commits.map((commit) => commit.hash)).toEqual(expectedHashes);
+        expect(lastCommitMessage().hasMore).toBe(false);
+
+        await webview.send({ type: "filterText", text: "abcd" });
+        expect(lastCommitMessage().commits.map((commit) => commit.hash)).toEqual(expectedHashes.slice(2, 502));
+        await webview.send({ type: "loadMore" });
+        expect(lastCommitMessage().commits.map((commit) => commit.hash)).toEqual(expectedHashes.slice(502));
+        expect(lastCommitMessage().hasMore).toBe(false);
+        provider.dispose();
+    });
+
     it("CommitPanelViewProvider handles staging and unstaging", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         expect(gitOps.getStatus).toHaveBeenCalled();
