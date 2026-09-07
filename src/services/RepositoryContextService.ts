@@ -180,7 +180,12 @@ export function createRepositoryScopedExecutor(service: RepositoryContextService
 
 async function discoverGitRepositories(root: string): Promise<string[]> {
     const results: string[] = [];
-    await walk(root);
+    const pending = [root];
+    // Limit filesystem concurrency while still discovering nested repositories.
+    while (pending.length > 0) {
+        const batch = pending.splice(0, 32);
+        await Promise.all(batch.map(walk));
+    }
     return results;
 
     async function walk(dir: string): Promise<void> {
@@ -198,7 +203,7 @@ async function discoverGitRepositories(root: string): Promise<string[]> {
         for (const entry of entries) {
             if (!entry.isDirectory()) continue;
             if (IGNORED_DIRECTORY_NAMES.has(entry.name)) continue;
-            await walk(path.join(dir, entry.name));
+            pending.push(path.join(dir, entry.name));
         }
     }
 }

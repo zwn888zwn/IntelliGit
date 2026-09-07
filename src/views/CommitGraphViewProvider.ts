@@ -260,10 +260,6 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
     setBranches(branches: Branch[]): void {
         this.branches = branches;
-        this.sendBranches().catch((err) => {
-            const message = getErrorMessage(err);
-            vscode.window.showErrorMessage(`Branch update error: ${message}`);
-        });
     }
 
     openBranchPopup(): void {
@@ -349,6 +345,8 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     async refresh(options: CommitGraphRefreshOptions = {}): Promise<void> {
+        // The ready handler loads the initial snapshot once the webview can receive it.
+        if (!this.webviewReady) return;
         await this.iconTheme.initIconThemeData();
         await this.sendBranches();
         if (options.reset) {

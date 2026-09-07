@@ -1029,6 +1029,42 @@ describe("extension integration", () => {
         showQuickPick.mockImplementation(async (items: Array<Record<string, unknown>>) => items[0]);
     });
 
+    it("finishes activation while the initial working-file scan is still pending", async () => {
+        const { activate } = await import("../../src/extension");
+        let releaseScan!: () => void;
+        const pendingScan = new Promise<void>((resolve) => { releaseScan = resolve; });
+        let notifyScanStarted!: () => void;
+        const scanStarted = new Promise<void>((resolve) => { notifyScanStarted = resolve; });
+        registerWebviewViewProvider.mockImplementation((viewType, provider) => {
+            if (viewType === MockCommitPanelViewProvider.viewType) {
+                provider.refresh.mockImplementation(() => {
+                    notifyScanStarted();
+                    return pendingScan;
+                });
+            }
+            return { dispose: vi.fn() };
+        });
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: mockDisposables,
+        } as unknown as MockExtensionContext;
+        let activated = false;
+        const activation = activate(context).then(() => { activated = true; });
+
+        try {
+            await scanStarted;
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(activated).toBe(true);
+            expect(latestCommitPanelProvider?.refresh).toHaveBeenCalledTimes(1);
+            expect(latestCommitGraphProvider?.setRepositoryContext).toHaveBeenCalled();
+            expect(latestCommitGraphProvider?.setBranches).toHaveBeenCalled();
+        } finally {
+            releaseScan();
+            await activation;
+            registerWebviewViewProvider.mockImplementation(() => ({ dispose: vi.fn() }));
+        }
+    });
+
     it("activates and executes branch/file command handlers", async () => {
         const { activate } = await import("../../src/extension");
         const context = {

@@ -386,7 +386,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     };
 
     const applyCurrentRepositoryContext = async (
-        options: { resetGraph?: boolean } = {},
+        options: { resetGraph?: boolean; deferPanelRefresh?: boolean } = {},
     ): Promise<void> => {
         const repository = getCurrentRepository();
         const repositoryInfo = repository?.info ?? null;
@@ -404,8 +404,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             commitDiffNavigationsByUri.clear();
             commitGraph.setBranches([]);
             await commitGraph.refresh({ reset: true });
-            await commitPanel.refresh();
-            await refreshService.refreshMergeConflicts();
+            if (!options.deferPanelRefresh) {
+                await commitPanel.refresh();
+                await refreshService.refreshMergeConflicts();
+            }
             clearSelection();
             await updateCommitDiffSourceContext();
             return;
@@ -417,8 +419,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         });
         commitGraph.setBranches(currentBranches);
         await commitGraph.refresh({ reset: options.resetGraph ?? true });
-        await commitPanel.refresh();
-        await refreshService.refreshMergeConflicts();
+        if (!options.deferPanelRefresh) {
+            await commitPanel.refresh();
+            await refreshService.refreshMergeConflicts();
+        }
         clearSelection();
         await updateCommitDiffSourceContext();
     };
@@ -2024,7 +2028,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // --- Initial load ---
 
-    await applyCurrentRepositoryContext({ resetGraph: true });
+    await applyCurrentRepositoryContext({ resetGraph: true, deferPanelRefresh: true });
     const initialRepository = getCurrentRepository();
     if (initialRepository && !MergeConflictSessionPanel.isOpen(initialRepository.root)) {
         const [mergeInProgress, rebaseInProgress] = await Promise.all([
@@ -2077,7 +2081,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
     );
 
-    // Eagerly fetch file count so the activity bar badge shows immediately.
+    // Load working files in the background so repository scans do not delay graph activation.
     commitPanel.refresh().catch((err) => {
         console.error("Initial commit panel refresh failed:", err);
     });
