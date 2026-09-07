@@ -2,12 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
+import type * as vscode from "vscode";
 
 type CommandHandler = (...args: unknown[]) => unknown;
 
 const registeredCommands = new Map<string, CommandHandler>();
 const mockDisposables: Array<{ dispose: () => void }> = [];
 const executeCommandFallback = vi.fn(async () => undefined);
+const implementationEditors: Array<{
+    document: { uri: { scheme: string; toString: () => string }; languageId: string; version: number; isClosed: boolean; lineAt: (line: number) => { range: MockRange } };
+    setDecorations: ReturnType<typeof vi.fn>;
+}> = [];
+const registerCodeLensProvider = vi.fn(() => ({ dispose: vi.fn() }));
+const registerInlayHintsProvider = vi.fn(() => ({ dispose: vi.fn() }));
+const createTextEditorDecorationType = vi.fn(() => ({ dispose: vi.fn() }));
+const implementationDiagnostics = new Set<(event: vscode.DiagnosticChangeEvent) => void>();
 const showInformationMessage = vi.fn(async () => undefined);
 const showErrorMessage = vi.fn(async () => undefined);
 const showWarningMessage = vi.fn(
@@ -516,7 +525,23 @@ vi.mock("vscode", () => ({
     },
     Position: MockPosition,
     Range: MockRange,
+    Location: class {
+        constructor(public uri: unknown, public range: unknown) {}
+    },
+    InlayHint: class {
+        constructor(public position: unknown, public label: unknown) {}
+    },
+    InlayHintLabelPart: class {
+        constructor(public value: string) {}
+    },
+    SymbolKind: { Interface: 10, Method: 5, Function: 11 },
     languages: {
+        registerCodeLensProvider,
+        registerInlayHintsProvider,
+        onDidChangeDiagnostics: vi.fn((listener: (event: vscode.DiagnosticChangeEvent) => void) => {
+            implementationDiagnostics.add(listener);
+            return { dispose: () => implementationDiagnostics.delete(listener) };
+        }),
         registerDefinitionProvider: vi.fn((_selector, provider) => {
             registeredDefinitionProvider = provider as typeof registeredDefinitionProvider;
             return { dispose: vi.fn() };
@@ -543,6 +568,9 @@ vi.mock("vscode", () => ({
         }),
     },
     window: {
+        visibleTextEditors: implementationEditors,
+        createTextEditorDecorationType,
+        onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: vi.fn() })),
         get activeTextEditor() {
             return activeTextEditor;
         },
@@ -654,16 +682,16 @@ vi.mock("vscode", () => ({
         openTextDocument,
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn(() => ({ dispose: vi.fn() })),
-        onDidChangeTextDocument: vi.fn((listener: () => void) => {
-            textDocListeners.push(listener);
+        onDidChangeTextDocument: vi.fn((listener: (event: unknown) => void) => {
+            textDocListeners.push(() => listener({ document: { languageId: "typescript" }, contentChanges: [] }));
             return { dispose: vi.fn() };
         }),
         onDidCloseTextDocument: vi.fn((listener: (document: { uri: { scheme?: string; toString?: () => string } }) => void) => {
             closeDocListeners.push(listener);
             return { dispose: vi.fn() };
         }),
-        onDidSaveTextDocument: vi.fn((listener: () => void) => {
-            saveDocListeners.push(listener);
+        onDidSaveTextDocument: vi.fn((listener: (document: unknown) => void) => {
+            saveDocListeners.push(() => listener({ languageId: "typescript" }));
             return { dispose: vi.fn() };
         }),
         onDidCreateFiles: vi.fn((listener: () => void) => {
@@ -3793,5 +3821,235 @@ describe("extension integration", () => {
         await activate(context);
         deactivate();
         expect(watchMock).toHaveBeenCalled();
+    });
+});
+
+describe("Go implementation hints", () => {
+    let hints: import("../../src/services/GoImplementationHints").GoImplementationHints;
+    const uri = { scheme: "file", path: "/service.go", toString: () => "file:///service.go" };
+    const range = new MockRange(new MockPosition(29, 4), new MockPosition(29, 25));
+    const method = { kind: 5, selectionRange: range, range, children: [] };
+    const symbols = [{ kind: 10, children: [method] }];
+    const location = {
+        uri: { scheme: "file", toString: () => "file:///impl.go" },
+        range: new MockRange(new MockPosition(8, 16), new MockPosition(8, 37)),
+    };
+    const token = { isCancellationRequested: false, onCancellationRequested: vi.fn() };
+    const provide = (requestedRange = { contains: () => true } as unknown as vscode.Range) => hints.provideInlayHints(
+        implementationEditors[0].document as unknown as vscode.TextDocument, requestedRange, token,
+    );
+    const labelOf = (hint: vscode.InlayHint) => (hint.label as vscode.InlayHintLabelPart[])[0];
+    const emitDiagnostics = (changedUri = uri) => {
+        for (const listener of implementationDiagnostics) listener({ uris: [changedUri as vscode.Uri] });
+    };
+
+    beforeEach(async () => {
+        vi.clearAllMocks();
+        registeredCommands.clear();
+        implementationDiagnostics.clear();
+        implementationEditors.splice(0, implementationEditors.length, {
+            document: {
+                uri, languageId: "go", version: 1, isClosed: false,
+                lineAt: (line: number) => ({ range: new MockRange(new MockPosition(line, 0), new MockPosition(line, 80)) }),
+            },
+            setDecorations: vi.fn(),
+        });
+        token.isCancellationRequested = false;
+        const { GoImplementationHints } = await import("../../src/services/GoImplementationHints");
+        hints = new GoImplementationHints();
+    });
+
+    afterEach(() => {
+        hints.dispose();
+        implementationEditors.length = 0;
+        executeCommandFallback.mockReset();
+        vi.useRealTimers();
+    });
+
+    it("registers only for Go files and links the method to its implementation preview", async () => {
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+        const lenses = await provide();
+        expect(registerInlayHintsProvider).toHaveBeenCalledWith({ language: "go", scheme: "file" }, hints);
+        expect(lenses).toHaveLength(1);
+        expect(labelOf(lenses[0]).value).toBe("1 个实现");
+        expect(lenses[0].position).toEqual(new MockPosition(29, 80));
+        expect(lenses[0].paddingLeft).toBe(true);
+        expect(registerCodeLensProvider).not.toHaveBeenCalled();
+        expect(createTextEditorDecorationType).not.toHaveBeenCalled();
+        expect(labelOf(lenses[0]).command).toMatchObject({
+            title: "转到实现",
+            command: "editor.action.peekLocations",
+            arguments: [uri, range.start, [location], "peek"],
+        });
+        expect(executeCommandFallback).toHaveBeenNthCalledWith(
+            2, "vscode.executeImplementationProvider", uri, range.start,
+        );
+        const command = labelOf(lenses[0]).command!;
+        const vscodeApi = await import("vscode");
+        await vscodeApi.commands.executeCommand(command.command, ...command.arguments!);
+        expect(executeCommandFallback).toHaveBeenLastCalledWith(
+            "editor.action.peekLocations", uri, range.start, [location], "peek",
+        );
+    });
+
+    it("normalizes location links, removes duplicates, and includes all distinct implementations", async () => {
+        const otherRange = new MockRange(new MockPosition(42, 8), new MockPosition(42, 29));
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([
+            location, location,
+            { targetUri: location.uri, targetSelectionRange: otherRange, targetRange: otherRange },
+        ] as never);
+        const [lens] = await provide();
+        expect(labelOf(lens).value).toBe("2 个实现");
+        expect(labelOf(lens).command?.arguments?.[2]).toEqual([location, { uri: location.uri, range: otherRange }]);
+    });
+
+    it("only returns inline hints inside the requested range when scrolling", async () => {
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+        expect(await provide({ contains: (position: vscode.Position) => position.line < 29 } as vscode.Range)).toEqual([]);
+        const visible = await provide({ contains: (position: vscode.Position) => position.line === 29 } as vscode.Range);
+        expect(visible).toHaveLength(1);
+        expect(visible[0].position).toEqual(new MockPosition(29, 80));
+        expect(executeCommandFallback).toHaveBeenCalledTimes(2);
+    });
+
+    it("places a multiline method's hint after its final line while navigating from the method name", async () => {
+        executeCommandFallback.mockResolvedValueOnce([
+            { kind: 10, children: [{ ...method, range: new MockRange(range.start, new MockPosition(31, 20)) }] },
+        ] as never).mockResolvedValueOnce([location] as never);
+        const [hint] = await provide();
+        expect(hint.position).toEqual(new MockPosition(31, 80));
+        expect(labelOf(hint).command?.arguments?.[1]).toEqual(range.start);
+        expect(hint.textEdits).toBeUndefined();
+    });
+
+    it("shows no inline hint when there are no implementations", async () => {
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([] as never);
+        expect(await provide()).toEqual([]);
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+    });
+
+    it("does not query concrete methods or ordinary functions", async () => {
+        executeCommandFallback.mockResolvedValueOnce([method, { kind: 11, children: [] }] as never);
+        expect(await provide()).toEqual([]);
+        expect(executeCommandFallback).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["edit", "cancel", "dispose"])("discards an in-flight response after %s", async (reason) => {
+        let release!: (value: unknown) => void;
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockImplementationOnce(
+            () => new Promise((resolve) => { release = resolve; }) as Promise<undefined>,
+        );
+        const pending = provide();
+        await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+        if (reason === "edit") implementationEditors[0].document.version++;
+        if (reason === "cancel") token.isCancellationRequested = true;
+        if (reason === "dispose") hints.dispose();
+        release([location]);
+        expect(await pending).toEqual([]);
+        if (reason !== "cancel") expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+    });
+
+    it("keeps inline hints stable through repeated unchanged diagnostics", async () => {
+        vi.useFakeTimers();
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+        const original = await provide();
+        const refresh = vi.fn();
+        hints.onDidChangeInlayHints(refresh);
+        for (let i = 0; i < 3; i++) {
+            executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+            emitDiagnostics();
+            expect(await provide()).toEqual(original);
+            await vi.advanceTimersByTimeAsync(300);
+        }
+        expect(refresh).not.toHaveBeenCalled();
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+        expect(await provide()).toEqual(original);
+    });
+
+    it("retains the display during refresh, then removes it when the last implementation disappears", async () => {
+        vi.useFakeTimers();
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+        const original = await provide();
+        const refresh = vi.fn();
+        hints.onDidChangeInlayHints(refresh);
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([] as never);
+        emitDiagnostics();
+        expect(await provide()).toEqual(original);
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(300);
+        expect(await provide()).toEqual([]);
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+        expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores diagnostics and edits unrelated to Go", async () => {
+        vi.useFakeTimers();
+        const vscodeApi = await import("vscode");
+        const changeListener = vi.mocked(vscodeApi.workspace.onDidChangeTextDocument).mock.calls.at(-1)![0];
+        emitDiagnostics({ ...uri, path: "/notes.ts" });
+        changeListener({
+            document: { languageId: "typescript" }, contentChanges: [{}],
+        } as vscode.TextDocumentChangeEvent);
+        changeListener({
+            document: { languageId: "go" }, contentChanges: [],
+        } as unknown as vscode.TextDocumentChangeEvent);
+        await vi.advanceTimersByTimeAsync(300);
+        expect(executeCommandFallback).not.toHaveBeenCalled();
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+    });
+
+    it("preserves cached hints when a background refresh fails", async () => {
+        vi.useFakeTimers();
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+        const original = await provide();
+        const refresh = vi.fn();
+        hints.onDidChangeInlayHints(refresh);
+        executeCommandFallback.mockRejectedValueOnce(new Error("gopls is restarting"));
+        emitDiagnostics();
+        await vi.advanceTimersByTimeAsync(300);
+        expect(await provide()).toEqual(original);
+        expect(refresh).not.toHaveBeenCalled();
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+    });
+
+    it("queries the new method position after an edit instead of returning old cached locations", async () => {
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockResolvedValueOnce([location] as never);
+        await provide();
+        implementationEditors[0].document.version++;
+        const movedRange = new MockRange(new MockPosition(32, 4), new MockPosition(32, 25));
+        executeCommandFallback.mockResolvedValueOnce([
+            { kind: 10, children: [{ ...method, selectionRange: movedRange, range: movedRange }] },
+        ] as never).mockResolvedValueOnce([location] as never);
+        const [lens] = await provide();
+        expect(lens.position).toEqual(new MockPosition(32, 80));
+        expect(labelOf(lens).command?.arguments?.[1]).toEqual(movedRange.start);
+        expect(executeCommandFallback).toHaveBeenLastCalledWith(
+            "vscode.executeImplementationProvider", uri, movedRange.start,
+        );
+    });
+
+    it("shares an in-flight lookup with a diagnostic refresh without clearing the display", async () => {
+        vi.useFakeTimers();
+        let release!: (value: unknown) => void;
+        executeCommandFallback.mockResolvedValueOnce(symbols as never).mockImplementationOnce(
+            () => new Promise((resolve) => { release = resolve; }) as Promise<undefined>,
+        );
+        const pending = provide();
+        await vi.advanceTimersByTimeAsync(0);
+        emitDiagnostics();
+        await vi.advanceTimersByTimeAsync(300);
+        expect(executeCommandFallback).toHaveBeenCalledTimes(2);
+        release([location]);
+        const lenses = await pending;
+        await vi.advanceTimersByTimeAsync(0);
+        expect(lenses).toHaveLength(1);
+        expect(await provide()).toEqual(lenses);
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
+    });
+
+    it("handles unavailable language services without leaving a marker", async () => {
+        executeCommandFallback.mockRejectedValueOnce(new Error("gopls is starting"));
+        expect(await provide()).toEqual([]);
+        expect(implementationEditors[0].setDecorations).not.toHaveBeenCalled();
     });
 });

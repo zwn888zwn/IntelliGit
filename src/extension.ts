@@ -40,6 +40,7 @@ import {
     getDiffOriginalFilePathFromUri,
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
+import { GoImplementationHints } from "./services/GoImplementationHints";
 import { runWithNotificationProgress } from "./utils/notifications";
 import { showPushSuccessWithRequestLink } from "./utils/pushMergeRequest";
 import {
@@ -72,6 +73,7 @@ import {
 import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    context.subscriptions.push(new GoImplementationHints());
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
     const DIFF_NAVIGATION_ACTIVE_CONTEXT = "intelligit.diffNavigation.active";
     const DIFF_NAVIGATION_HAS_PREVIOUS_CONTEXT = "intelligit.diffNavigation.hasPrevious";
