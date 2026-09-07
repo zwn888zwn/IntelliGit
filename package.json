@@ -87,6 +87,12 @@
         },
         "commands": [
             {
+                "command": "intelligit.openRecentProject",
+                "title": "切换最近项目…",
+                "category": "IntelliGit",
+                "icon": "$(folder-opened)"
+            },
+            {
                 "command": "intelligit.showGitLog",
                 "title": "Show Git Log",
                 "category": "IntelliGit",
@@ -380,6 +386,11 @@
                 }
             ],
             "view/title": [
+                {
+                    "command": "intelligit.openRecentProject",
+                    "when": "view == workbench.explorer.fileView",
+                    "group": "navigation@0"
+                },
                 {
                     "command": "intelligit.refresh",
                     "when": "view == intelligit.commitGraph",

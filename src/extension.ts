@@ -73,6 +73,11 @@ import {
 import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    context.subscriptions.push(
+        vscode.commands.registerCommand("intelligit.openRecentProject", () =>
+            vscode.commands.executeCommand("workbench.action.openRecent"),
+        ),
+    );
     context.subscriptions.push(new GoImplementationHints());
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
     const DIFF_NAVIGATION_ACTIVE_CONTEXT = "intelligit.diffNavigation.active";

@@ -1116,6 +1116,8 @@ describe("extension integration", () => {
         expect(registeredCommands.has("intelligit.compareProjectWithBranch")).toBe(true);
         expect(registeredCommands.has("intelligit.compareCurrentBranchWithBranch")).toBe(true);
         expect(registeredCommands.has("intelligit.showBranchPopup")).toBe(true);
+        await registeredCommands.get("intelligit.openRecentProject")!();
+        expect(executeCommandFallback).toHaveBeenCalledWith("workbench.action.openRecent");
         expect(registeredCommands.has("intelligit.abortMerge")).toBe(true);
         expect(registeredCommands.has("intelligit.previousDiffFile")).toBe(true);
         expect(registeredCommands.has("intelligit.nextDiffFile")).toBe(true);
@@ -3422,7 +3424,9 @@ describe("extension integration", () => {
 
         workspaceFolders = undefined;
         await activate(context);
-        expect(registeredCommands.size).toBe(0);
+        expect([...registeredCommands.keys()]).toEqual(["intelligit.openRecentProject"]);
+        await registeredCommands.get("intelligit.openRecentProject")!();
+        expect(executeCommandFallback).toHaveBeenCalledWith("workbench.action.openRecent");
         expect(registerWebviewViewProvider).toHaveBeenCalledTimes(2);
         expect(registerWebviewViewProvider).toHaveBeenNthCalledWith(
             1,
