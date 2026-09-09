@@ -11,6 +11,7 @@ import {
     LuFolderGit2,
     LuGitBranch,
     LuListTree,
+    LuTag,
 } from "react-icons/lu";
 import type {
     Branch,
@@ -49,12 +50,14 @@ import { RepoIcon, TagRightIcon } from "./branch-column/icons";
 import { renderHighlightedLabel } from "./branch-column/highlight";
 import { getVsCodeApi } from "./shared/vscodeApi";
 import {
+    BASE_ICON_STYLE,
     BRANCH_ROW_CLASS_CSS,
     BRANCH_TREE_SCROLL_STYLE,
     HEAD_LABEL_STYLE,
     HEAD_ROW_STYLE,
     HEAD_WRAPPER_STYLE,
     MULTI_REPOSITORY_PANEL_STYLE,
+    NODE_ICON_SIZE,
     NO_MATCH_STYLE,
     PANEL_STYLE,
     REPOSITORY_BRANCH_STYLE,
@@ -120,7 +123,7 @@ interface CommitGraphViewState {
 }
 
 const DEFAULT_EXPANDED_SECTIONS = ["local", "remote"];
-const CURRENT_BRANCH_ICON_TEAL = "#7fd4cf";
+const CURRENT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #e2c54b)";
 const TAG_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 const ALL_REPOSITORIES_BRANCH_ACTIONS = new Set<string>([
     "checkout",
@@ -667,7 +670,13 @@ export function BranchColumn({
                                 }}
                                 style={HEAD_ROW_STYLE}
                             >
-                                <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
+                                <LuTag
+                                    size={NODE_ICON_SIZE}
+                                    color={CURRENT_BRANCH_ICON_YELLOW}
+                                    style={{ ...BASE_ICON_STYLE, transform: "scaleX(-1)" }}
+                                    aria-hidden="true"
+                                    focusable="false"
+                                />
                                 <span style={HEAD_LABEL_STYLE}>HEAD</span>
                                 <TrackingBadge
                                     branch={current}

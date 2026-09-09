@@ -762,7 +762,8 @@ describe("low coverage components", () => {
             'span[aria-label*="Branches (3):"][aria-label*="main"][aria-label*="origin/main"][aria-label*="feature/demo"]',
         );
         expect(branchCount).toBeTruthy();
-        expect(container.textContent).toContain("v1.0.0");
+        expect(container.textContent).not.toContain("v1.0.0");
+        expect(container.querySelector('[data-ref-kind="tag"]')).toBeTruthy();
         const messageCell = container.querySelector(
             'span[title*="feat: row coverage"]',
         ) as HTMLElement;
@@ -804,6 +805,167 @@ describe("low coverage components", () => {
 
         unmount(root, container);
     });
+
+    it.each([false, true])(
+        "CommitRow shows multiple tags only in the tooltip (branches: %s)",
+        (hasBranches) => {
+            const tags = ["release/v1.0.0", "web-game/color-cards/v1.0.0", "production"];
+            const { root, container } = mount(
+                <CommitRow
+                    commit={{
+                        repoId: ".",
+                        repoRoot: "/repo",
+                        hash: "abc123",
+                        shortHash: "abc123",
+                        message: "Tagged commit",
+                        author: "Author",
+                        email: "author@example.com",
+                        date: "2026-09-09T00:00:00Z",
+                        parentHashes: [],
+                        refs: [
+                            ...(hasBranches ? ["HEAD -> main", "origin/main"] : []),
+                            ...tags.map((tag) => `tag:${tag}`),
+                        ],
+                    }}
+                    rowLeftOffset={0}
+                    messageIndent={0}
+                    isSelected={false}
+                    isUnpushed={false}
+                    onSelect={vi.fn()}
+                    onContextMenu={vi.fn()}
+                />,
+            );
+            expect(container.querySelectorAll('[data-ref-kind="tag"]')).toHaveLength(1);
+            expect(container.querySelectorAll('[data-ref-kind="tag"] svg')).toHaveLength(tags.length);
+            for (const tag of tags) expect(container.textContent).not.toContain(tag);
+            expect(container.textContent).not.toContain("+1");
+            const indicator = container.querySelector('[aria-label^="Branches ("]') as HTMLElement;
+            expect(indicator.textContent).toBe(hasBranches ? "main & origin/main" : "");
+            act(() => indicator.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+            const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+            expect(tooltip.querySelector('[data-ref-kind="tag"]')?.textContent).toBe(tags.join("\n"));
+            expect(tooltip.querySelectorAll('[data-ref-kind="tag"] svg')).toHaveLength(tags.length);
+            expect(tooltip.querySelector('[data-ref-kind="head"]') !== null).toBe(hasBranches);
+            unmount(root, container);
+        },
+    );
+
+    it.each(["top-left", "bottom-right", "tall"])(
+        "CommitRow keeps grouped ref tooltip visible at %s",
+        (placement) => {
+            vi.useFakeTimers();
+            const anchorTop = placement === "bottom-right" ? window.innerHeight - 24 : 2;
+            const anchorLeft = placement === "bottom-right" ? window.innerWidth - 42 : 2;
+            const tooltipHeight = placement === "tall" ? window.innerHeight + 100 : 140;
+            const rectMock = vi
+                .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+                .mockImplementation(function () {
+                    return this.getAttribute("role") === "tooltip"
+                        ? new DOMRect(0, 0, 260, tooltipHeight)
+                        : new DOMRect(anchorLeft, anchorTop, 40, 16);
+                });
+            try {
+                const { root, container } = mount(
+                    <CommitRow
+                        commit={{
+                            repoId: ".",
+                            repoRoot: "/repo",
+                            hash: "abc123",
+                            shortHash: "abc123",
+                            message: "Commit with refs",
+                            author: "Author",
+                            email: "author@example.com",
+                            date: "2026-09-09T00:00:00Z",
+                            parentHashes: [],
+                            refs: ["HEAD -> main", "feature/demo", "backup/main", "tag:v1.0.0"],
+                            graphRefs: [
+                                { name: "main", type: "head" },
+                                { name: "main", type: "local" },
+                                { name: "feature/demo", type: "local" },
+                                { name: "backup/main", type: "remote" },
+                                { name: "v1.0.0", type: "tag" },
+                            ],
+                        }}
+                        rowLeftOffset={0}
+                        messageIndent={0}
+                        isSelected={false}
+                        isUnpushed={false}
+                        onSelect={vi.fn()}
+                        onContextMenu={vi.fn()}
+                    />,
+                );
+                const indicator = container.querySelector(
+                    '[aria-label^="Branches ("]',
+                ) as HTMLElement;
+                expect(indicator.querySelectorAll("[data-ref-kind]")).toHaveLength(4);
+                expect(indicator.querySelectorAll("svg")).toHaveLength(5);
+                expect(indicator.querySelectorAll('[data-ref-kind="local"] svg')).toHaveLength(2);
+                const rowIcons = Array.from(indicator.querySelectorAll("svg"));
+                expect(
+                    rowIcons[rowIcons.length - 1].closest("[data-ref-kind]")?.getAttribute("data-ref-kind"),
+                ).toBe("head");
+                for (const icon of rowIcons) {
+                    expect(icon.style.transform).toBe("scaleX(-1)");
+                }
+                expect((rowIcons[0].parentElement as HTMLElement).style.width).toBe("6px");
+                expect((rowIcons[rowIcons.length - 1].parentElement as HTMLElement).style.width).toBe(
+                    "13px",
+                );
+                act(() => indicator.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+
+                const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
+                expect(tooltip).toBeTruthy();
+                expect(container.contains(tooltip)).toBe(false);
+                expect(tooltip.querySelector('[data-ref-kind="head"]')?.textContent).toBe("HEAD");
+                expect(tooltip.querySelector('[data-ref-kind="local"]')?.textContent).toBe(
+                    "main\nfeature/demo",
+                );
+                expect(tooltip.querySelector('[data-ref-kind="remote"]')?.textContent).toBe(
+                    "backup/main",
+                );
+                expect(tooltip.querySelector('[data-ref-kind="tag"]')?.textContent).toBe("v1.0.0");
+                expect(tooltip.querySelectorAll('[data-ref-kind="local"] svg')).toHaveLength(2);
+                const localIcons = tooltip.querySelectorAll<SVGElement>('[data-ref-kind="local"] svg');
+                expect(localIcons[0].style.transform).toBe("scaleX(-1)");
+                expect((localIcons[0].parentElement as HTMLElement).style.width).toBe("7px");
+                expect((localIcons[1].parentElement as HTMLElement).style.width).toBe("14px");
+                const colors = Array.from(tooltip.querySelectorAll("svg")).map((icon) =>
+                    icon.getAttribute("color"),
+                );
+                expect(new Set(colors).size).toBe(4);
+                expect(Number.parseFloat(tooltip.style.left)).toBeGreaterThanOrEqual(8);
+                expect(Number.parseFloat(tooltip.style.left) + 260).toBeLessThanOrEqual(
+                    window.innerWidth - 8,
+                );
+                expect(Number.parseFloat(tooltip.style.top)).toBeGreaterThanOrEqual(8);
+                expect(
+                    Number.parseFloat(tooltip.style.top) +
+                    Math.min(tooltipHeight, Number.parseFloat(tooltip.style.maxHeight)),
+                ).toBeLessThanOrEqual(window.innerHeight - 8);
+                if (placement === "bottom-right") {
+                    expect(Number.parseFloat(tooltip.style.top) + tooltipHeight).toBeLessThan(anchorTop);
+                } else {
+                    expect(Number.parseFloat(tooltip.style.top)).toBeGreaterThan(anchorTop + 16);
+                }
+
+                act(() => {
+                    indicator.dispatchEvent(new MouseEvent("pointerout", { bubbles: true }));
+                    tooltip.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
+                    vi.advanceTimersByTime(150);
+                });
+                expect(document.querySelector('[role="tooltip"]')).not.toBeNull();
+                act(() => {
+                    tooltip.dispatchEvent(new MouseEvent("pointerout", { bubbles: true }));
+                    vi.advanceTimersByTime(150);
+                });
+                expect(document.querySelector('[role="tooltip"]')).toBeNull();
+                unmount(root, container);
+            } finally {
+                rectMock.mockRestore();
+                vi.useRealTimers();
+            }
+        },
+    );
 
     it("ContextMenu supports keyboard activation and escape close", () => {
         const onSelect = vi.fn();

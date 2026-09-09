@@ -1,7 +1,7 @@
 import React from "react";
 import { createPortal } from "react-dom";
+import { LuTag } from "react-icons/lu";
 import type { Commit } from "../../../types";
-import { RefTypeIcon } from "../shared/components";
 import { formatDateTime } from "../shared/date";
 import { REF_BADGE_COLORS } from "../shared/tokens";
 import { splitCommitRefs } from "../shared/utils";
@@ -28,60 +28,100 @@ interface Props {
     onContextMenu: (event: React.MouseEvent, commit: Commit) => void;
 }
 
-function getRefColors(kind: "branch" | "tag", name: string): { bg: string; fg: string } {
-    if (kind === "tag") return REF_BADGE_COLORS.tag;
-    if (name.includes("HEAD")) return REF_BADGE_COLORS.head;
-    if (name.startsWith("origin/")) return REF_BADGE_COLORS.remote;
-    return REF_BADGE_COLORS.local;
-}
-
-function RefBadge({ kind, name }: { kind: "branch" | "tag"; name: string }): React.ReactElement {
-    const colors = getRefColors(kind, name);
-    return (
-        <span
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                maxWidth: 200,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-                borderRadius: 3,
-                padding: "1px 6px",
-                fontSize: 10,
-                lineHeight: "15px",
-                color: colors.fg,
-                background: colors.bg,
-            }}
-            title={name}
-        >
-            {name}
-        </span>
-    );
-}
-
 function normalizeBranchRefName(ref: string): string {
     return ref.startsWith("HEAD -> ") ? ref.slice("HEAD -> ".length).trim() : ref;
 }
 
-function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.ReactElement | null {
+function BranchRefsIndicator({
+    branchRefs,
+    tagRefs,
+    graphRefs,
+}: {
+    branchRefs: string[];
+    tagRefs: string[];
+    graphRefs?: Commit["graphRefs"];
+}): React.ReactElement | null {
     const displayRefs = Array.from(
         new Set(branchRefs.map(normalizeBranchRefName).filter((ref) => ref && ref !== "HEAD")),
     );
-    const branchRefsCount = displayRefs.length;
-    const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
-    if (branchRefsCount === 0) return null;
+    const groups = [
+        {
+            kind: "head",
+            label: "HEAD",
+            color: "var(--vscode-charts-yellow, #e2c54b)",
+            names: branchRefs.some((ref) => ref === "HEAD" || ref.startsWith("HEAD -> "))
+                ? ["HEAD"]
+                : [],
+        },
+        {
+            kind: "local",
+            label: "Local branches",
+            color: "var(--vscode-charts-green, #73c991)",
+            names: displayRefs.filter(
+                (name) =>
+                    graphRefs?.some((ref) => ref.name === name && ref.type === "local") ||
+                    !(graphRefs?.some((ref) => ref.name === name && ref.type === "remote") ||
+                        name.startsWith("origin/")),
+            ),
+        },
+        {
+            kind: "remote",
+            label: "Remote branches",
+            color: "var(--vscode-charts-purple, #b180d7)",
+            names: displayRefs.filter(
+                (name) =>
+                    !graphRefs?.some((ref) => ref.name === name && ref.type === "local") &&
+                    (graphRefs?.some((ref) => ref.name === name && ref.type === "remote") ||
+                        name.startsWith("origin/")),
+            ),
+        },
+        { kind: "tag", label: "Tags", color: REF_BADGE_COLORS.tag.bg, names: tagRefs },
+    ].filter((group) => group.names.length > 0);
+    const [tooltipPos, setTooltipPos] = React.useState<{
+        x: number;
+        top: number;
+        bottom: number;
+    } | null>(null);
+    const [tooltipLayout, setTooltipLayout] = React.useState({ left: 8, top: 8, maxHeight: 0 });
+    const tooltipRef = React.useRef<HTMLDivElement>(null);
+    const closeTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
+    const tooltipText = `Branches (${displayRefs.length}):\n${displayRefs.join("\n")}\n${groups
+        .map((group) => `${group.label}: ${group.names.join(", ")}`)
+        .join("\n")}`;
 
-    const branchText = displayRefs.join(" & ");
-    const tooltipText = `Branches (${branchRefsCount}):\n${displayRefs.join("\n")}`;
-    const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        setTooltipPos({
-            x: event.clientX > 0 ? event.clientX : rect.left + rect.width / 2,
-            y: rect.top - 6,
+    React.useLayoutEffect(() => {
+        if (!tooltipPos || !tooltipRef.current) return;
+        const rect = tooltipRef.current.getBoundingClientRect();
+        const contentHeight = Math.max(rect.height, tooltipRef.current.scrollHeight + 2);
+        const below = Math.max(0, window.innerHeight - tooltipPos.bottom - 14);
+        const above = Math.max(0, tooltipPos.top - 14);
+        const placeBelow = contentHeight <= below || below >= above;
+        const maxHeight = Math.max(1, placeBelow ? below : above);
+        const height = Math.min(contentHeight, maxHeight);
+        setTooltipLayout({
+            left: Math.max(
+                8,
+                Math.min(tooltipPos.x - rect.width / 2, window.innerWidth - rect.width - 8),
+            ),
+            top: Math.max(8, placeBelow ? tooltipPos.bottom + 6 : tooltipPos.top - height - 6),
+            maxHeight,
         });
+    }, [tooltipPos, tooltipText]);
+
+    React.useEffect(() => () => clearTimeout(closeTimerRef.current), []);
+
+    const keepTooltip = (): void => clearTimeout(closeTimerRef.current);
+    const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
+        keepTooltip();
+        const rect = event.currentTarget.getBoundingClientRect();
+        setTooltipLayout({ left: 8, top: 8, maxHeight: 0 });
+        setTooltipPos({ x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom });
     };
-    const hideTooltip = (): void => setTooltipPos(null);
+    const hideTooltip = (): void => {
+        keepTooltip();
+        closeTimerRef.current = setTimeout(() => setTooltipPos(null), 100);
+    };
+    if (groups.length === 0) return null;
 
     return (
         <span
@@ -90,20 +130,51 @@ function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.Re
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 4,
-                minWidth: 34,
+                minWidth: branchRefs.length > 0 ? 34 : 13,
                 maxWidth: 260,
                 flex: "0 1 auto",
                 fontSize: "11px",
                 lineHeight: "16px",
                 color: "var(--vscode-descriptionForeground)",
-                opacity: 0.86,
             }}
             aria-label={tooltipText}
             onPointerEnter={showTooltip}
-            onPointerMove={showTooltip}
             onPointerLeave={hideTooltip}
         >
-            <RefTypeIcon kind="branch" size={12} />
+            <span style={{ display: "inline-flex", flexShrink: 0 }}>
+                {groups.slice().reverse().map((group, groupIndex) => (
+                    <span
+                        key={group.kind}
+                        data-ref-kind={group.kind}
+                        aria-label={group.label}
+                        style={{ display: "inline-flex" }}
+                    >
+                        {group.names.map((name, index) => (
+                            <span
+                                key={name}
+                                style={{
+                                    display: "inline-flex",
+                                    width:
+                                        groupIndex === groups.length - 1 && index === group.names.length - 1
+                                            ? 13
+                                            : 6,
+                                    overflow: "visible",
+                                }}
+                            >
+                                <LuTag
+                                    size={13}
+                                    color={group.color}
+                                    style={{
+                                        flexShrink: 0,
+                                        transform: "scaleX(-1)",
+                                        fill: "var(--commit-ref-background)",
+                                    }}
+                                />
+                            </span>
+                        ))}
+                    </span>
+                ))}
+            </span>
             <span
                 style={{
                     minWidth: 0,
@@ -112,33 +183,81 @@ function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.Re
                     whiteSpace: "nowrap",
                 }}
             >
-                {branchText}
+                {displayRefs.join(" & ") || (branchRefs.includes("HEAD") ? "HEAD" : "")}
             </span>
             {tooltipPos &&
                 createPortal(
-                    <span
+                    <div
+                        ref={tooltipRef}
+                        role="tooltip"
+                        onPointerEnter={keepTooltip}
+                        onPointerLeave={hideTooltip}
+                        onClick={(event) => event.stopPropagation()}
+                        onContextMenu={(event) => event.stopPropagation()}
                         style={{
                             position: "fixed",
-                            left: Math.max(8, Math.min(tooltipPos.x, window.innerWidth - 8)),
-                            top: Math.max(8, tooltipPos.y),
-                            transform: "translate(-50%, -100%)",
+                            left: tooltipLayout.left,
+                            top: tooltipLayout.top,
+                            maxHeight: tooltipLayout.maxHeight || Math.max(1, window.innerHeight - 16),
+                            boxSizing: "border-box",
+                            width: "max-content",
+                            maxWidth: "min(360px, calc(100vw - 16px))",
+                            overflowY: "auto",
                             background: "var(--vscode-editorHoverWidget-background, #2f3646)",
                             color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
                             border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.12))",
                             borderRadius: 4,
-                            fontSize: 11,
-                            lineHeight: "15px",
-                            padding: "4px 7px",
-                            maxWidth: 360,
-                            whiteSpace: "pre-wrap",
+                            fontSize: 12,
+                            lineHeight: "18px",
+                            padding: "6px 8px",
                             overflowWrap: "anywhere",
                             zIndex: 9999,
-                            pointerEvents: "none",
                             boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
                         }}
                     >
-                        {tooltipText}
-                    </span>,
+                        {groups.map((group) => (
+                            <div
+                                key={group.kind}
+                                data-ref-kind={group.kind}
+                                aria-label={group.label}
+                                style={{ display: "flex", alignItems: "flex-start", gap: 6 }}
+                            >
+                                <span
+                                    style={{
+                                        display: "inline-flex",
+                                        flexShrink: 0,
+                                        paddingTop: 2,
+                                        width:
+                                            14 + 7 * (Math.max(...groups.map((item) => item.names.length)) - 1),
+                                    }}
+                                >
+                                    {group.names.map((name, index) => (
+                                        <span
+                                            key={name}
+                                            style={{
+                                                display: "inline-flex",
+                                                width: index === group.names.length - 1 ? 14 : 7,
+                                                overflow: "visible",
+                                            }}
+                                        >
+                                            <LuTag
+                                                size={14}
+                                                color={group.color}
+                                                style={{
+                                                    flexShrink: 0,
+                                                    transform: "scaleX(-1)",
+                                                    fill: "var(--vscode-editorHoverWidget-background, #2f3646)",
+                                                }}
+                                            />
+                                        </span>
+                                    ))}
+                                </span>
+                                <span style={{ minWidth: 0, whiteSpace: "pre-wrap" }}>
+                                    {group.names.join("\n")}
+                                </span>
+                            </div>
+                        ))}
+                    </div>,
                     document.body,
                 )}
         </span>
@@ -148,13 +267,13 @@ function BranchRefsIndicator({ branchRefs }: { branchRefs: string[] }): React.Re
 function CommitMessageCell({
     message,
     refs,
+    graphRefs,
 }: {
     message: string;
     refs: string[];
+    graphRefs?: Commit["graphRefs"];
 }): React.ReactElement {
     const { branches: branchRefs, tags: tagRefs } = splitCommitRefs(refs);
-    const visibleTagRefs = tagRefs.slice(0, 2);
-    const hiddenTagCount = Math.max(0, tagRefs.length - visibleTagRefs.length);
     const refSummaryLines: string[] = [];
     if (branchRefs.length > 0) refSummaryLines.push(`Branches: ${branchRefs.join(" • ")}`);
     if (tagRefs.length > 0) refSummaryLines.push(`Tags: ${tagRefs.join(" • ")}`);
@@ -182,29 +301,7 @@ function CommitMessageCell({
             >
                 {message}
             </span>
-            <BranchRefsIndicator branchRefs={branchRefs} />
-            {visibleTagRefs.map((tagRef) => (
-                <span key={`tag:${tagRef}`} style={{ marginLeft: 5, flexShrink: 0 }}>
-                    <RefBadge kind="tag" name={tagRef} />
-                </span>
-            ))}
-            {hiddenTagCount > 0 && (
-                <span
-                    style={{
-                        marginLeft: 5,
-                        flexShrink: 0,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 3,
-                        fontSize: "10px",
-                        opacity: 0.75,
-                    }}
-                    title={`${hiddenTagCount} more tag${hiddenTagCount === 1 ? "" : "s"}`}
-                >
-                    <RefTypeIcon kind="tag" size={11} tagColor={REF_BADGE_COLORS.tag.bg} />
-                    {`+${hiddenTagCount}`}
-                </span>
-            )}
+            <BranchRefsIndicator branchRefs={branchRefs} tagRefs={tagRefs} graphRefs={graphRefs} />
         </span>
     );
 }
@@ -229,6 +326,9 @@ function CommitRowInner({
             onClick={() => onSelect(commit.hash)}
             onContextMenu={(event) => onContextMenu(event, commit)}
             style={{
+                "--commit-ref-background": isSelected
+                    ? "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 36%, var(--vscode-editor-background, #222))"
+                    : "var(--vscode-editor-background, #222)",
                 height: ROW_HEIGHT,
                 width: `calc(100% - ${rowLeftOffset}px)`,
                 minWidth: 0,
@@ -252,7 +352,7 @@ function CommitRowInner({
                     : isMergeCommit
                       ? "var(--vscode-disabledForeground)"
                       : "inherit",
-            }}
+            } as React.CSSProperties}
         >
             <span
                 style={{
@@ -265,7 +365,11 @@ function CommitRowInner({
                     boxSizing: "border-box",
                 }}
             >
-                <CommitMessageCell message={commit.message} refs={commit.refs} />
+                <CommitMessageCell
+                    message={commit.message}
+                    refs={commit.refs}
+                    graphRefs={commit.graphRefs}
+                />
             </span>
 
             {showAuthor && (
@@ -330,6 +434,7 @@ function areEqual(prev: Props, next: Props): boolean {
         prev.commit.author === next.commit.author &&
         prev.commit.date === next.commit.date &&
         prev.commit.refs === next.commit.refs &&
+        prev.commit.graphRefs === next.commit.graphRefs &&
         prev.commit.parentHashes === next.commit.parentHashes &&
         prev.isSelected === next.isSelected &&
         prev.isUnpushed === next.isUnpushed &&

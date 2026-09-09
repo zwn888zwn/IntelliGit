@@ -1,11 +1,13 @@
 import React from "react";
-import { LuCloudUpload } from "react-icons/lu";
+import { LuCloudUpload, LuTag } from "react-icons/lu";
 import type { Branch, ThemeFolderIconMap, ThemeTreeIcon } from "../../../../types";
 import { renderHighlightedLabel } from "../highlight";
-import { ChevronIcon, GitBranchIcon, StarIcon, TagRightIcon } from "../icons";
+import { ChevronIcon, GitBranchIcon, StarIcon } from "../icons";
 import { TreeFolderIcon } from "../../shared/components";
 import { resolveFolderIcon } from "../../shared/utils";
 import {
+    BASE_ICON_STYLE,
+    NODE_ICON_SIZE,
     NODE_LABEL_STYLE,
     ROW_STYLE,
     TRACKING_BADGE_STYLE,
@@ -16,7 +18,7 @@ import {
 import type { TreeNode } from "../types";
 
 const BRANCH_TREE_ICON_BLUE = "var(--vscode-charts-blue, #58a6ff)";
-const CURRENT_BRANCH_ICON_TEAL = "var(--vscode-charts-green, #7fd4cf)";
+const CURRENT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #e2c54b)";
 const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 
 interface Props {
@@ -236,7 +238,13 @@ export function BranchTreeNodeRow({
         >
             <span style={{ display: "inline-block", width: 14, marginRight: 4, flexShrink: 0 }} />
             {isCurrent ? (
-                <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
+                <LuTag
+                    size={NODE_ICON_SIZE}
+                    color={CURRENT_BRANCH_ICON_YELLOW}
+                    style={{ ...BASE_ICON_STYLE, transform: "scaleX(-1)" }}
+                    aria-hidden="true"
+                    focusable="false"
+                />
             ) : isMainLike ? (
                 <StarIcon color={DEFAULT_BRANCH_ICON_YELLOW} />
             ) : (
