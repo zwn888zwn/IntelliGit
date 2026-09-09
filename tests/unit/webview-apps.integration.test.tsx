@@ -1601,6 +1601,74 @@ describe("ProjectComparisonApp integration", () => {
         expect(vscode.postMessage).toHaveBeenCalledWith({ type: "openDiff", path: "src/a.ts" });
     });
 
+    it("filters comparison files by partial name or path and clears the text filter", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+
+        await import("../../src/webviews/react/project-comparison/ProjectComparisonApp");
+        await flush();
+        sendUpdate(files);
+        await flush();
+
+        const input = document.querySelector(
+            'input[aria-label="Filter files by name or path"]',
+        ) as HTMLInputElement;
+        fireKey(document.querySelector('[role="treeitem"][title="src"]'), "ArrowLeft");
+        await flush();
+
+        // Matching a filename ignores case and surrounding whitespace, and reveals collapsed files.
+        vscode.postMessage.mockClear();
+        fireInput(input, " A.T ");
+        await flush();
+        expect(document.querySelector('[role="treeitem"][title="src/a.ts"]')).not.toBeNull();
+        expect(document.querySelector('[role="treeitem"][title="src/nested/b.ts"]')).toBeNull();
+        expect(document.body.textContent).toContain("1 / 2");
+        expect(vscode.postMessage).not.toHaveBeenCalled();
+
+        fireInput(input, "NEST");
+        await flush();
+        expect(document.querySelector('[role="treeitem"][title="src/a.ts"]')).toBeNull();
+        const matchedFile = document.querySelector('[role="treeitem"][title="src/nested/b.ts"]');
+        expect(matchedFile).not.toBeNull();
+        fireKey(matchedFile, "Enter");
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "openDiff",
+            path: "src/nested/b.ts",
+        });
+
+        const refreshedFiles = [...files, { ...files[1], path: "src/nested/c.ts" }];
+        sendUpdate(refreshedFiles);
+        await flush();
+        expect(input.value).toBe("NEST");
+        expect(document.querySelector('[role="treeitem"][title="src/nested/c.ts"]')).not.toBeNull();
+        expect(document.body.textContent).toContain("2 / 3");
+
+        fireInput(input, "missing");
+        await flush();
+        expect(document.querySelectorAll('[role="treeitem"]')).toHaveLength(0);
+        expect(document.body.textContent).toContain("No matching files");
+        expect(document.body.textContent).toContain("0 / 3");
+
+        fireClick(document.querySelector('button[aria-label="Clear file filter"]'));
+        await flush();
+        expect(input.value).toBe("");
+        for (const file of refreshedFiles) {
+            expect(document.querySelector(`[role="treeitem"][title="${file.path}"]`)).not.toBeNull();
+        }
+        expect(document.body.textContent).toContain("3 / 3");
+
+        fireInput(input, "missing");
+        fireKey(input, "Escape");
+        await flush();
+        expect(input.value).toBe("");
+        expect(document.body.textContent).toContain("3 / 3");
+
+        sendUpdate([]);
+        await flush();
+        expect(document.body.textContent).toContain("No differences");
+    });
+
     it("reopens and scrolls to the active file while refresh is disabled", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();

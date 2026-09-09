@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Box, ChakraProvider, Flex } from "@chakra-ui/react";
+import { Box, ChakraProvider, Flex, Input } from "@chakra-ui/react";
 import theme from "../commit-panel/theme";
 import { getVsCodeApi } from "../shared/vscodeApi";
 import { buildFileTree, collectDirPaths, countFiles, type TreeEntry } from "../shared/fileTree";
@@ -33,6 +33,15 @@ function App(): React.ReactElement {
     const vscode = getVsCodeApi<ProjectComparisonOutbound, Record<string, unknown>>();
     const [state, setState] = useState<ProjectComparisonState>(initialState);
     const [activePath, setActivePath] = useState<string | null>(null);
+    const [filterText, setFilterText] = useState("");
+    const filterNeedle = filterText.trim().toLowerCase();
+    const filteredFiles = useMemo(
+        () =>
+            filterNeedle
+                ? state.files.filter((file) => file.path.toLowerCase().includes(filterNeedle))
+                : state.files,
+        [state.files, filterNeedle],
+    );
 
     useEffect(() => {
         const listener = (event: MessageEvent<ProjectComparisonInbound>): void => {
@@ -84,6 +93,58 @@ function App(): React.ReactElement {
                 state={state}
                 onRefresh={() => vscode.postMessage({ type: "refresh" })}
             />
+            <Flex
+                align="center"
+                gap="6px"
+                px="10px"
+                py="6px"
+                borderBottom="1px solid var(--vscode-panel-border)"
+            >
+                <Input
+                    type="text"
+                    aria-label="Filter files by name or path"
+                    placeholder="Filter files by name or path..."
+                    value={filterText}
+                    onChange={(event) => setFilterText(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                            event.preventDefault();
+                            setFilterText("");
+                        }
+                    }}
+                    flex={1}
+                    minW={0}
+                    h="26px"
+                    px="6px"
+                    fontSize="12px"
+                    borderRadius="3px"
+                    borderColor="var(--vscode-input-border, transparent)"
+                    bg="var(--vscode-input-background)"
+                    color="var(--vscode-input-foreground)"
+                    _placeholder={{ color: "var(--vscode-input-placeholderForeground)" }}
+                    _focusVisible={{ borderColor: "var(--vscode-focusBorder)", boxShadow: "none" }}
+                />
+                {filterText && (
+                    <Box
+                        as="button"
+                        type="button"
+                        aria-label="Clear file filter"
+                        title="Clear (Escape)"
+                        onClick={() => setFilterText("")}
+                        w="24px"
+                        h="24px"
+                        flexShrink={0}
+                        borderRadius="3px"
+                        color="var(--vscode-icon-foreground)"
+                        _hover={{ bg: "var(--vscode-toolbar-hoverBackground)" }}
+                    >
+                        &#215;
+                    </Box>
+                )}
+                <Box fontSize="11px" color="var(--vscode-descriptionForeground)" flexShrink={0}>
+                    {filteredFiles.length} / {state.files.length}
+                </Box>
+            </Flex>
             {state.error && (
                 <Box
                     px="10px"
@@ -96,18 +157,23 @@ function App(): React.ReactElement {
                 </Box>
             )}
             <Box flex={1} overflow="auto" role="tree" aria-label="Project comparison files">
-                {state.files.length === 0 ? (
+                {filteredFiles.length === 0 ? (
                     <Box
                         color="var(--vscode-descriptionForeground)"
                         fontSize="12px"
                         p="10px 12px"
                         textAlign="center"
                     >
-                        {state.isRefreshing ? "Loading..." : "No differences"}
+                        {state.isRefreshing
+                            ? "Loading..."
+                            : state.files.length === 0
+                              ? "No differences"
+                              : "No matching files"}
                     </Box>
                 ) : (
                     <ComparisonTree
-                        files={state.files}
+                        files={filteredFiles}
+                        filterNeedle={filterNeedle}
                         activePath={activePath}
                         folderIcon={state.folderIcon}
                         folderExpandedIcon={state.folderExpandedIcon}
@@ -178,6 +244,7 @@ function Header({
 
 function ComparisonTree({
     files,
+    filterNeedle,
     activePath,
     folderIcon,
     folderExpandedIcon,
@@ -185,6 +252,7 @@ function ComparisonTree({
     onOpenDiff,
 }: {
     files: ProjectComparisonFile[];
+    filterNeedle: string;
     activePath: string | null;
     folderIcon?: ProjectComparisonState["folderIcon"];
     folderExpandedIcon?: ProjectComparisonState["folderExpandedIcon"];
@@ -201,7 +269,7 @@ function ComparisonTree({
             const next = new Set(prev);
             let changed = false;
             for (const dir of allDirs) {
-                if (!seenDirsRef.current.has(dir)) {
+                if (filterNeedle || !seenDirsRef.current.has(dir)) {
                     seenDirsRef.current.add(dir);
                     next.add(dir);
                     changed = true;
@@ -209,7 +277,7 @@ function ComparisonTree({
             }
             return changed ? next : prev;
         });
-    }, [tree]);
+    }, [tree, filterNeedle]);
 
     useEffect(() => {
         if (!activePath) return;
