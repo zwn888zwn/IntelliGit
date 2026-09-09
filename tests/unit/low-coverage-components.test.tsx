@@ -1185,7 +1185,17 @@ describe("low coverage components", () => {
         ];
         const { root, container } = mount(
             <BranchColumn
-                branches={branches}
+                branches={[
+                    ...branches,
+                    ...branches.map((branch) => ({
+                        ...branch,
+                        name: `origin/${branch.name}`,
+                        isRemote: true,
+                        isCurrent: false,
+                        ahead: 0,
+                        behind: 0,
+                    })),
+                ]}
                 selectedBranch={null}
                 onSelectBranch={vi.fn()}
                 onBranchAction={vi.fn()}
@@ -1221,63 +1231,89 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
-    it("BranchColumn marks local branches without an upstream", () => {
-        const branches: Branch[] = [
-            {
-                name: "main",
-                hash: "feed1234",
-                isRemote: false,
-                isCurrent: true,
-                ahead: 0,
-                behind: 0,
-            },
-            {
-                name: "tracked-feature",
-                hash: "a1b2c3d4",
-                isRemote: false,
-                isCurrent: false,
-                upstream: "origin/tracked-feature",
-                ahead: 0,
-                behind: 0,
-            },
-            {
-                name: "origin/main",
-                hash: "feed1234",
-                isRemote: true,
-                isCurrent: false,
-                remote: "origin",
-                ahead: 0,
-                behind: 0,
-            },
-        ];
-        const { root, container } = mount(
-            <BranchColumn
-                branches={branches}
-                selectedBranch={null}
-                onSelectBranch={vi.fn()}
-                onBranchAction={vi.fn()}
-            />,
-        );
+    it.each([
+        ["main", "origin/main", false],
+        ["main", "backup/main", false],
+        ["main", "origin/feature/main", true],
+        ["feature/demo", "origin/feature/demo", false],
+        ["feature/demo", "origin/demo", true],
+        ["main", undefined, true],
+    ] as const)(
+        "BranchColumn marks %s as unpublished with remote %s: %s",
+        (name, remoteName, unpublished) => {
+            const branches: Branch[] = [
+                {
+                    name,
+                    hash: "feed1234",
+                    isRemote: false,
+                    isCurrent: true,
+                    ahead: 0,
+                    behind: 0,
+                },
+                {
+                    name: "tracked-feature",
+                    hash: "a1b2c3d4",
+                    isRemote: false,
+                    isCurrent: false,
+                    upstream: "origin/tracked-feature",
+                    ahead: 0,
+                    behind: 0,
+                },
+            ];
+            if (remoteName) {
+                branches.push({
+                    name: remoteName,
+                    hash: "different-remote-tip",
+                    isRemote: true,
+                    isCurrent: false,
+                    remote: remoteName.split("/")[0],
+                    ahead: 0,
+                    behind: 0,
+                });
+            }
+            const { root, container } = mount(
+                <BranchColumn
+                    branches={branches}
+                    selectedBranch={name}
+                    onSelectBranch={vi.fn()}
+                    onBranchAction={vi.fn()}
+                />,
+            );
 
-        const headRow = Array.from(container.querySelectorAll(".branch-row")).find(
-            (row) => row.textContent?.trim() === "HEAD",
-        ) as HTMLElement;
-        const mainRow = Array.from(container.querySelectorAll(".branch-row")).find(
-            (row) => row.textContent?.trim() === "main",
-        ) as HTMLElement;
-        const trackedRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
-            row.textContent?.includes("tracked-feature"),
-        ) as HTMLElement;
+            const headRow = Array.from(container.querySelectorAll(".branch-row")).find(
+                (row) => row.textContent?.trim() === "HEAD",
+            ) as HTMLElement;
+            const localRow = container.querySelector(".branch-row.selected") as HTMLElement;
+            const trackedRow = Array.from(container.querySelectorAll(".branch-row")).find(
+                (row) => row.textContent?.trim() === "tracked-feature",
+            ) as HTMLElement;
 
-        expect(headRow.querySelector(".branch-no-upstream")).toBeTruthy();
-        expect(mainRow.querySelector(".branch-no-upstream")).toBeTruthy();
-        expect(trackedRow.querySelector(".branch-no-upstream")).toBeNull();
-        expect(
-            headRow.querySelector("[data-branch-tooltip]")?.getAttribute("data-branch-tooltip"),
-        ).toBe("No upstream configured. Push… will publish and set upstream.");
+            expect(!!headRow.querySelector(".branch-unpublished")).toBe(unpublished);
+            expect(!!localRow.querySelector(".branch-unpublished")).toBe(unpublished);
+            // A configured upstream does not hide the icon if the remote branch is absent.
+            expect(trackedRow.querySelector(".branch-unpublished")).toBeTruthy();
+            expect(
+                headRow.querySelector("[data-branch-tooltip]")?.getAttribute("data-branch-tooltip"),
+            ).toBe(
+                unpublished ? "No remote branch with the same name. Push… to publish." : undefined,
+            );
+            if (remoteName) {
+                act(() => {
+                    const remoteHeader = Array.from(
+                        container.querySelectorAll("[role='button']"),
+                    ).find(
+                        (row) => row.textContent?.trim() === remoteName.split("/")[0],
+                    ) as HTMLElement;
+                    remoteHeader.click();
+                });
+                expect(container.querySelectorAll(".branch-unpublished")).toHaveLength(
+                    unpublished ? 3 : 1,
+                );
+            }
 
-        unmount(root, container);
-    });
+            unmount(root, container);
+        },
+    );
 
     it("CommitList triggers context action and load-more", () => {
         const onCommitAction = vi.fn();

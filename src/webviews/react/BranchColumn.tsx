@@ -279,6 +279,15 @@ export function BranchColumn({
     const hasMultipleRepositories = repositories.length > 1;
     const filterNeedle = branchFilter.trim().toLowerCase();
     const actualCurrent = useMemo(() => branches.find((b) => b.isCurrent), [branches]);
+    const remoteBranchNames = useMemo(
+        () =>
+            new Set(
+                branches
+                    .filter((b) => b.isRemote)
+                    .map((b) => b.name.slice(b.name.indexOf("/") + 1)),
+            ),
+        [branches],
+    );
 
     const filteredBranches = useMemo(() => {
         if (!filterNeedle) return branches;
@@ -660,7 +669,10 @@ export function BranchColumn({
                             >
                                 <TagRightIcon color={CURRENT_BRANCH_ICON_TEAL} />
                                 <span style={HEAD_LABEL_STYLE}>HEAD</span>
-                                <TrackingBadge branch={current} />
+                                <TrackingBadge
+                                    branch={current}
+                                    remoteBranchNames={remoteBranchNames}
+                                />
                             </div>
                         </div>
                     )}
@@ -676,6 +688,7 @@ export function BranchColumn({
                                 <BranchTreeNodeRow
                                     key={`local-${node.branch?.name ?? node.label}-${index}`}
                                     node={node}
+                                    remoteBranchNames={remoteBranchNames}
                                     depth={0}
                                     selectedBranch={selectedBranch}
                                     expandedFolders={expandedFolders}
@@ -717,6 +730,7 @@ export function BranchColumn({
                                                 <BranchTreeNodeRow
                                                     key={`remote-${remote}-${node.branch?.name ?? node.label}-${index}`}
                                                     node={node}
+                                                    remoteBranchNames={remoteBranchNames}
                                                     depth={1}
                                                     selectedBranch={selectedBranch}
                                                     expandedFolders={expandedFolders}

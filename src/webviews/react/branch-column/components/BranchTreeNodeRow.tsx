@@ -21,6 +21,7 @@ const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 
 interface Props {
     node: TreeNode;
+    remoteBranchNames?: ReadonlySet<string>;
     depth: number;
     selectedBranch: string | null;
     expandedFolders: Set<string>;
@@ -34,10 +35,16 @@ interface Props {
     folderIconsByName?: ThemeFolderIconMap;
 }
 
-export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElement | null {
+export function TrackingBadge({
+    branch,
+    remoteBranchNames,
+}: {
+    branch: Branch;
+    remoteBranchNames?: ReadonlySet<string>;
+}): React.ReactElement | null {
     const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
-    const hasNoUpstream = !branch.isRemote && !branch.upstream;
-    if (!hasNoUpstream && branch.ahead <= 0 && branch.behind <= 0) return null;
+    const hasNoRemoteBranch = !branch.isRemote && !remoteBranchNames?.has(branch.name);
+    if (!hasNoRemoteBranch && branch.ahead <= 0 && branch.behind <= 0) return null;
 
     const tooltipParts: string[] = [];
     if (branch.behind > 0) {
@@ -48,7 +55,7 @@ export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElemen
     }
     const trackingText = tooltipParts.join(" and ");
     const tooltipText = [
-        hasNoUpstream ? "No upstream configured. Push… will publish and set upstream." : "",
+        hasNoRemoteBranch ? "No remote branch with the same name. Push… to publish." : "",
         trackingText,
     ]
         .filter(Boolean)
@@ -72,10 +79,10 @@ export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElemen
             onPointerMove={showTooltip}
             onPointerLeave={hideTooltip}
         >
-            {hasNoUpstream && (
+            {hasNoRemoteBranch && (
                 <span
-                    className="branch-no-upstream"
-                    aria-label="No upstream configured"
+                    className="branch-unpublished"
+                    aria-label="No remote branch with the same name"
                     style={{
                         color: "var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d)",
                         display: "inline-flex",
@@ -127,6 +134,7 @@ export function TrackingBadge({ branch }: { branch: Branch }): React.ReactElemen
 
 export function BranchTreeNodeRow({
     node,
+    remoteBranchNames,
     depth,
     selectedBranch,
     expandedFolders,
@@ -187,6 +195,7 @@ export function BranchTreeNodeRow({
                         <BranchTreeNodeRow
                             key={`${folderKey}/${child.branch?.name ?? child.label}-${index}`}
                             node={child}
+                            remoteBranchNames={remoteBranchNames}
                             depth={depth + 1}
                             selectedBranch={selectedBranch}
                             expandedFolders={expandedFolders}
@@ -234,7 +243,9 @@ export function BranchTreeNodeRow({
                 <GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />
             )}
             <span style={NODE_LABEL_STYLE}>{renderHighlightedLabel(node.label, filterNeedle)}</span>
-            {node.branch && <TrackingBadge branch={node.branch} />}
+            {node.branch && (
+                <TrackingBadge branch={node.branch} remoteBranchNames={remoteBranchNames} />
+            )}
         </div>
     );
 }
