@@ -3437,6 +3437,55 @@ describe("extension integration", () => {
         expect(openTextDocument).toHaveBeenCalledWith(sourceUri);
     });
 
+    it("routes definitions from both sides of a multi-file commit diff to current source", async () => {
+        const { activate } = await import("../../src/extension");
+        const { openCommitChanges } = await vi.importActual<typeof import("../../src/services/multiDiffService")>(
+            "../../src/services/multiDiffService",
+        );
+        await activate({
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext);
+        const commit = "a".repeat(40);
+        const parent = "b".repeat(40);
+        const executor = {
+            run: vi.fn(async (args: string[]) => {
+                if (args[0] === "rev-parse") return commit;
+                if (args[0] === "rev-list") return `${commit} ${parent}`;
+                if (args[0] === "diff") return "M\0src/feature.go\0";
+                throw new Error(`Unexpected Git command: ${args.join(" ")}`);
+            }),
+        };
+        executeCommandFallback.mockClear();
+        await openCommitChanges(commit, "/repo-a", executor as never);
+        const changesCall = executeCommandFallback.mock.calls.find(([command]) => command === "vscode.changes");
+        expect(changesCall).toBeDefined();
+        const [, original, modified] = changesCall![2][0];
+        const sourceUri = {
+            scheme: "file", path: "/repo-a/src/feature.go", fsPath: "/repo-a/src/feature.go",
+        };
+        const definitions = [{ uri: sourceUri, range: new MockRange(new MockPosition(10, 0), new MockPosition(10, 5)) }];
+
+        for (const uri of [original, modified]) {
+            openTextDocument.mockResolvedValueOnce({
+                uri: sourceUri,
+                lineCount: 1,
+                lineAt: () => ({ text: "helper()" }),
+            });
+            executeCommandFallback.mockResolvedValueOnce(definitions);
+            const result = await registeredDefinitionProvider?.provideDefinition({
+                uri,
+                getWordRangeAtPosition: () => new MockRange(new MockPosition(20, 0), new MockPosition(20, 6)),
+                getText: () => "helper",
+            }, new MockPosition(20, 0));
+            expect(openTextDocument).toHaveBeenLastCalledWith(sourceUri);
+            expect(executeCommandFallback).toHaveBeenLastCalledWith(
+                "vscode.executeDefinitionProvider", sourceUri, new MockPosition(0, 0),
+            );
+            expect(result).toEqual(definitions);
+        }
+    });
+
     it("prompts merge parent selection before opening commit file diff", async () => {
         const { activate } = await import("../../src/extension");
         const context = {

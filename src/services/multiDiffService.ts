@@ -33,7 +33,7 @@ function gitResourceUri(repoRoot: string, filePath: string, ref: string): vscode
     return vscode.Uri.from({
         scheme: "git",
         path: fileUri.path,
-        query: JSON.stringify({ path: fileUri.fsPath, ref }),
+        query: JSON.stringify({ path: fileUri.fsPath, ref, intelligitCommitDiff: true }),
     });
 }
 
