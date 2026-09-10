@@ -13,6 +13,7 @@ import type { TreeEntry } from "../types";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { TreeFolderIcon } from "./TreeIcons";
 import { getLeafName, getParentPath, resolveFolderIcon } from "../../shared/utils";
+import { OpenChangesButton } from "../../shared/components/OpenChangesButton";
 
 interface Props {
     files: WorkingFile[];
@@ -100,6 +101,13 @@ export function StageTab({
                                 folderIconsByName={folderIconsByName}
                                 groupByDir={groupByDir}
                                 onAction={(targets) => runAction(staged, targets)}
+                                onOpenChanges={() =>
+                                    vscode.postMessage({
+                                        type: "showAllStageDiff",
+                                        repoRoot: repository.root,
+                                        staged,
+                                    })
+                                }
                                 onSelect={(file) => {
                                     setSelectedKey(fileKey(file));
                                     vscode.postMessage({
@@ -122,6 +130,7 @@ interface StageSectionProps extends Omit<Props, "repositories"> {
     staged: boolean;
     selectedKey: string | null;
     onAction: (files: WorkingFile[]) => void;
+    onOpenChanges: () => void;
     onSelect: (file: WorkingFile) => void;
 }
 
@@ -135,6 +144,7 @@ function StageSection({
     folderIconsByName,
     groupByDir,
     onAction,
+    onOpenChanges,
     onSelect,
 }: StageSectionProps): React.ReactElement {
     const tree = useFileTree(files, groupByDir);
@@ -177,6 +187,11 @@ function StageSection({
                 >
                     {staged ? "Unstage All" : "Stage All"}
                 </Button>
+                <OpenChangesButton
+                    onClick={onOpenChanges}
+                    disabled={files.length === 0}
+                    title={staged ? "Open Staged Changes" : "Open Unstaged Changes"}
+                />
             </Flex>
             {isOpen && (
                 <StageTreeEntries

@@ -1,6 +1,6 @@
 import React from "react";
-import { LuCloudUpload, LuTag } from "react-icons/lu";
-import type { Branch, ThemeFolderIconMap, ThemeTreeIcon } from "../../../../types";
+import { LuCloudUpload, LuFolderGit2, LuTag } from "react-icons/lu";
+import type { Branch, GitWorktree, ThemeFolderIconMap, ThemeTreeIcon } from "../../../../types";
 import { renderHighlightedLabel } from "../highlight";
 import { ChevronIcon, GitBranchIcon, StarIcon } from "../icons";
 import { TreeFolderIcon } from "../../shared/components";
@@ -23,6 +23,7 @@ const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 
 interface Props {
     node: TreeNode;
+    worktrees?: GitWorktree[];
     remoteBranchNames?: ReadonlySet<string>;
     depth: number;
     selectedBranch: string | null;
@@ -136,6 +137,7 @@ export function TrackingBadge({
 
 export function BranchTreeNodeRow({
     node,
+    worktrees,
     remoteBranchNames,
     depth,
     selectedBranch,
@@ -197,6 +199,7 @@ export function BranchTreeNodeRow({
                         <BranchTreeNodeRow
                             key={`${folderKey}/${child.branch?.name ?? child.label}-${index}`}
                             node={child}
+                            worktrees={worktrees}
                             remoteBranchNames={remoteBranchNames}
                             depth={depth + 1}
                             selectedBranch={selectedBranch}
@@ -216,6 +219,10 @@ export function BranchTreeNodeRow({
     }
 
     const isCurrent = node.branch?.isCurrent;
+    const checkedOutWorktree =
+        node.branch && !node.branch.isRemote && !isCurrent
+            ? worktrees?.find((worktree) => worktree.branch === node.branch?.name)
+            : undefined;
     const shortName = node.branch?.name.replace(/^.*\//, "") ?? "";
     const isMainLike = !!node.branch && (shortName === "main" || shortName === "master");
     const isSelected = selectedBranch === node.fullName;
@@ -245,6 +252,18 @@ export function BranchTreeNodeRow({
                     aria-hidden="true"
                     focusable="false"
                 />
+            ) : checkedOutWorktree ? (
+                <span
+                    title={`Checked out in another worktree:\n${checkedOutWorktree.path}\nUse “Open Worktree...” in the context menu to open it.`}
+                    aria-label={`Worktree: ${checkedOutWorktree.path}`}
+                    style={{ ...BASE_ICON_STYLE, display: "inline-flex" }}
+                >
+                    <LuFolderGit2
+                        size={NODE_ICON_SIZE}
+                        color={BRANCH_TREE_ICON_BLUE}
+                        aria-hidden="true"
+                    />
+                </span>
             ) : isMainLike ? (
                 <StarIcon color={DEFAULT_BRANCH_ICON_YELLOW} />
             ) : (

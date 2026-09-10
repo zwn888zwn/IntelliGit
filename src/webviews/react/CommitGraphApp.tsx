@@ -513,6 +513,9 @@ function App(): React.ReactElement {
             repoRoot,
         });
     }, []);
+    const handleOpenChanges = useCallback((commitHash: string, repoRoot: string) => {
+        vscode.postMessage({ type: "openCommitChanges", commitHash, repoRoot });
+    }, []);
 
     return (
         <>
@@ -617,6 +620,7 @@ function App(): React.ReactElement {
                             folderExpandedIcon={commitFolderExpandedIcon}
                             folderIconsByName={commitFolderIconsByName}
                             onOpenDiff={handleOpenDiff}
+                            onOpenChanges={handleOpenChanges}
                         />
                     </div>
                 </div>

@@ -24,6 +24,11 @@ import {
     openStageFileDiff,
     openWorkingTreeFileDiff,
 } from "../services/diffService";
+import {
+    openShelvedChanges,
+    openStageChanges,
+    openWorkingTreeChanges,
+} from "../services/multiDiffService";
 import { buildFileTree, type TreeEntry } from "../webviews/react/shared/fileTree";
 import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
@@ -761,6 +766,29 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 break;
             }
 
+            case "showAllDiffs": {
+                const repoRoot = this.assertString(msg.repoRoot, "repoRoot");
+                const repository = this.getRepositoryEntry(repoRoot);
+                const files = this.files.filter((file) => file.repoRoot === repository.root);
+                if (files.length > 0) {
+                    await openWorkingTreeChanges(files, repository.root, repository.executor);
+                }
+                break;
+            }
+
+            case "showAllStageDiff": {
+                const repoRoot = this.assertString(msg.repoRoot, "repoRoot");
+                const staged = msg.staged === true;
+                const repository = this.getRepositoryEntry(repoRoot);
+                const files = this.files.filter(
+                    (file) => file.repoRoot === repository.root && file.staged === staged,
+                );
+                if (files.length > 0) {
+                    await openStageChanges(files, repository.root, repository.executor, staged);
+                }
+                break;
+            }
+
             case "shelveSave": {
                 const name = typeof msg.name === "string" ? msg.name : "Shelved changes";
                 const keepIndex = msg.keepIndex === true;
@@ -845,6 +873,21 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     this.getRepositoryRoot().fsPath,
                     this.gitOps,
                 );
+                break;
+            }
+
+            case "showAllShelfDiff": {
+                const index = this.assertNumber(msg.index, "index");
+                const hash = this.assertString(msg.hash, "hash");
+                const repoRoot = this.assertString(msg.repoRoot, "repoRoot");
+                const repository = this.getRepositoryEntry(repoRoot);
+                if (this.repository?.root !== repository.root) {
+                    throw new Error("The selected repository changed. Refresh the commit panel.");
+                }
+                if (!this.stashes.some((stash) => stash.index === index && stash.hash === hash)) {
+                    throw new Error(`Stash is no longer available: ${index}`);
+                }
+                await openShelvedChanges(index, repository.root, repository.executor, hash);
                 break;
             }
 

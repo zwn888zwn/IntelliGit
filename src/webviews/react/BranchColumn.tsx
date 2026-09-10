@@ -697,6 +697,7 @@ export function BranchColumn({
                                 <BranchTreeNodeRow
                                     key={`local-${node.branch?.name ?? node.label}-${index}`}
                                     node={node}
+                                    worktrees={repositoryWorktrees[repository?.root ?? ""]}
                                     remoteBranchNames={remoteBranchNames}
                                     depth={0}
                                     selectedBranch={selectedBranch}

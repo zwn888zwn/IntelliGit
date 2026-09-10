@@ -20,6 +20,11 @@ export class CommitInfoViewProvider implements vscode.WebviewViewProvider {
         repoRoot: string;
     }>();
     readonly onOpenCommitFileDiff = this._onOpenCommitFileDiff.event;
+    private readonly _onOpenCommitChanges = new vscode.EventEmitter<{
+        commitHash: string;
+        repoRoot: string;
+    }>();
+    readonly onOpenCommitChanges = this._onOpenCommitChanges.event;
 
     constructor(private readonly extensionUri: vscode.Uri) {
         this.iconTheme = new IconThemeService(this.extensionUri);
@@ -55,6 +60,12 @@ export class CommitInfoViewProvider implements vscode.WebviewViewProvider {
                     this._onOpenCommitFileDiff.fire({
                         commitHash: msg.commitHash,
                         filePath: msg.filePath,
+                        repoRoot: msg.repoRoot,
+                    });
+                    break;
+                case "openCommitChanges":
+                    this._onOpenCommitChanges.fire({
+                        commitHash: msg.commitHash,
                         repoRoot: msg.repoRoot,
                     });
                     break;
@@ -127,5 +138,6 @@ export class CommitInfoViewProvider implements vscode.WebviewViewProvider {
     dispose(): void {
         this.iconTheme.dispose();
         this._onOpenCommitFileDiff.dispose();
+        this._onOpenCommitChanges.dispose();
     }
 }

@@ -6,6 +6,14 @@ import type * as vscode from "vscode";
 
 type CommandHandler = (...args: unknown[]) => unknown;
 
+const openCommitChangesMock = vi.hoisted(() => vi.fn(async () => undefined));
+const openBranchComparisonChangesMock = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock("../../src/services/multiDiffService", async (importOriginal) => ({
+    ...await importOriginal<typeof import("../../src/services/multiDiffService")>(),
+    openCommitChanges: openCommitChangesMock,
+    openBranchComparisonChanges: openBranchComparisonChangesMock,
+}));
+
 const registeredCommands = new Map<string, CommandHandler>();
 const mockDisposables: Array<{ dispose: () => void }> = [];
 const executeCommandFallback = vi.fn(async () => undefined);
@@ -359,6 +367,11 @@ class MockCommitGraphViewProvider {
     onDeleteWorktree = this.deleteWorktreeEmitter.event;
     onCommitAction = this.commitActionEmitter.event;
     onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
+    private openCommitChangesEmitter = new MockEventEmitter<{ commitHash: string; repoRoot: string }>();
+    onOpenCommitChanges = this.openCommitChangesEmitter.event;
+    async emitOpenCommitChanges(payload: { commitHash: string; repoRoot: string }): Promise<void> {
+        await this.openCommitChangesEmitter.fireAsync(payload);
+    }
     setBranches = vi.fn();
     setRepositoryContext = vi.fn();
     refresh = vi.fn(async () => undefined);
@@ -421,6 +434,7 @@ class MockCommitInfoViewProvider {
     setCommitDetail = vi.fn();
     clear = vi.fn();
     onOpenCommitFileDiff = this.openCommitFileDiffEmitter.event;
+    onOpenCommitChanges = new MockEventEmitter<{ commitHash: string; repoRoot: string }>().event;
     dispose = vi.fn();
 }
 
@@ -2879,6 +2893,16 @@ describe("extension integration", () => {
             label: "main",
         });
 
+        await latestWebviewPanel?.emitMessage({ type: "openAllDiffs" });
+        await waitForAsync();
+        expect(openBranchComparisonChangesMock).toHaveBeenCalledWith(
+            expect.arrayContaining([expect.objectContaining({ path: "src/changed.ts" })]),
+            "feature-local",
+            { kind: "current-branch", label: "main" },
+            "/repo-a",
+            expect.anything(),
+        );
+
         await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/changed.ts" });
         await waitForAsync();
 
@@ -3108,6 +3132,32 @@ describe("extension integration", () => {
             expect.any(Function),
         );
         expect(showInformationMessage).toHaveBeenCalledWith("Pushed commits up to a1b2c3d4.");
+    });
+
+    it("routes all commit changes to the requested repository and rejects a closed repository", async () => {
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        await activate(context);
+        const repository = repositoryEntries[0];
+        await latestCommitGraphProvider!.emitOpenCommitChanges({
+            commitHash: "a1b2c3d4",
+            repoRoot: repository.root,
+        });
+        expect(openCommitChangesMock).toHaveBeenCalledWith(
+            "a1b2c3d4", repository.root, repository.executor,
+        );
+        openCommitChangesMock.mockClear();
+        await latestCommitGraphProvider!.emitOpenCommitChanges({
+            commitHash: "a1b2c3d4",
+            repoRoot: "/closed-repository",
+        });
+        expect(openCommitChangesMock).not.toHaveBeenCalled();
+        expect(showErrorMessage).toHaveBeenCalledWith(
+            "Failed to open commit changes: Repository is no longer open.",
+        );
     });
 
     it("opens commit diff when commit graph requests file diff", async () => {

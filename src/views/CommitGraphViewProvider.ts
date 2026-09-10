@@ -110,6 +110,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         repoRoot: string;
     }>();
     readonly onOpenCommitFileDiff = this._onOpenCommitFileDiff.event;
+    private readonly _onOpenCommitChanges = new vscode.EventEmitter<{
+        commitHash: string;
+        repoRoot: string;
+    }>();
+    readonly onOpenCommitChanges = this._onOpenCommitChanges.event;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -247,6 +252,14 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                                 commitHash: msg.commitHash,
                                 filePath: msg.filePath,
                             } as never);
+                        }
+                        break;
+                    case "openCommitChanges":
+                        if (msg.repoRoot) {
+                            this._onOpenCommitChanges.fire({
+                                commitHash: msg.commitHash,
+                                repoRoot: msg.repoRoot,
+                            });
                         }
                         break;
                 }
@@ -937,6 +950,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this._onDeleteWorktree.dispose();
         this._onCommitAction.dispose();
         this._onOpenCommitFileDiff.dispose();
+        this._onOpenCommitChanges.dispose();
     }
 
     private refreshThemeDataWithErrorHandling(): void {

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const multiDiffMocks = vi.hoisted(() => ({
+    openWorkingTreeChanges: vi.fn(async () => undefined),
+    openStageChanges: vi.fn(async () => undefined),
+    openShelvedChanges: vi.fn(async () => undefined),
+}));
+vi.mock("../../src/services/multiDiffService", () => multiDiffMocks);
+
 type MessageHandler = (message: unknown) => void | Promise<void>;
 
 class FakeEventEmitter<T> {
@@ -342,6 +349,8 @@ describe("view providers integration", () => {
         });
         const webview = createWebviewView();
 
+        const openChanges = vi.fn();
+        provider.onOpenCommitChanges(openChanges);
         provider.resolveWebviewView(
             webview.view as unknown as object,
             {} as unknown as object,
@@ -364,6 +373,8 @@ describe("view providers integration", () => {
         );
 
         await webview.send({ type: "ready" });
+        await webview.send({ type: "openCommitChanges", commitHash: "abc", repoRoot: "/repo" });
+        expect(openChanges).toHaveBeenCalledWith({ commitHash: "abc", repoRoot: "/repo" });
         expect(postMessageSpy).toHaveBeenCalledWith(
             expect.objectContaining({ type: "setCommitDetail" }),
         );
@@ -492,6 +503,7 @@ describe("view providers integration", () => {
         const deleteWorktree = vi.fn();
         const commitAction = vi.fn();
         const openCommitFileDiff = vi.fn();
+        const openCommitChanges = vi.fn();
 
         provider.onCommitSelected(selected);
         provider.onBranchFilterChanged(branchFilter);
@@ -502,6 +514,7 @@ describe("view providers integration", () => {
         provider.onDeleteWorktree(deleteWorktree);
         provider.onCommitAction(commitAction);
         provider.onOpenCommitFileDiff(openCommitFileDiff);
+        provider.onOpenCommitChanges(openCommitChanges);
 
         provider.resolveWebviewView(
             webview.view as unknown as object,
@@ -649,6 +662,10 @@ describe("view providers integration", () => {
         });
 
         const logCallsBeforePagedFetch = gitOps.getLog.mock.calls.length;
+        await webview.send({
+            type: "openCommitChanges", commitHash: "abc1234", repoRoot: "/repo",
+        });
+        expect(openCommitChanges).toHaveBeenCalledWith({ commitHash: "abc1234", repoRoot: "/repo" });
         await webview.send({ type: "filterText", text: "feat" });
         await webview.send({ type: "loadMore" });
         expect(gitOps.getLog.mock.calls.length - logCallsBeforePagedFetch).toBe(2);
@@ -662,6 +679,40 @@ describe("view providers integration", () => {
         await provider.refresh();
         expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Git log error"));
 
+        provider.dispose();
+    });
+
+    it("CommitPanelViewProvider keeps collection diff scopes separate and rejects stale stash requests", async () => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        gitOps.getStatus.mockResolvedValue([
+            { repoId: ".", repoRoot: "/repo", path: "same.ts", status: "M", staged: false, additions: 1, deletions: 0 },
+            { repoId: ".", repoRoot: "/repo", path: "same.ts", status: "M", staged: true, additions: 2, deletions: 0 },
+        ]);
+        await provider.refresh();
+        await webview.send({ type: "showAllDiffs", repoRoot: "/repo" });
+        expect(multiDiffMocks.openWorkingTreeChanges).toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({ path: "same.ts", staged: false, repoRoot: "/repo" }),
+                expect.objectContaining({ path: "same.ts", staged: true, repoRoot: "/repo" }),
+            ]), "/repo", expect.anything(),
+        );
+        for (const staged of [false, true]) {
+            await webview.send({ type: "showAllStageDiff", repoRoot: "/repo", staged });
+            expect(multiDiffMocks.openStageChanges).toHaveBeenLastCalledWith(
+                [expect.objectContaining({ path: "same.ts", staged, repoRoot: "/repo" })],
+                "/repo", expect.anything(), staged,
+            );
+        }
+        await webview.send({ type: "showAllShelfDiff", repoRoot: "/repo", index: 0, hash: "stashhash" });
+        expect(multiDiffMocks.openShelvedChanges).toHaveBeenCalledWith(
+            0, "/repo", expect.anything(), "stashhash",
+        );
+        multiDiffMocks.openShelvedChanges.mockClear();
+        await webview.send({ type: "showAllShelfDiff", repoRoot: "/closed", index: 0, hash: "stashhash" });
+        await webview.send({ type: "showAllShelfDiff", repoRoot: "/repo", index: 0, hash: "old-stash" });
+        await webview.send({ type: "showAllShelfDiff", repoRoot: "/repo", index: 999, hash: "stashhash" });
+        expect(multiDiffMocks.openShelvedChanges).not.toHaveBeenCalled();
+        expect(showErrorMessage).toHaveBeenCalledWith("Stash is no longer available: 999");
         provider.dispose();
     });
 

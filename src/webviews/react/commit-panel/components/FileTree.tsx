@@ -8,6 +8,7 @@ import { FolderRow } from "./FolderRow";
 import { FileRow } from "./FileRow";
 import { useFileTree, collectAllDirPaths } from "../hooks/useFileTree";
 import { getCheckedFileKey } from "../hooks/useCheckedFiles";
+import { OpenChangesButton } from "../../shared/components/OpenChangesButton";
 import type {
     RepositoryContextInfo,
     ThemeFolderIconMap,
@@ -32,6 +33,7 @@ interface Props {
     isAllChecked: (files: WorkingFile[]) => boolean;
     isSomeChecked: (files: WorkingFile[]) => boolean;
     onSelectRepository: (repoRoot: string) => void;
+    onOpenChanges: (repoRoot: string) => void;
     onFileClick: (file: WorkingFile) => void;
     expandAllSignal: number;
     collapseAllSignal: number;
@@ -53,6 +55,7 @@ export function FileTree({
     isAllChecked,
     isSomeChecked,
     onSelectRepository,
+    onOpenChanges,
     onFileClick,
     expandAllSignal,
     collapseAllSignal,
@@ -101,6 +104,7 @@ export function FileTree({
                     isAllChecked={isAllChecked}
                     isSomeChecked={isSomeChecked}
                     onSelectRepository={onSelectRepository}
+                    onOpenChanges={onOpenChanges}
                     onFileClick={onFileClick}
                     expandAllSignal={expandAllSignal}
                     collapseAllSignal={collapseAllSignal}
@@ -131,6 +135,7 @@ function RepositorySection({
     isAllChecked,
     isSomeChecked,
     onSelectRepository,
+    onOpenChanges,
     onFileClick,
     expandAllSignal,
     collapseAllSignal,
@@ -238,6 +243,11 @@ function RepositorySection({
                 <Box fontSize="11px" color="var(--vscode-descriptionForeground)" flexShrink={0}>
                     {files.length} {files.length === 1 ? "file" : "files"}
                 </Box>
+                <OpenChangesButton
+                    onClick={() => onOpenChanges(repository.root)}
+                    disabled={files.length === 0}
+                    title="Open All Changes"
+                />
             </Flex>
 
             {tracked.length > 0 && (

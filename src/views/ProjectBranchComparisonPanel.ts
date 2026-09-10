@@ -8,6 +8,7 @@ import {
     getRepoRelativeFilePathFromUri,
     openBranchComparisonFileDiff,
 } from "../services/diffService";
+import { openBranchComparisonChanges } from "../services/multiDiffService";
 import { getErrorMessage } from "../utils/errors";
 import { buildWebviewShellHtml } from "./webviewHtml";
 import { IconThemeService } from "./shared";
@@ -173,6 +174,16 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
                 await this.openFileDiff(file);
                 return;
             }
+            case "openAllDiffs":
+                if (this.files.length === 0) return;
+                await openBranchComparisonChanges(
+                    this.files,
+                    this.branchName,
+                    this.target,
+                    this.repository.root,
+                    this.repository.executor,
+                );
+                return;
         }
     }
 

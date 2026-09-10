@@ -40,6 +40,7 @@ import {
     getDiffOriginalFilePathFromUri,
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
+import { openCommitChanges } from "./services/multiDiffService";
 import { GoImplementationHints } from "./services/GoImplementationHints";
 import { runWithNotificationProgress } from "./utils/notifications";
 import { showPushSuccessWithRequestLink } from "./utils/pushMergeRequest";
@@ -924,9 +925,30 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
     };
 
+    const handleOpenCommitChanges = async (params: {
+        commitHash: string;
+        repoRoot: string;
+    }): Promise<void> => {
+        try {
+            const repository = repositoryService
+                .listRepositories()
+                .find((entry) => entry.root === params.repoRoot);
+            if (!repository) throw new Error("Repository is no longer open.");
+            await openCommitChanges(
+                params.commitHash,
+                repository.root,
+                repository.executor,
+            );
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to open commit changes: ${getErrorMessage(error)}`);
+        }
+    };
+
     context.subscriptions.push(
         commitGraph.onOpenCommitFileDiff(handleOpenCommitFileDiff),
         commitInfo.onOpenCommitFileDiff(handleOpenCommitFileDiff),
+        commitGraph.onOpenCommitChanges(handleOpenCommitChanges),
+        commitInfo.onOpenCommitChanges(handleOpenCommitChanges),
     );
 
     // --- Helper ---

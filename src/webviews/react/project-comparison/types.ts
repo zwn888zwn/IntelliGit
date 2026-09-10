@@ -9,7 +9,8 @@ import type {
 export type ProjectComparisonOutbound =
     | { type: "ready" }
     | { type: "refresh" }
-    | { type: "openDiff"; path: string };
+    | { type: "openDiff"; path: string }
+    | { type: "openAllDiffs" };
 
 export type ProjectComparisonInbound =
     | {

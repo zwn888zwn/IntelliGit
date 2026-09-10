@@ -28,6 +28,8 @@ export type OutboundMessage =
     | { type: "rollback"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
     | { type: "showStageDiff"; target: RepoPathRef; staged: boolean }
+    | { type: "showAllDiffs"; repoRoot: string }
+    | { type: "showAllStageDiff"; repoRoot: string; staged: boolean }
     | {
           type: "shelveSave";
           name?: string;
@@ -40,6 +42,7 @@ export type OutboundMessage =
     | { type: "shelfDelete"; index: number }
     | { type: "shelfSelect"; index: number }
     | { type: "showShelfDiff"; index: number; path: string }
+    | { type: "showAllShelfDiff"; index: number; hash: string; repoRoot: string }
     | { type: "openFile"; target: RepoPathRef }
     | { type: "deleteFile"; target: RepoPathRef }
     | { type: "showHistory"; target: RepoPathRef }

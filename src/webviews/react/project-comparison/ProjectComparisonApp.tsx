@@ -9,6 +9,7 @@ import { StatusBadge } from "../commit-panel/components/StatusBadge";
 import { SYSTEM_FONT_STACK } from "../../../utils/constants";
 import { GIT_STATUS_COLORS, TEST_FILE_ROW_BACKGROUND } from "../shared/tokens";
 import { getLeafName, getParentPath, isTestFilePath, resolveFolderIcon } from "../shared/utils";
+import { OpenChangesButton } from "../shared/components/OpenChangesButton";
 import type { ProjectComparisonFile } from "../../../types";
 import type {
     ProjectComparisonInbound,
@@ -92,6 +93,7 @@ function App(): React.ReactElement {
             <Header
                 state={state}
                 onRefresh={() => vscode.postMessage({ type: "refresh" })}
+                onOpenAllDiffs={() => vscode.postMessage({ type: "openAllDiffs" })}
             />
             <Flex
                 align="center"
@@ -189,9 +191,11 @@ function App(): React.ReactElement {
 function Header({
     state,
     onRefresh,
+    onOpenAllDiffs,
 }: {
     state: ProjectComparisonState;
     onRefresh: () => void;
+    onOpenAllDiffs: () => void;
 }): React.ReactElement {
     const repoLabel = state.repository?.relativePath ?? state.repository?.name ?? "";
     return (
@@ -238,6 +242,11 @@ function Header({
             >
                 &#8635;
             </Box>
+            <OpenChangesButton
+                onClick={onOpenAllDiffs}
+                disabled={state.isRefreshing || state.files.length === 0}
+                title="Open All Changes"
+            />
         </Flex>
     );
 }

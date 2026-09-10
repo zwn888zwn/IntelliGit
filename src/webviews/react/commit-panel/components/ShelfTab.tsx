@@ -12,6 +12,7 @@ import { useFileTree, collectAllDirPaths } from "../hooks/useFileTree";
 import type { TreeEntry } from "../types";
 import { TEST_FILE_ROW_BACKGROUND } from "../../shared/tokens";
 import { getLeafName, isTestFilePath, resolveFolderIcon } from "../../shared/utils";
+import { OpenChangesButton } from "../../shared/components/OpenChangesButton";
 
 interface Props {
     stashes: StashEntry[];
@@ -22,6 +23,7 @@ interface Props {
     folderIconsByName?: ThemeFolderIconMap;
     groupByDir: boolean;
     onCreateStash: () => void;
+    repoRoot?: string;
 }
 
 type ShelfActionKind = "apply" | "pop" | "delete";
@@ -35,6 +37,7 @@ export function ShelfTab({
     folderIconsByName,
     groupByDir,
     onCreateStash,
+    repoRoot,
 }: Props): React.ReactElement {
     const vscode = getVsCodeApi();
     const tree = useFileTree(shelfFiles, groupByDir);
@@ -236,6 +239,20 @@ export function ShelfTab({
                                             {parsed.branch}
                                         </Box>
                                     )}
+                                    <OpenChangesButton
+                                        onClick={() => {
+                                            if (repoRoot) {
+                                                vscode.postMessage({
+                                                    type: "showAllShelfDiff",
+                                                    index: stash.index,
+                                                    hash: stash.hash,
+                                                    repoRoot,
+                                                });
+                                            }
+                                        }}
+                                        disabled={!repoRoot}
+                                        title="Open Stash Changes"
+                                    />
                                 </Flex>
                                 {isExpanded && !hasFiles && isLoading && (
                                     <Box

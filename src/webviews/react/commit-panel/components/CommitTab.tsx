@@ -39,6 +39,7 @@ interface Props {
     onCommit: () => void;
     onCommitAndPush: () => void;
     onCreateStash: () => void;
+    onOpenChanges: (repoRoot: string) => void;
     groupByDir: boolean;
     onToggleGroupBy: () => void;
 }
@@ -65,6 +66,7 @@ export function CommitTab({
     onCommit,
     onCommitAndPush,
     onCreateStash,
+    onOpenChanges,
     groupByDir,
     onToggleGroupBy,
 }: Props): React.ReactElement {
@@ -141,6 +143,7 @@ export function CommitTab({
                     onSelectRepository={(repoRoot) =>
                         vscode.postMessage({ type: "setCurrentRepository", repoRoot })
                     }
+                    onOpenChanges={onOpenChanges}
                     onFileClick={handleFileClick}
                     expandAllSignal={expandAllSignal}
                     collapseAllSignal={collapseAllSignal}

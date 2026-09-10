@@ -180,6 +180,9 @@ function App(): React.ReactElement {
                             onCommit={handleCommit}
                             onCommitAndPush={handleCommitAndPush}
                             onCreateStash={handleOpenStashDialog}
+                            onOpenChanges={(repoRoot) =>
+                                vscode.postMessage({ type: "showAllDiffs", repoRoot })
+                            }
                             folderIcon={state.folderIcon}
                             folderExpandedIcon={state.folderExpandedIcon}
                             folderIconsByName={state.folderIconsByName}
@@ -197,6 +200,7 @@ function App(): React.ReactElement {
                             folderIconsByName={state.folderIconsByName}
                             groupByDir={groupByDir}
                             onCreateStash={handleOpenStashDialog}
+                            repoRoot={state.repository?.root}
                         />
                     }
                 />

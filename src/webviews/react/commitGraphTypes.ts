@@ -117,7 +117,8 @@ export type CommitGraphOutbound =
           allRepositories?: boolean;
       }
     | { type: "commitAction"; action: CommitAction; hash: string; repoRoot: string }
-    | { type: "openCommitFileDiff"; commitHash: string; filePath: string; repoRoot: string };
+    | { type: "openCommitFileDiff"; commitHash: string; filePath: string; repoRoot: string }
+    | { type: "openCommitChanges"; commitHash: string; repoRoot: string };
 
 /** Messages sent FROM the extension host TO the webview. */
 export type CommitGraphInbound =

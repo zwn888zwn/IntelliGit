@@ -7,6 +7,7 @@ import { FileTypeIcon } from "../commit-panel/components/FileTypeIcon";
 import { StatusBadge } from "../commit-panel/components/StatusBadge";
 import { useDragResize } from "../commit-panel/hooks/useDragResize";
 import { RefTypeIcon, TreeFolderIcon } from "../shared/components";
+import { OpenChangesButton } from "../shared/components/OpenChangesButton";
 import { TEST_FILE_ROW_BACKGROUND } from "../shared/tokens";
 import { getLeafName, isTestFilePath, resolveFolderIcon, splitCommitRefs } from "../shared/utils";
 import {
@@ -65,12 +66,14 @@ export function CommitInfoPane({
     folderExpandedIcon,
     folderIconsByName,
     onOpenDiff,
+    onOpenChanges,
 }: {
     detail: CommitDetail | null;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
     onOpenDiff?: (commitHash: string, filePath: string, repoRoot: string) => void;
+    onOpenChanges?: (commitHash: string, repoRoot: string) => void;
 }): React.ReactElement {
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
     const [filesCollapsed, setFilesCollapsed] = useState(false);
@@ -139,6 +142,8 @@ export function CommitInfoPane({
                 tabIndex={0}
                 role="button"
                 aria-expanded={!filesCollapsed}
+                display="flex"
+                alignItems="center"
                 onClick={() => setFilesCollapsed((v) => !v)}
                 onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -147,7 +152,14 @@ export function CommitInfoPane({
                     }
                 }}
             >
-                {filesCollapsed ? "\u25B6" : "\u25BC"} Changed Files
+                <Box as="span" flex={1}>
+                    {filesCollapsed ? "\u25B6" : "\u25BC"} Changed Files
+                </Box>
+                <OpenChangesButton
+                    onClick={() => onOpenChanges?.(detail.hash, detail.repoRoot)}
+                    disabled={!onOpenChanges || detail.files.length === 0}
+                    title="Open All Changes"
+                />
             </Box>
             {!filesCollapsed && (
                 <Box flex="1 1 auto" overflowY="auto" minH="40px" py="4px">
