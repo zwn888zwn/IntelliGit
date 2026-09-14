@@ -44,6 +44,13 @@ interface RowMenuState {
     item: WorktreeDialogItem;
 }
 
+interface HoverTooltipState {
+    text: string;
+    left: number;
+    top: number;
+    placement: "above" | "below";
+}
+
 const MENU_ITEMS: MenuItem[] = [
     { label: "Open", action: "open" },
     { label: "Delete...", action: "delete" },
@@ -66,6 +73,7 @@ export function WorktreesDialog({
     const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
     const [requestedCreateRepoRoot, setRequestedCreateRepoRoot] = useState("");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [hoverTooltip, setHoverTooltip] = useState<HoverTooltipState | null>(null);
 
     useEffect(() => {
         if (!deleteResult) return;
@@ -151,6 +159,26 @@ export function WorktreesDialog({
         }
     };
 
+    const showOverflowTooltip = (
+        event: React.PointerEvent<HTMLElement>,
+        text: string,
+    ): void => {
+        const target = event.currentTarget;
+        if (target.scrollWidth <= target.clientWidth) {
+            setHoverTooltip(null);
+            return;
+        }
+        const rect = target.getBoundingClientRect();
+        const maxWidth = Math.min(520, window.innerWidth - 16);
+        const placement = rect.top >= 72 ? "above" : "below";
+        setHoverTooltip({
+            text,
+            left: Math.max(8, Math.min(rect.left, window.innerWidth - maxWidth - 8)),
+            top: placement === "above" ? rect.top - 6 : rect.bottom + 6,
+            placement,
+        });
+    };
+
     return createPortal(
         <div style={BACKDROP_STYLE} role="presentation" onMouseDown={onClose}>
             <section
@@ -200,16 +228,12 @@ export function WorktreesDialog({
                         sortedItems.map((item) => {
                             const { worktree } = item;
                             const current = isCurrentWorktree(item.repositoryRoot, worktree.path);
-                            const rowTitle = [
-                                item.repositoryName,
-                                worktree.branch ?? "Detached HEAD",
-                                worktree.path,
-                            ].join("\n");
+                            const worktreeName = getWorktreeName(worktree.path);
+                            const branchName = worktree.branch ?? "Detached HEAD";
                             return (
                                 <div
                                     key={getWorktreeKey(item)}
                                     role="row"
-                                    title={rowTitle}
                                     onClick={(event) => {
                                         if (event.detail >= 2) onOpen(item.repoRoot, worktree.path);
                                     }}
@@ -240,16 +264,48 @@ export function WorktreesDialog({
                                                         "var(--vscode-charts-blue, #58a6ff)",
                                                 }}
                                             />
-                                            <span style={REPOSITORY_NAME_STYLE}>
+                                            <span
+                                                data-worktree-field="repository"
+                                                onPointerEnter={(event) =>
+                                                    showOverflowTooltip(event, item.repositoryName)
+                                                }
+                                                onPointerLeave={() => setHoverTooltip(null)}
+                                                style={REPOSITORY_NAME_STYLE}
+                                            >
                                                 {item.repositoryName}
                                             </span>
                                         </span>
                                     )}
-                                    <span style={NAME_STYLE}>{getWorktreeName(worktree.path)}</span>
-                                    <span style={BRANCH_STYLE}>
-                                        {worktree.branch ?? "Detached HEAD"}
+                                    <span
+                                        data-worktree-field="name"
+                                        onPointerEnter={(event) =>
+                                            showOverflowTooltip(event, worktreeName)
+                                        }
+                                        onPointerLeave={() => setHoverTooltip(null)}
+                                        style={NAME_STYLE}
+                                    >
+                                        {worktreeName}
                                     </span>
-                                    <span style={PATH_STYLE}>{worktree.path}</span>
+                                    <span
+                                        data-worktree-field="branch"
+                                        onPointerEnter={(event) =>
+                                            showOverflowTooltip(event, branchName)
+                                        }
+                                        onPointerLeave={() => setHoverTooltip(null)}
+                                        style={BRANCH_STYLE}
+                                    >
+                                        {branchName}
+                                    </span>
+                                    <span
+                                        data-worktree-field="path"
+                                        onPointerEnter={(event) =>
+                                            showOverflowTooltip(event, worktree.path)
+                                        }
+                                        onPointerLeave={() => setHoverTooltip(null)}
+                                        style={PATH_STYLE}
+                                    >
+                                        {worktree.path}
+                                    </span>
                                     <span style={ACTION_CELL_STYLE}>
                                         <button
                                             type="button"
@@ -290,6 +346,25 @@ export function WorktreesDialog({
                         })
                     )}
                 </div>
+
+                {hoverTooltip &&
+                    createPortal(
+                        <div
+                            role="tooltip"
+                            style={{
+                                ...HOVER_TOOLTIP_STYLE,
+                                left: hoverTooltip.left,
+                                top: hoverTooltip.top,
+                                transform:
+                                    hoverTooltip.placement === "above"
+                                        ? "translateY(-100%)"
+                                        : undefined,
+                            }}
+                        >
+                            {hoverTooltip.text}
+                        </div>,
+                        document.body,
+                    )}
 
                 {errorMessage && <div style={ERROR_STYLE}>{errorMessage}</div>}
 
@@ -514,6 +589,23 @@ const PATH_STYLE: React.CSSProperties = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     color: "var(--vscode-descriptionForeground, #8d929b)",
+};
+
+const HOVER_TOOLTIP_STYLE: React.CSSProperties = {
+    position: "fixed",
+    boxSizing: "border-box",
+    maxWidth: "min(520px, calc(100vw - 16px))",
+    padding: "5px 8px",
+    border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.14))",
+    borderRadius: 4,
+    background: "var(--vscode-editorHoverWidget-background, #2f3646)",
+    color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+    fontSize: 12,
+    lineHeight: "17px",
+    overflowWrap: "anywhere",
+    pointerEvents: "none",
+    zIndex: 10001,
 };
 
 const ACTION_CELL_STYLE: React.CSSProperties = {
