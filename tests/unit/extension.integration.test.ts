@@ -41,6 +41,8 @@ const showInputBox = vi.fn(async (opts?: { prompt?: string; value?: string }) =>
 const showSaveDialog = vi.fn(async () => ({ fsPath: "/tmp/patch.diff", path: "/tmp/patch.diff" }));
 const showOpenDialog = vi.fn(async () => [{ fsPath: "/tmp", path: "/tmp" }]);
 const showQuickPick = vi.fn(async (items: Array<Record<string, unknown>>) => items[0]);
+const createQuickPick = vi.fn();
+const updateWorkspaceFolders = vi.fn(() => true);
 const showTextDocument = vi.fn(async () => undefined);
 const openTextDocument = vi.fn(async (arg: unknown) => arg);
 const writeFile = vi.fn(async () => undefined);
@@ -515,6 +517,12 @@ vi.mock("vscode", () => ({
         NoPermissions: (message: string) => new Error(message),
     },
     Uri: {
+        parse: (value: string) => ({
+            scheme: value.slice(0, value.indexOf(":")),
+            path: value.slice(value.indexOf(":") + 1),
+            toString: (skipEncoding = false) => skipEncoding ? value
+                : value.replaceAll(";", "%3B").replaceAll(",", "%2C"),
+        }),
         file: (value: string) => ({ scheme: "file", fsPath: value, path: value }),
         from: ({
             scheme,
@@ -676,11 +684,13 @@ vi.mock("vscode", () => ({
         showQuickPick,
         showTextDocument,
         createStatusBarItem,
+        createQuickPick,
         createTerminal,
         createOutputChannel,
         withProgress,
     },
     workspace: {
+        updateWorkspaceFolders,
         get workspaceFile() {
             return workspaceFile;
         },
@@ -874,6 +884,224 @@ vi.mock("../../src/utils/fileOps", async () => {
         ...actual,
         deleteFileWithFallback,
     };
+});
+
+describe("project switcher", () => {
+    let accept: () => void;
+    let hide: () => void;
+    let picker: {
+        items: Array<vscode.QuickPickItem & { uri?: vscode.Uri; current?: boolean }>;
+        selectedItems: vscode.QuickPickItem[];
+        activeItems: vscode.QuickPickItem[];
+        busy: boolean;
+        matchOnDescription?: boolean;
+        matchOnDetail?: boolean;
+        show: ReturnType<typeof vi.fn>;
+        hide: ReturnType<typeof vi.fn>;
+        dispose: ReturnType<typeof vi.fn>;
+    };
+
+    beforeEach(() => {
+        vi.useRealTimers();
+        registeredCommands.clear();
+        executeCommandFallback.mockReset();
+        workspaceFolders = undefined;
+        workspaceFile = undefined;
+        showInformationMessage.mockResolvedValue("当前窗口" as never);
+        updateWorkspaceFolders.mockClear();
+        createdStatusBarItems.length = 0;
+        registerWebviewViewProvider.mockClear();
+        picker = {
+            items: [], selectedItems: [], activeItems: [], busy: false,
+            show: vi.fn(), hide: vi.fn(() => hide()), dispose: vi.fn(),
+        };
+        createQuickPick.mockReturnValue({
+            ...picker,
+            onDidAccept: (listener: () => void) => {
+                accept = listener;
+                return { dispose: vi.fn() };
+            },
+            onDidHide: (listener: () => void) => {
+                hide = listener;
+                return { dispose: vi.fn() };
+            },
+        });
+        picker = createQuickPick();
+        createQuickPick.mockClear();
+    });
+
+    afterEach(() => {
+        executeCommandFallback.mockReset();
+        executeCommandFallback.mockResolvedValue(undefined);
+        showInformationMessage.mockResolvedValue(undefined);
+        hide?.();
+    });
+
+    async function open(workspaces: unknown[]) {
+        picker.show.mockClear();
+        executeCommandFallback.mockResolvedValueOnce({ workspaces } as never);
+        const { openRecentProject } = await import("../../src/commands/projectPopup");
+        const completion = openRecentProject();
+        await vi.waitFor(() => expect(picker.show).toHaveBeenCalled());
+        return { completion };
+    }
+
+    it("keeps the project command available without adding a separate sidebar pane", async () => {
+        const { registerProjectSwitcher } = await import("../../src/commands/projectPopup");
+        const subscriptions: vscode.Disposable[] = [];
+        registerProjectSwitcher({ subscriptions } as vscode.ExtensionContext);
+        expect(createdStatusBarItems).toHaveLength(0);
+        expect(registerWebviewViewProvider).not.toHaveBeenCalled();
+        expect(registeredCommands.has("intelligit.openRecentProject")).toBe(true);
+        executeCommandFallback.mockResolvedValueOnce({ workspaces: [] } as never);
+        const completion = registeredCommands.get("intelligit.openRecentProject")!();
+        await vi.waitFor(() => expect(picker.show).toHaveBeenCalled());
+        hide();
+        await completion;
+        subscriptions.forEach((subscription) => subscription.dispose());
+    });
+
+    it("uses stable colored initials for projects instead of uniform folder icons", async () => {
+        const { completion } = await open([
+            { folderUri: { scheme: "file", path: "/BrainGame" } },
+            { folderUri: { scheme: "file", path: "/SearchHelper" } },
+            { folderUri: { scheme: "file", path: "/Upstudy" } },
+        ]);
+        const projects = picker.items.filter((item) => item.uri);
+        const decode = (item: vscode.QuickPickItem) => Buffer.from(
+            (item.iconPath as vscode.Uri).toString(true).split(",")[1], "base64",
+        ).toString();
+        expect(projects.map((item) => item.label)).toEqual(["BrainGame", "SearchHelper", "Upstudy"]);
+        expect(decode(projects[0])).toContain(">BG</text>");
+        expect(decode(projects[1])).toContain(">SH</text>");
+        expect(decode(projects[2])).toContain(">U</text>");
+        expect(new Set(projects.map((item) => decode(item).match(/fill="(#[\da-fA-F]+)"/)![1])).size)
+            .toBeGreaterThan(1);
+        const icons = projects.map((item) => item.iconPath!.toString());
+        hide();
+        await completion;
+        const reopened = await open(projects.map((item) => ({ folderUri: item.uri })));
+        expect(picker.items.filter((item) => item.uri).map((item) => item.iconPath!.toString())).toEqual(icons);
+        hide();
+        await reopened.completion;
+    });
+
+    it("groups and deduplicates projects, supports searching paths and branches, and opens a selection", async () => {
+        workspaceFolders = [{ name: "Current", uri: { scheme: "file", fsPath: "/current", path: "/current" } }] as typeof workspaceFolders;
+        const { completion } = await open([
+            { folderUri: { scheme: "file", path: "/current" } },
+            { folderUri: { scheme: "file", path: "/other" } },
+            { folderUri: { scheme: "file", path: "/other" } },
+            { fileUri: { scheme: "file", path: "/loose.txt" } },
+        ]);
+        expect(picker.items.filter((item) => item.kind === -1).map((item) => item.label))
+            .toEqual(["当前项目", "最近项目"]);
+        expect(picker.items.filter((item) => item.uri)).toHaveLength(2);
+        expect(picker.matchOnDescription).toBe(true);
+        expect(picker.matchOnDetail).toBe(true);
+        const other = picker.items.find((item) => item.detail === "/other")!;
+        picker.selectedItems = [other];
+        accept();
+        await completion;
+        expect(executeCommandFallback).toHaveBeenCalledWith("vscode.openFolder", other.uri,
+            { forceNewWindow: false, forceReuseWindow: true });
+        expect(picker.dispose).toHaveBeenCalledTimes(1);
+    });
+
+    it("loads a real Git branch without delaying the search box", async () => {
+        const { execFileSync } = await import("child_process");
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-switcher-"));
+        try {
+            execFileSync("git", ["init", "-b", "feature/search", root]);
+            const { completion } = await open([{ folderUri: { scheme: "file", path: root } }]);
+            expect(picker.show).toHaveBeenCalled();
+            await vi.waitFor(() => expect(picker.items.find((item) => item.uri)?.description)
+                .toBe("$(git-branch) feature/search"));
+            hide();
+            await completion;
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+    it("keeps non-Git folders selectable and does nothing on cancellation", async () => {
+        const root = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-no-git-"));
+        try {
+            const { completion } = await open([{ folderUri: { scheme: "file", path: root } }]);
+            await vi.waitFor(() => expect(picker.busy).toBe(false));
+            expect(picker.items.find((item) => item.uri)?.description).toBeUndefined();
+            hide();
+            await completion;
+            expect(executeCommandFallback).toHaveBeenCalledTimes(1);
+        } finally {
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+    it("opens a recent workspace with its original URI and remote authority", async () => {
+        const { completion } = await open([{
+            workspace: { configPath: { scheme: "file", path: "/projects.code-workspace" } },
+            remoteAuthority: "ssh-remote+server",
+        }]);
+        const item = picker.items.find((entry) => entry.uri)!;
+        expect(item.description).toBe("工作区");
+        picker.selectedItems = [item];
+        accept();
+        await completion;
+        expect(executeCommandFallback).toHaveBeenCalledWith("_files.windowOpen",
+            [{ workspaceUri: item.uri }],
+            { remoteAuthority: "ssh-remote+server", forceNewWindow: false, forceReuseWindow: true });
+    });
+
+    it.each(["vscode.openFolder", "git.clone"])("routes the %s action", async (command) => {
+        const { completion } = await open([]);
+        picker.selectedItems = [picker.items[command === "git.clone" ? 1 : 0]];
+        accept();
+        await completion;
+        expect(executeCommandFallback).toHaveBeenCalledWith(command);
+    });
+
+    it("opens the selected project in a new window when requested", async () => {
+        showInformationMessage.mockResolvedValueOnce("新窗口" as never);
+        const { completion } = await open([{ folderUri: { scheme: "file", path: "/other" } }]);
+        const item = picker.items.find((entry) => entry.uri)!;
+        picker.selectedItems = [item];
+        accept();
+        await completion;
+        expect(executeCommandFallback).toHaveBeenCalledWith("vscode.openFolder", item.uri,
+            { forceNewWindow: true, forceReuseWindow: false });
+    });
+
+    it("attaches a folder to the current workspace without opening another window", async () => {
+        showInformationMessage.mockResolvedValueOnce("添加到当前工作区" as never);
+        const { completion } = await open([{ folderUri: { scheme: "file", path: "/other" } }]);
+        const item = picker.items.find((entry) => entry.uri)!;
+        picker.selectedItems = [item];
+        accept();
+        await completion;
+        expect(showInformationMessage).toHaveBeenLastCalledWith(expect.any(String),
+            { modal: true }, "当前窗口", "新窗口", "添加到当前工作区");
+        expect(updateWorkspaceFolders).toHaveBeenCalledWith(0, 0, { uri: item.uri });
+        expect(executeCommandFallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not switch projects if the opening choice is cancelled", async () => {
+        showInformationMessage.mockResolvedValueOnce(undefined);
+        const { completion } = await open([{ folderUri: { scheme: "file", path: "/other" } }]);
+        picker.selectedItems = [picker.items.find((entry) => entry.uri)!];
+        accept();
+        await completion;
+        expect(executeCommandFallback).toHaveBeenCalledTimes(1);
+        expect(updateWorkspaceFolders).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the original recent picker when history is unavailable", async () => {
+        executeCommandFallback.mockRejectedValueOnce(new Error("Unknown command"));
+        const { openRecentProject } = await import("../../src/commands/projectPopup");
+        await openRecentProject();
+        expect(executeCommandFallback).toHaveBeenLastCalledWith("workbench.action.openRecent");
+        expect(createQuickPick).not.toHaveBeenCalled();
+    });
 });
 
 async function waitForAsync(): Promise<void> {
@@ -1151,16 +1379,16 @@ describe("extension integration", () => {
         expect(createStatusBarItem).toHaveBeenCalledWith(1, 100);
         expect(createStatusBarItem).toHaveBeenCalledWith(1, 99);
         expect(createStatusBarItem).toHaveBeenCalledWith(1, 98);
-        expect(createdStatusBarItems[0]?.command).toBe("intelligit.showBranchPopup");
-        expect(createdStatusBarItems[0]?.text).toContain("main");
-        expect(createdStatusBarItems[0]?.text).not.toContain("chevron-down");
-        expect(createdStatusBarItems[0]?.text).not.toContain("↗");
-        expect(createdStatusBarItems[0]?.text).not.toContain("↙");
-        expect(createdStatusBarItems[0]?.show).toHaveBeenCalled();
-        expect(createdStatusBarItems[1]?.command).toBe("intelligit.abortMerge");
-        expect(createdStatusBarItems[1]?.hide).toHaveBeenCalled();
-        expect(createdStatusBarItems[2]?.text).toBe("1/2 files");
-        expect(createdStatusBarItems[2]?.show).toHaveBeenCalled();
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.command).toBe("intelligit.showBranchPopup");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.text).toContain("main");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.text).not.toContain("chevron-down");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.text).not.toContain("↗");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.text).not.toContain("↙");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.show).toHaveBeenCalled();
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Abort Merge")?.command).toBe("intelligit.abortMerge");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Abort Merge")?.hide).toHaveBeenCalled();
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Diff File Position")?.text).toBe("1/2 files");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Diff File Position")?.show).toHaveBeenCalled();
 
         await getCommand("intelligit.showBranchPopup")();
         expect(executeCommandFallback).toHaveBeenCalledWith("intelligit.commitGraph.focus");
@@ -1260,11 +1488,11 @@ describe("extension integration", () => {
         } as unknown as MockExtensionContext;
         await activate(context);
 
-        expect(createdStatusBarItems[0]?.text).toBe("$(warning) Merging main");
-        expect(createdStatusBarItems[0]?.command).toBe("intelligit.openConflictSession");
-        expect(createdStatusBarItems[1]?.text).toBe("$(close)");
-        expect(createdStatusBarItems[1]?.command).toBe("intelligit.abortMerge");
-        expect(createdStatusBarItems[1]?.show).toHaveBeenCalled();
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.text).toBe("$(warning) Merging main");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Branch")?.command).toBe("intelligit.openConflictSession");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Abort Merge")?.text).toBe("$(close)");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Abort Merge")?.command).toBe("intelligit.abortMerge");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Abort Merge")?.show).toHaveBeenCalled();
 
         await registeredCommands.get("intelligit.abortMerge")?.();
 
@@ -2784,7 +3012,7 @@ describe("extension integration", () => {
             "intelligit.diffNavigation.hasPrevious",
             false,
         );
-        expect(createdStatusBarItems[2]?.text).toBe("1/2 files");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Diff File Position")?.text).toBe("1/2 files");
         executeCommandFallback.mockClear();
         gitOpsState.getFileContentAtRef.mockClear();
 
@@ -2816,7 +3044,7 @@ describe("extension integration", () => {
             "vscode.setEditorLayout",
             expect.anything(),
         );
-        expect(createdStatusBarItems[2]?.text).toBe("2/2 files");
+        expect(createdStatusBarItems.find((item) => item.name === "IntelliGit Diff File Position")?.text).toBe("2/2 files");
         executeCommandFallback.mockClear();
 
         await registeredCommands.get("intelligit.previousDiffFile")?.();

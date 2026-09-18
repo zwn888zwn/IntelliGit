@@ -18,6 +18,7 @@ import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps"
 import { handleCommitContextAction } from "./commands/commitCommands";
 import { createBranchCommands } from "./commands/branchCommands";
 import { BranchStatusBarController } from "./commands/branchPopup";
+import { registerProjectSwitcher } from "./commands/projectPopup";
 import { RefreshService } from "./services/refreshService";
 import {
     openJetBrainsMergeToolForFile,
@@ -74,11 +75,7 @@ import {
 import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    context.subscriptions.push(
-        vscode.commands.registerCommand("intelligit.openRecentProject", () =>
-            vscode.commands.executeCommand("workbench.action.openRecent"),
-        ),
-    );
+    registerProjectSwitcher(context);
     context.subscriptions.push(new GoImplementationHints());
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
     const DIFF_NAVIGATION_ACTIVE_CONTEXT = "intelligit.diffNavigation.active";
