@@ -163,12 +163,15 @@ export async function openRecentProject(): Promise<void> {
                 || (currentUri?.scheme === selected.uri.scheme
                     && currentUri.authority === selected.uri.authority)
             );
-            const mode = await vscode.window.showInformationMessage(
-                `如何打开 ${path.posix.basename(selected.uri.path)}？`,
-                { modal: true },
-                "当前窗口", "新窗口", ...(canAttach ? ["添加到当前工作区"] : []),
+            const mode = await vscode.window.showQuickPick(
+                ["当前窗口", "新窗口", ...(canAttach ? ["添加到当前工作区"] : []), "取消"],
+                {
+                    title: `如何打开 ${path.posix.basename(selected.uri.path)}？`,
+                    placeHolder: "↑ ↓ 选择，Enter 确认，Esc 取消",
+                    ignoreFocusOut: true,
+                },
             );
-            if (!mode) return;
+            if (!mode || mode === "取消") return;
             if (mode === "添加到当前工作区") {
                 const added = vscode.workspace.updateWorkspaceFolders(
                     vscode.workspace.workspaceFolders?.length ?? 0, 0, { uri: selected.uri },

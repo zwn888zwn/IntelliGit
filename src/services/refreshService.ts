@@ -144,6 +144,7 @@ export class RefreshService implements vscode.Disposable {
     }
 
     private registerGitDirWatchers(): void {
+        const watchedWorktreeRoots = new Set<string>();
         const gitStateFiles = new Set([
             "HEAD",
             "FETCH_HEAD",
@@ -156,6 +157,27 @@ export class RefreshService implements vscode.Disposable {
         for (const repoRoot of this.repoRoots) {
             const gitDir = this.resolveGitDir(repoRoot);
             const commonGitDir = this.resolveCommonGitDir(gitDir);
+            if (!watchedWorktreeRoots.has(commonGitDir)) {
+                try {
+                    // Watch from the existing common directory so the first worktree
+                    // is detected even before Git creates its worktrees directory.
+                    const pattern = new vscode.RelativePattern(
+                        vscode.Uri.file(commonGitDir),
+                        "worktrees{,/**}",
+                    );
+                    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+                    const handler = () => this.debouncedFullRefresh();
+                    this.gitWatcherDisposables.push(
+                        watcher.onDidChange(handler),
+                        watcher.onDidCreate(handler),
+                        watcher.onDidDelete(handler),
+                        watcher,
+                    );
+                    watchedWorktreeRoots.add(commonGitDir);
+                } catch {
+                    /* common git dir may not be watchable */
+                }
+            }
             try {
                 const dirWatcher = fs.watch(gitDir, (_event, filename) => {
                     if (!filename) {

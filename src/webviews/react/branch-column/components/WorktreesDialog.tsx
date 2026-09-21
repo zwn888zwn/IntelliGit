@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { GitWorktree, RepositoryContextInfo } from "../../../../types";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
@@ -74,6 +74,9 @@ export function WorktreesDialog({
     const [requestedCreateRepoRoot, setRequestedCreateRepoRoot] = useState("");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [hoverTooltip, setHoverTooltip] = useState<HoverTooltipState | null>(null);
+    const [query, setQuery] = useState("");
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
+    const listRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if (!deleteResult) return;
@@ -138,6 +141,39 @@ export function WorktreesDialog({
         [allRepositories, items],
     );
     const showRepositoryColumn = allRepositories;
+    const searchTerms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const visibleItems = sortedItems.filter((item) => {
+        const text = `${item.repositoryName} ${item.worktree.branch ?? "Detached HEAD"} ${item.worktree.path}`.toLowerCase();
+        return searchTerms.every((term) => text.includes(term));
+    });
+    const selectedItem = visibleItems.find((item) => getWorktreeKey(item) === selectedKey)
+        ?? visibleItems[0];
+    const activeKey = selectedItem ? getWorktreeKey(selectedItem) : null;
+
+    useEffect(() => {
+        listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
+            ?.scrollIntoView?.({ block: "nearest" });
+    }, [activeKey]);
+
+    const handleListKeyDown = (event: React.KeyboardEvent<HTMLElement>): void => {
+        if (confirmItem || rowMenu || (event.target as HTMLElement).tagName === "BUTTON") return;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+            event.preventDefault();
+            if (!selectedItem) return;
+            const index = visibleItems.indexOf(selectedItem);
+            const nextIndex = Math.max(0, Math.min(
+                visibleItems.length - 1,
+                index + (event.key === "ArrowDown" ? 1 : -1),
+            ));
+            setSelectedKey(getWorktreeKey(visibleItems[nextIndex]));
+            if (event.currentTarget.getAttribute("role") === "grid") {
+                listRef.current?.querySelectorAll<HTMLElement>('[role="row"]')[nextIndex]?.focus();
+            }
+        } else if (event.key === "Enter" && selectedItem) {
+            event.preventDefault();
+            onOpen(selectedItem.repoRoot, selectedItem.worktree.path);
+        }
+    };
     const subtitle = allRepositories
         ? repositoryCount > 0
             ? `${repositoryCount} ${repositoryCount === 1 ? "repository" : "repositories"}`
@@ -184,6 +220,12 @@ export function WorktreesDialog({
             <section
                 aria-label="Worktrees"
                 onMouseDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => {
+                    if (event.key === "Escape" && !confirmItem && !rowMenu) {
+                        event.stopPropagation();
+                        onClose();
+                    }
+                }}
                 style={DIALOG_STYLE}
             >
                 <div style={HEADER_STYLE}>
@@ -221,11 +263,31 @@ export function WorktreesDialog({
                     </div>
                 </div>
 
-                <div style={LIST_STYLE}>
-                    {sortedItems.length === 0 ? (
-                        <div style={EMPTY_STYLE}>No worktrees found.</div>
+                <input
+                    autoFocus
+                    aria-label="Search worktrees"
+                    placeholder="Search repository, branch, or path..."
+                    value={query}
+                    onChange={(event) => {
+                        setQuery(event.target.value);
+                        setSelectedKey(null);
+                        setHoverTooltip(null);
+                        setRowMenu(null);
+                    }}
+                    onKeyDown={handleListKeyDown}
+                    style={{
+                        margin: "0 16px 12px",
+                        padding: "6px 8px",
+                        color: "var(--vscode-input-foreground)",
+                        background: "var(--vscode-input-background)",
+                        border: "1px solid var(--vscode-input-border, transparent)",
+                    }}
+                />
+                <div ref={listRef} role="grid" aria-label="Worktree list" style={LIST_STYLE} onKeyDown={handleListKeyDown}>
+                    {visibleItems.length === 0 ? (
+                        <div style={EMPTY_STYLE}>{query.trim() ? "No matching worktrees." : "No worktrees found."}</div>
                     ) : (
-                        sortedItems.map((item) => {
+                        visibleItems.map((item) => {
                             const { worktree } = item;
                             const current = isCurrentWorktree(item.repositoryRoot, worktree.path);
                             const worktreeName = getWorktreeName(worktree.path);
@@ -234,7 +296,11 @@ export function WorktreesDialog({
                                 <div
                                     key={getWorktreeKey(item)}
                                     role="row"
+                                    aria-selected={getWorktreeKey(item) === activeKey}
+                                    tabIndex={getWorktreeKey(item) === activeKey ? 0 : -1}
+                                    onFocus={() => setSelectedKey(getWorktreeKey(item))}
                                     onClick={(event) => {
+                                        setSelectedKey(getWorktreeKey(item));
                                         if (event.detail >= 2) onOpen(item.repoRoot, worktree.path);
                                     }}
                                     onContextMenu={(event) => {
@@ -245,11 +311,14 @@ export function WorktreesDialog({
                                             item,
                                         });
                                     }}
-                                    style={
-                                        showRepositoryColumn
+                                    style={{
+                                        ...(showRepositoryColumn
                                             ? ROW_WITH_REPOSITORY_STYLE
-                                            : ROW_STYLE
-                                    }
+                                            : ROW_STYLE),
+                                        background: getWorktreeKey(item) === activeKey
+                                            ? "var(--vscode-list-inactiveSelectionBackground)"
+                                            : undefined,
+                                    }}
                                 >
                                     <span style={CURRENT_MARK_STYLE}>
                                         {current ? "Current" : ""}

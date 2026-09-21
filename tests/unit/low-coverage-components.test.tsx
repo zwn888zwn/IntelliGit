@@ -150,6 +150,183 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
+    it("WorktreesDialog navigates, filters, and opens the selected worktree", async () => {
+        const onOpen = vi.fn();
+        const repositories: RepositoryContextInfo[] = [
+            {
+                repoId: "alpha",
+                name: "Alpha",
+                root: "/repos/alpha",
+                color: "#00bcd4",
+            },
+            {
+                repoId: "beta",
+                name: "Beta",
+                root: "/repos/beta",
+                color: "#4caf50",
+            },
+        ];
+        const items = [
+            {
+                repoRoot: "/repos/alpha",
+                repositoryName: "Alpha",
+                repositoryRoot: "/repos/alpha",
+                worktree: {
+                    path: "/repos/alpha",
+                    branch: "main",
+                    detached: false,
+                },
+            },
+            {
+                repoRoot: "/repos/alpha",
+                repositoryName: "Alpha",
+                repositoryRoot: "/repos/alpha",
+                worktree: {
+                    path: "/repos/alpha-feature",
+                    branch: "feature/ui",
+                    detached: false,
+                },
+            },
+            {
+                repoRoot: "/repos/beta",
+                repositoryName: "Beta",
+                repositoryRoot: "/repos/beta",
+                worktree: {
+                    path: "/repos/beta-release",
+                    branch: "release/2026",
+                    detached: false,
+                },
+            },
+        ];
+        const { root, container } = mount(
+            <WorktreesDialog
+                repository={repositories[0]}
+                repositories={repositories}
+                allRepositories={true}
+                repositoryCount={repositories.length}
+                items={items}
+                onOpen={onOpen}
+                onDelete={vi.fn()}
+                onClose={vi.fn()}
+            />,
+        );
+
+        const searchInput = document.querySelector(
+            'input[aria-label="Search worktrees"]',
+        ) as HTMLInputElement;
+        const rows = () => Array.from(document.querySelectorAll('[role="row"]')) as HTMLElement[];
+        expect(document.querySelector('[role="grid"][aria-label="Worktree list"]')).toBeTruthy();
+        expect(rows()[0].getAttribute("aria-selected")).toBe("true");
+
+        act(() => {
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+        });
+        await flush();
+        act(() => {
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+        });
+        await flush();
+        act(() => {
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        });
+        expect(onOpen).toHaveBeenCalledWith("/repos/beta", "/repos/beta-release");
+
+        onOpen.mockClear();
+        act(() => {
+            const valueSetter = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                "value",
+            )?.set;
+            valueSetter?.call(searchInput, "bEtA RELEASE /repos/beta-release");
+            searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+        });
+        await flush();
+        expect(rows()).toHaveLength(1);
+        expect(rows()[0].getAttribute("aria-selected")).toBe("true");
+        act(() => {
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        });
+        expect(onOpen).toHaveBeenCalledWith("/repos/beta", "/repos/beta-release");
+
+        onOpen.mockClear();
+        act(() => {
+            const valueSetter = Object.getOwnPropertyDescriptor(
+                HTMLInputElement.prototype,
+                "value",
+            )?.set;
+            valueSetter?.call(searchInput, "does-not-exist");
+            searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        });
+        await flush();
+        expect(rows()).toHaveLength(0);
+        expect(onOpen).not.toHaveBeenCalled();
+
+        unmount(root, container);
+    });
+
+    it("WorktreesDialog falls back to the first remaining row after a selected row is removed", async () => {
+        const onOpen = vi.fn();
+        const repository: RepositoryContextInfo = {
+            repoId: "alpha",
+            name: "Alpha",
+            root: "/repos/alpha",
+            color: "#00bcd4",
+        };
+        const firstItem = {
+            repoRoot: repository.root,
+            repositoryName: repository.name,
+            repositoryRoot: repository.root,
+            worktree: { path: repository.root, branch: "main", detached: false },
+        };
+        const selectedItem = {
+            repoRoot: repository.root,
+            repositoryName: repository.name,
+            repositoryRoot: repository.root,
+            worktree: { path: "/repos/alpha-feature", branch: "feature/ui", detached: false },
+        };
+        const { root, container } = mount(
+            <WorktreesDialog
+                repository={repository}
+                items={[firstItem, selectedItem]}
+                onOpen={onOpen}
+                onDelete={vi.fn()}
+                onClose={vi.fn()}
+            />,
+        );
+        const searchInput = document.querySelector(
+            'input[aria-label="Search worktrees"]',
+        ) as HTMLInputElement;
+        act(() => {
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+        });
+        await flush();
+        expect(Array.from(document.querySelectorAll('[role="row"]'))[1].getAttribute("aria-selected")).toBe(
+            "true",
+        );
+
+        act(() => {
+            root.render(
+                <WorktreesDialog
+                    repository={repository}
+                    items={[firstItem]}
+                    onOpen={onOpen}
+                    onDelete={vi.fn()}
+                    onClose={vi.fn()}
+                />,
+            );
+        });
+        await flush();
+        const remainingRow = document.querySelector('[role="row"]') as HTMLElement;
+        expect(remainingRow.getAttribute("aria-selected")).toBe("true");
+        act(() => {
+            searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        });
+        expect(onOpen).toHaveBeenCalledWith(repository.root, repository.root);
+
+        unmount(root, container);
+    });
+
     it("BranchPopupOverlay opens repository submenus with repository branch state", async () => {
         const repositories: RepositoryContextInfo[] = [
             {

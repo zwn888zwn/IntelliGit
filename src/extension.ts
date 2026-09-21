@@ -3,6 +3,7 @@
 // The extension host is the sole data coordinator -- views never talk directly.
 
 import * as path from "path";
+import * as fs from "fs/promises";
 import * as vscode from "vscode";
 import { CommitGraphViewProvider } from "./views/CommitGraphViewProvider";
 import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
@@ -66,6 +67,7 @@ import {
     findWorktreeForBranch,
     getDefaultWorktreeLocation,
     getDefaultWorktreeProjectName,
+    getWorktreeWorkspacePath,
     isLocalBranchCheckedOut,
     isCurrentWorktreePath,
     parseWorktreeListPorcelain,
@@ -1052,6 +1054,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
             await runWithNotificationProgress(`Deleting worktree ${path.basename(worktree.path)}...`, async () => {
                 await repository.executor.run(buildWorktreeRemoveArgs(worktree.path));
+                const workspacePath = getWorktreeWorkspacePath(worktree.path);
+                try {
+                    await fs.unlink(workspacePath);
+                } catch (error) {
+                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                        vscode.window.showWarningMessage(
+                            `Worktree deleted, but could not remove workspace file ${workspacePath}: ${getErrorMessage(error)}`,
+                        );
+                    }
+                }
             });
             commitGraph.setWorktreeDeleteResult({ success: true, path: worktree.path });
             await refreshRepositoryWorktrees(repository);

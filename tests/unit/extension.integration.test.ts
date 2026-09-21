@@ -108,6 +108,13 @@ const workspaceFolderListeners: Array<() => void> = [];
 type FsWatchCallback = (...args: unknown[]) => void;
 const fsWatchCallbacks: FsWatchCallback[] = [];
 const fsWatchPaths: string[] = [];
+const fileSystemWatchers: Array<{
+    pattern: { baseUri: { fsPath: string }; pattern: string };
+    change: MockEventEmitter<unknown>;
+    create: MockEventEmitter<unknown>;
+    delete: MockEventEmitter<unknown>;
+    dispose: ReturnType<typeof vi.fn>;
+}> = [];
 const fsStatSync = vi.fn();
 const fsReadFileSync = vi.fn();
 let registeredDefinitionProvider:
@@ -494,6 +501,9 @@ vi.mock("fs", () => ({
 }));
 
 vi.mock("vscode", () => ({
+    RelativePattern: class {
+        constructor(public baseUri: { fsPath: string }, public pattern: string) {}
+    },
     Disposable: MockDisposable,
     EventEmitter: MockEventEmitter,
     ThemeIcon: class {
@@ -703,6 +713,22 @@ vi.mock("vscode", () => ({
         }),
         onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
         fs: { readFile, writeFile, stat: fsStat },
+        createFileSystemWatcher: vi.fn((pattern) => {
+            const watcher = {
+                pattern,
+                change: new MockEventEmitter<unknown>(),
+                create: new MockEventEmitter<unknown>(),
+                delete: new MockEventEmitter<unknown>(),
+                dispose: vi.fn(),
+            };
+            fileSystemWatchers.push(watcher);
+            return {
+                onDidChange: watcher.change.event,
+                onDidCreate: watcher.create.event,
+                onDidDelete: watcher.delete.event,
+                dispose: watcher.dispose,
+            };
+        }),
         openTextDocument,
         registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
         registerFileSystemProvider: vi.fn(() => ({ dispose: vi.fn() })),
@@ -907,7 +933,8 @@ describe("project switcher", () => {
         executeCommandFallback.mockReset();
         workspaceFolders = undefined;
         workspaceFile = undefined;
-        showInformationMessage.mockResolvedValue("当前窗口" as never);
+        showQuickPick.mockReset();
+        showQuickPick.mockResolvedValue("当前窗口" as never);
         updateWorkspaceFolders.mockClear();
         createdStatusBarItems.length = 0;
         registerWebviewViewProvider.mockClear();
@@ -933,7 +960,8 @@ describe("project switcher", () => {
     afterEach(() => {
         executeCommandFallback.mockReset();
         executeCommandFallback.mockResolvedValue(undefined);
-        showInformationMessage.mockResolvedValue(undefined);
+        showQuickPick.mockReset();
+        showQuickPick.mockImplementation(async (items) => items[0]);
         hide?.();
     });
 
@@ -1051,6 +1079,9 @@ describe("project switcher", () => {
         expect(executeCommandFallback).toHaveBeenCalledWith("_files.windowOpen",
             [{ workspaceUri: item.uri }],
             { remoteAuthority: "ssh-remote+server", forceNewWindow: false, forceReuseWindow: true });
+        expect(showQuickPick).toHaveBeenCalledWith(
+            ["当前窗口", "新窗口", "取消"], expect.any(Object),
+        );
     });
 
     it.each(["vscode.openFolder", "git.clone"])("routes the %s action", async (command) => {
@@ -1062,7 +1093,7 @@ describe("project switcher", () => {
     });
 
     it("opens the selected project in a new window when requested", async () => {
-        showInformationMessage.mockResolvedValueOnce("新窗口" as never);
+        showQuickPick.mockResolvedValueOnce("新窗口" as never);
         const { completion } = await open([{ folderUri: { scheme: "file", path: "/other" } }]);
         const item = picker.items.find((entry) => entry.uri)!;
         picker.selectedItems = [item];
@@ -1073,20 +1104,26 @@ describe("project switcher", () => {
     });
 
     it("attaches a folder to the current workspace without opening another window", async () => {
-        showInformationMessage.mockResolvedValueOnce("添加到当前工作区" as never);
+        showQuickPick.mockResolvedValueOnce("添加到当前工作区" as never);
         const { completion } = await open([{ folderUri: { scheme: "file", path: "/other" } }]);
         const item = picker.items.find((entry) => entry.uri)!;
         picker.selectedItems = [item];
         accept();
         await completion;
-        expect(showInformationMessage).toHaveBeenLastCalledWith(expect.any(String),
-            { modal: true }, "当前窗口", "新窗口", "添加到当前工作区");
+        expect(showQuickPick).toHaveBeenLastCalledWith(
+            ["当前窗口", "新窗口", "添加到当前工作区", "取消"],
+            {
+                title: "如何打开 other？",
+                placeHolder: "↑ ↓ 选择，Enter 确认，Esc 取消",
+                ignoreFocusOut: true,
+            },
+        );
         expect(updateWorkspaceFolders).toHaveBeenCalledWith(0, 0, { uri: item.uri });
         expect(executeCommandFallback).toHaveBeenCalledTimes(1);
     });
 
-    it("does not switch projects if the opening choice is cancelled", async () => {
-        showInformationMessage.mockResolvedValueOnce(undefined);
+    it.each([undefined, "取消"])("does not switch projects if the opening choice is cancelled (%s)", async (choice) => {
+        showQuickPick.mockResolvedValueOnce(choice as never);
         const { completion } = await open([{ folderUri: { scheme: "file", path: "/other" } }]);
         picker.selectedItems = [picker.items.find((entry) => entry.uri)!];
         accept();
@@ -1159,6 +1196,7 @@ describe("extension integration", () => {
         workspaceFolderListeners.length = 0;
         fsWatchCallbacks.length = 0;
         fsWatchPaths.length = 0;
+        fileSystemWatchers.length = 0;
         fsStatSync.mockReset();
         fsReadFileSync.mockReset();
         fsStatSync.mockImplementation(() => ({ isFile: () => false }));
@@ -1931,6 +1969,79 @@ describe("extension integration", () => {
             path: "/repo-a-feature",
         });
     });
+
+    it.each(["success", "git failure", "cleanup failure"] as const)(
+        "cleans up only the deleted worktree workspace: %s",
+        async (outcome) => {
+            const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-workspace-delete-"));
+            const worktreePath = path.join(parent, "feature");
+            const workspacePath = `${worktreePath}.code-workspace`;
+            const sourceWorkspacePath = path.join(parent, "main.code-workspace");
+            const workspaceContent = '{ "folders": [{ "path": "feature" }] }\n';
+            try {
+                await fs.writeFile(sourceWorkspacePath, "original workspace");
+                if (outcome === "cleanup failure") {
+                    await fs.mkdir(workspacePath);
+                } else {
+                    await fs.writeFile(workspacePath, workspaceContent);
+                }
+                executorRun.mockImplementation(async (args: string[]) => {
+                    if (args[0] === "worktree" && args[1] === "list") {
+                        return [
+                            "worktree /repo-a",
+                            "HEAD feed1234",
+                            "branch refs/heads/main",
+                            "",
+                            `worktree ${worktreePath}`,
+                            "HEAD a1b2c3d4",
+                            "branch refs/heads/feature-local",
+                            "",
+                        ].join("\n");
+                    }
+                    if (args[0] === "worktree" && args[1] === "remove") {
+                        expect(await fs.stat(workspacePath)).toBeDefined();
+                        if (outcome === "git failure") throw new Error("Worktree is dirty");
+                    }
+                    return defaultExecutorRunImpl(args);
+                });
+                const { activate } = await import("../../src/extension");
+                const context = {
+                    extensionUri: { fsPath: "/ext", path: "/ext" },
+                    subscriptions: [],
+                } as unknown as MockExtensionContext;
+                await activate(context);
+
+                await latestCommitGraphProvider!.emitDeleteWorktree({
+                    repoRoot: "/repo-a",
+                    path: worktreePath,
+                });
+
+                expect(await fs.readFile(sourceWorkspacePath, "utf8")).toBe("original workspace");
+                if (outcome === "git failure") {
+                    expect(await fs.readFile(workspacePath, "utf8")).toBe(workspaceContent);
+                    expect(latestCommitGraphProvider!.setWorktreeDeleteResult).toHaveBeenCalledWith({
+                        success: false,
+                        message: "Worktree is dirty",
+                    });
+                } else {
+                    expect(latestCommitGraphProvider!.setWorktreeDeleteResult).toHaveBeenCalledWith({
+                        success: true,
+                        path: worktreePath,
+                    });
+                    if (outcome === "success") {
+                        await expect(fs.stat(workspacePath)).rejects.toMatchObject({ code: "ENOENT" });
+                    } else {
+                        expect((await fs.stat(workspacePath)).isDirectory()).toBe(true);
+                        expect(showWarningMessage).toHaveBeenCalledWith(
+                            expect.stringContaining(`could not remove workspace file ${workspacePath}`),
+                        );
+                    }
+                }
+            } finally {
+                await fs.rm(parent, { recursive: true, force: true });
+            }
+        },
+    );
 
     it("blocks deleting the current worktree", async () => {
         const { activate } = await import("../../src/extension");
@@ -3874,6 +3985,42 @@ describe("extension integration", () => {
                 updatedBranches,
             );
             deactivate();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("refreshes external worktree creation, changes and removal from the common git directory", async () => {
+        fsStatSync.mockImplementation((target: unknown) => ({
+            isFile: () => String(target) === "/repo-a/.git",
+        }));
+        fsReadFileSync.mockImplementation((target: unknown) => {
+            if (String(target) === "/repo-a/.git") return "gitdir: /common/.git/worktrees/repo-a\n";
+            if (String(target) === "/common/.git/worktrees/repo-a/commondir") return "../..\n";
+            throw new Error("ENOENT");
+        });
+        const { activate } = await import("../../src/extension");
+        const context = {
+            extensionUri: { fsPath: "/ext", path: "/ext" },
+            subscriptions: [],
+        } as unknown as MockExtensionContext;
+        vi.useFakeTimers();
+        try {
+            await activate(context);
+            const watcher = fileSystemWatchers.find((item) =>
+                item.pattern.baseUri.fsPath === "/common/.git" &&
+                item.pattern.pattern === "worktrees{,/**}",
+            );
+            expect(watcher).toBeDefined();
+            for (const event of [watcher!.create, watcher!.change, watcher!.delete]) {
+                latestCommitGraphProvider!.refresh.mockClear();
+                await event.fireAsync({ fsPath: "/common/.git/worktrees/external/HEAD" });
+                vi.advanceTimersByTime(600);
+                await waitForAsync();
+                expect(latestCommitGraphProvider!.refresh).toHaveBeenCalled();
+            }
+            for (const subscription of context.subscriptions) subscription.dispose();
+            expect(watcher!.dispose).toHaveBeenCalled();
         } finally {
             vi.useRealTimers();
         }
