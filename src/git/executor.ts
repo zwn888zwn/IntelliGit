@@ -9,6 +9,12 @@ export class GitExecutor {
     }
 
     async run(args: string[]): Promise<string> {
+        // Background reads must not contend with merge/stage for the index lock.
+        if (args[0] === "status") {
+            args = ["--no-optional-locks", ...args];
+        } else if (args[0] === "diff") {
+            args = ["-c", "diff.autoRefreshIndex=false", ...args];
+        }
         return this.git.raw(["-c", "core.quotepath=false", ...args]);
     }
 

@@ -166,7 +166,13 @@ export class RefreshService implements vscode.Disposable {
                         "worktrees{,/**}",
                     );
                     const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-                    const handler = () => this.debouncedFullRefresh();
+                    const handler = (uri: vscode.Uri) => {
+                        const filename = path.basename(uri.fsPath);
+                        // Status refreshes can touch the index and its lock. The current
+                        // worktree's index changes already have a light-refresh watcher.
+                        if (filename === "index" || filename.endsWith(".lock")) return;
+                        this.debouncedFullRefresh();
+                    };
                     this.gitWatcherDisposables.push(
                         watcher.onDidChange(handler),
                         watcher.onDidCreate(handler),

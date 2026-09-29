@@ -4013,12 +4013,32 @@ describe("extension integration", () => {
             );
             expect(watcher).toBeDefined();
             for (const event of [watcher!.create, watcher!.change, watcher!.delete]) {
-                latestCommitGraphProvider!.refresh.mockClear();
-                await event.fireAsync({ fsPath: "/common/.git/worktrees/external/HEAD" });
-                vi.advanceTimersByTime(600);
-                await waitForAsync();
-                expect(latestCommitGraphProvider!.refresh).toHaveBeenCalled();
+                for (const filename of ["index", "index.lock", "HEAD.lock"]) {
+                    latestCommitGraphProvider!.refresh.mockClear();
+                    latestCommitPanelProvider!.refresh.mockClear();
+                    await event.fireAsync({ fsPath: `/common/.git/worktrees/external/${filename}` });
+                    vi.advanceTimersByTime(600);
+                    await waitForAsync();
+                    expect(latestCommitGraphProvider!.refresh).not.toHaveBeenCalled();
+                    expect(latestCommitPanelProvider!.refresh).not.toHaveBeenCalled();
+                }
+                for (const suffix of ["", "/HEAD", "/gitdir", "/locked"]) {
+                    latestCommitGraphProvider!.refresh.mockClear();
+                    await event.fireAsync({ fsPath: `/common/.git/worktrees/external${suffix}` });
+                    vi.advanceTimersByTime(600);
+                    await waitForAsync();
+                    expect(latestCommitGraphProvider!.refresh).toHaveBeenCalled();
+                }
             }
+            latestCommitGraphProvider!.refresh.mockClear();
+            latestCommitPanelProvider!.refresh.mockClear();
+            const gitDirWatcherIndex = fsWatchPaths.indexOf("/common/.git/worktrees/repo-a");
+            expect(gitDirWatcherIndex).toBeGreaterThanOrEqual(0);
+            fsWatchCallbacks[gitDirWatcherIndex]!("change", "index");
+            vi.advanceTimersByTime(600);
+            await waitForAsync();
+            expect(latestCommitPanelProvider!.refresh).toHaveBeenCalled();
+            expect(latestCommitGraphProvider!.refresh).not.toHaveBeenCalled();
             for (const subscription of context.subscriptions) subscription.dispose();
             expect(watcher!.dispose).toHaveBeenCalled();
         } finally {
