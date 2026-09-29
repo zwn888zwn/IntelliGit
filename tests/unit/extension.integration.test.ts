@@ -1970,7 +1970,7 @@ describe("extension integration", () => {
         });
     });
 
-    it.each(["success", "git failure", "cleanup failure"] as const)(
+    it.each(["success", "git failure", "cleanup failure", "dirty forced", "dirty canceled", "force failure", "locked failure"] as const)(
         "cleans up only the deleted worktree workspace: %s",
         async (outcome) => {
             const parent = await fs.mkdtemp(path.join(os.tmpdir(), "intelligit-workspace-delete-"));
@@ -2001,6 +2001,13 @@ describe("extension integration", () => {
                     if (args[0] === "worktree" && args[1] === "remove") {
                         expect(await fs.stat(workspacePath)).toBeDefined();
                         if (outcome === "git failure") throw new Error("Worktree is dirty");
+                        if (outcome === "locked failure") throw new Error("Worktree is locked");
+                        if (outcome === "dirty forced" || outcome === "dirty canceled" || outcome === "force failure") {
+                            if (args[2] !== "--force") {
+                                throw new Error(`fatal: '${worktreePath}' contains modified or untracked files, use --force to delete it`);
+                            }
+                            if (outcome === "force failure") throw new Error("Force removal failed");
+                        }
                     }
                     return defaultExecutorRunImpl(args);
                 });
@@ -2010,6 +2017,11 @@ describe("extension integration", () => {
                     subscriptions: [],
                 } as unknown as MockExtensionContext;
                 await activate(context);
+                if (outcome === "dirty forced" || outcome === "force failure") {
+                    showWarningMessage.mockResolvedValueOnce("Force Delete Worktree");
+                } else if (outcome === "dirty canceled") {
+                    showWarningMessage.mockResolvedValueOnce(undefined);
+                }
 
                 await latestCommitGraphProvider!.emitDeleteWorktree({
                     repoRoot: "/repo-a",
@@ -2017,18 +2029,21 @@ describe("extension integration", () => {
                 });
 
                 expect(await fs.readFile(sourceWorkspacePath, "utf8")).toBe("original workspace");
-                if (outcome === "git failure") {
+                if (outcome === "git failure" || outcome === "locked failure" || outcome === "dirty canceled" || outcome === "force failure") {
                     expect(await fs.readFile(workspacePath, "utf8")).toBe(workspaceContent);
                     expect(latestCommitGraphProvider!.setWorktreeDeleteResult).toHaveBeenCalledWith({
                         success: false,
-                        message: "Worktree is dirty",
+                        message: outcome === "git failure" ? "Worktree is dirty"
+                            : outcome === "locked failure" ? "Worktree is locked"
+                            : outcome === "dirty canceled" ? "Deletion canceled. Worktree and local files were kept."
+                            : "Force removal failed",
                     });
                 } else {
                     expect(latestCommitGraphProvider!.setWorktreeDeleteResult).toHaveBeenCalledWith({
                         success: true,
                         path: worktreePath,
                     });
-                    if (outcome === "success") {
+                    if (outcome === "success" || outcome === "dirty forced") {
                         await expect(fs.stat(workspacePath)).rejects.toMatchObject({ code: "ENOENT" });
                     } else {
                         expect((await fs.stat(workspacePath)).isDirectory()).toBe(true);
@@ -2036,6 +2051,21 @@ describe("extension integration", () => {
                             expect.stringContaining(`could not remove workspace file ${workspacePath}`),
                         );
                     }
+                }
+                if (outcome === "dirty forced" || outcome === "dirty canceled" || outcome === "force failure") {
+                    expect(showWarningMessage).toHaveBeenCalledWith(
+                        expect.stringContaining("has modified or untracked files"),
+                        expect.objectContaining({ modal: true, detail: expect.stringContaining(worktreePath) }),
+                        "Force Delete Worktree",
+                    );
+                    expect(executorRun).toHaveBeenCalledWith(["worktree", "remove", worktreePath]);
+                    if (outcome === "dirty canceled") {
+                        expect(executorRun).not.toHaveBeenCalledWith(["worktree", "remove", "--force", worktreePath]);
+                    } else {
+                        expect(executorRun).toHaveBeenCalledWith(["worktree", "remove", "--force", worktreePath]);
+                    }
+                } else {
+                    expect(executorRun).not.toHaveBeenCalledWith(["worktree", "remove", "--force", worktreePath]);
                 }
             } finally {
                 await fs.rm(parent, { recursive: true, force: true });

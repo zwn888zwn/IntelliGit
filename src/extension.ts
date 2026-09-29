@@ -1052,19 +1052,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 throw new Error("The current worktree cannot be deleted from this window.");
             }
 
-            await runWithNotificationProgress(`Deleting worktree ${path.basename(worktree.path)}...`, async () => {
-                await repository.executor.run(buildWorktreeRemoveArgs(worktree.path));
-                const workspacePath = getWorktreeWorkspacePath(worktree.path);
-                try {
-                    await fs.unlink(workspacePath);
-                } catch (error) {
-                    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-                        vscode.window.showWarningMessage(
-                            `Worktree deleted, but could not remove workspace file ${workspacePath}: ${getErrorMessage(error)}`,
-                        );
-                    }
+            try {
+                await runWithNotificationProgress(`Deleting worktree ${path.basename(worktree.path)}...`, async () => {
+                    await repository.executor.run(buildWorktreeRemoveArgs(worktree.path));
+                });
+            } catch (error) {
+                if (!/contains modified or untracked files, use --force to delete it/i.test(getErrorMessage(error))) {
+                    throw error;
                 }
-            });
+                const choice = await vscode.window.showWarningMessage(
+                    `Worktree ${path.basename(worktree.path)} has modified or untracked files.`,
+                    {
+                        modal: true,
+                        detail: `Force deleting ${worktree.path} permanently discards its local changes and untracked files.`,
+                    },
+                    "Force Delete Worktree",
+                );
+                if (choice !== "Force Delete Worktree") {
+                    commitGraph.setWorktreeDeleteResult({
+                        success: false,
+                        message: "Deletion canceled. Worktree and local files were kept.",
+                    });
+                    return;
+                }
+                await runWithNotificationProgress(`Force deleting worktree ${path.basename(worktree.path)}...`, async () => {
+                    await repository.executor.run(["worktree", "remove", "--force", worktree.path]);
+                });
+            }
+            const workspacePath = getWorktreeWorkspacePath(worktree.path);
+            try {
+                await fs.unlink(workspacePath);
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+                    vscode.window.showWarningMessage(
+                        `Worktree deleted, but could not remove workspace file ${workspacePath}: ${getErrorMessage(error)}`,
+                    );
+                }
+            }
             commitGraph.setWorktreeDeleteResult({ success: true, path: worktree.path });
             await refreshRepositoryWorktrees(repository);
             vscode.window.showInformationMessage(`Deleted worktree at ${worktree.path}.`);
