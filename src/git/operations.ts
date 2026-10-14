@@ -202,7 +202,7 @@ export class GitOps {
         skip: number = 0,
     ): Promise<Commit[]> {
         const format =
-            ["%H", "%h", "%s", "%an", "%ae", "%aI", "%P", "%D"].join(FIELD_SEP) + RECORD_SEP;
+            ["%H", "%h", "%s", "%an", "%ae", "%cI", "%P", "%D"].join(FIELD_SEP) + RECORD_SEP;
 
         const args = ["log", "--date-order", `--max-count=${maxCount}`, `--pretty=format:${format}`];
         if (skip > 0) {
