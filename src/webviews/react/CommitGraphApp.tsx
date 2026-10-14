@@ -499,11 +499,20 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "deleteWorktree", payload });
     }, []);
 
-    const handleCommitAction = useCallback((action: CommitAction, hash: string) => {
-        const commit = commits.find((item) => item.hash === hash);
-        if (!commit) return;
-        vscode.postMessage({ type: "commitAction", action, hash, repoRoot: commit.repoRoot });
-    }, [commits]);
+    const handleCommitAction = useCallback(
+        (action: CommitAction, hash: string, hashes?: string[]) => {
+            const commit = commits.find((item) => item.hash === hash);
+            if (!commit) return;
+            vscode.postMessage({
+                type: "commitAction",
+                action,
+                hash,
+                repoRoot: commit.repoRoot,
+                hashes,
+            });
+        },
+        [commits],
+    );
 
     const handleOpenDiff = useCallback((commitHash: string, filePath: string, repoRoot: string) => {
         vscode.postMessage({

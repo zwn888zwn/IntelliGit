@@ -865,12 +865,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const hash = payload.hash;
             const repoRoot = "repoRoot" in payload ? payload.repoRoot : requireCurrentRepository().root;
             try {
+                if (action === "squashCommits" && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
+                    throw new Error("The selected repository is no longer available.");
+                }
                 const repository =
                     repositoryService.listRepositories().find((entry) => entry.root === repoRoot) ??
                     requireCurrentRepository();
                 await handleCommitContextAction({
                     action,
                     hash,
+                    hashes: payload.hashes,
                     executor: repository.executor,
                     gitOps: repository.gitOps,
                     repoRoot: repository.root,

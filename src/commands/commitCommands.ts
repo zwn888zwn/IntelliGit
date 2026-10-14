@@ -6,6 +6,7 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
+import { prepareSquash, applySquash } from "../git/squash";
 import type { CommitAction } from "../webviews/react/commitGraphTypes";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
@@ -33,6 +34,7 @@ function assertNever(value: never): never {
 export async function handleCommitContextAction(params: {
     action: CommitAction;
     hash: string;
+    hashes?: string[];
     executor: GitExecutor;
     gitOps: GitOps;
     repoRoot: string;
@@ -49,6 +51,28 @@ export async function handleCommitContextAction(params: {
     const short = validatedHash.slice(0, 8);
 
     switch (action) {
+        case "squashCommits": {
+            const plan = await prepareSquash(executor, params.hashes ?? []);
+            const message = await vscode.window.showInputBox({
+                title: `Squash ${plan.hashes.length} commits`,
+                prompt: "Commit message (staged and working-tree changes will be preserved)",
+                value: plan.message,
+                validateInput: (value) => (value.trim() ? undefined : "Enter a commit message."),
+            });
+            if (!message?.trim()) return;
+            const confirm = await vscode.window.showWarningMessage(
+                `Combine ${plan.hashes.length} unpushed commits into one on ${plan.branch.replace(/^refs\/heads\//, "")}?`,
+                { modal: true },
+                "Squash",
+            );
+            if (confirm !== "Squash") return;
+            await runWithNotificationProgress("Squashing commits...", () =>
+                applySquash(executor, plan, message),
+            );
+            vscode.window.showInformationMessage(`Squashed ${plan.hashes.length} commits.`);
+            await refreshAll();
+            return;
+        }
         case "copyRevision": {
             const copiedRevision = (
                 await executor.run(["rev-parse", "--short", validatedHash])

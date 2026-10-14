@@ -101,6 +101,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         action: CommitAction;
         hash: string;
         repoRoot: string;
+        hashes?: string[];
     }>();
     readonly onCommitAction = this._onCommitAction.event;
 
@@ -232,6 +233,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                                 action: msg.action,
                                 hash: msg.hash,
                                 repoRoot: msg.repoRoot,
+                                hashes: msg.hashes,
                             });
                         } else {
                             this._onCommitAction.fire({

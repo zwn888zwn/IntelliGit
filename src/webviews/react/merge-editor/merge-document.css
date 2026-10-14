@@ -1,0 +1,148 @@
+.merge-document .merge-toolbar {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.merge-document .toolbar-left {
+    flex-wrap: wrap;
+}
+.merge-document label {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    white-space: nowrap;
+}
+.merge-document-labels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    border-bottom: 1px solid var(--merge-border);
+}
+.merge-document-labels span {
+    padding: 7px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.merge-document-panes {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+.merge-document-pane {
+    min-width: 0;
+    height: 100%;
+    overflow: hidden;
+}
+.merge-document .cm-editor {
+    height: 100%;
+    background: var(--vscode-editor-background);
+    color: var(--vscode-editor-foreground);
+}
+.merge-document .cm-editor.cm-focused {
+    outline: none;
+}
+.merge-document .cm-scroller {
+    overflow: auto;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: var(--vscode-editor-font-size, 13px);
+    line-height: 20px;
+}
+.merge-document .cm-content {
+    padding: 4px 0;
+    caret-color: var(--vscode-editorCursor-foreground);
+}
+.merge-document .cm-gutters {
+    background: var(--vscode-editorGutter-background, var(--vscode-editor-background));
+    color: var(--vscode-editorLineNumber-foreground);
+    border-color: var(--merge-border);
+}
+.merge-document .cm-selectionBackground,
+.merge-document .cm-focused .cm-selectionBackground {
+    background: var(--vscode-editor-selectionBackground) !important;
+}
+.merge-document .cm-content ::selection {
+    background: var(--vscode-editor-selectionBackground);
+}
+.merge-document .cm-cursor {
+    border-left-color: var(--vscode-editorCursor-foreground);
+}
+.merge-document .merge-decision-gutter {
+    min-width: 38px;
+}
+.merge-document .merge-decision-gutter button {
+    font: inherit;
+    color: var(--vscode-charts-green, #73c991);
+    background: transparent;
+    border: 0;
+    padding: 0 3px;
+    cursor: pointer;
+    line-height: 20px;
+}
+.merge-document .merge-decision-gutter button:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+}
+.merge-document .merge-line-pending {
+    background: color-mix(
+        in srgb,
+        var(--vscode-editorGutter-deletedBackground, #f14c4c) 15%,
+        transparent
+    );
+}
+.merge-document .merge-line-resolved {
+    background: color-mix(
+        in srgb,
+        var(--vscode-editorGutter-addedBackground, #73c991) 14%,
+        transparent
+    );
+}
+.merge-document .word-diff-change {
+    background: color-mix(
+        in srgb,
+        var(--vscode-editorGutter-modifiedBackground, #cca700) 25%,
+        transparent
+    );
+}
+.merge-document-ribbons {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: hidden;
+}
+.merge-ribbon-pending {
+    fill: color-mix(
+        in srgb,
+        var(--vscode-editorGutter-deletedBackground, #f14c4c) 15%,
+        transparent
+    );
+}
+.merge-ribbon-resolved {
+    fill: color-mix(in srgb, var(--vscode-editorGutter-addedBackground, #73c991) 14%, transparent);
+}
+.merge-document .cm-panels {
+    background: var(--vscode-editorWidget-background);
+    color: var(--vscode-editorWidget-foreground);
+}
+.merge-document .cm-textfield {
+    background: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent);
+}
+.merge-document .cm-button {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: 0;
+}
+.merge-document .merge-footer {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.merge-document button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}

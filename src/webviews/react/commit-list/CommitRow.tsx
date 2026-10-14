@@ -24,7 +24,7 @@ interface Props {
     showAuthor?: boolean;
     showDate?: boolean;
     showHash?: boolean;
-    onSelect: (hash: string) => void;
+    onSelect: (hash: string, event: React.MouseEvent) => void;
     onContextMenu: (event: React.MouseEvent, commit: Commit) => void;
 }
 
@@ -323,7 +323,8 @@ function CommitRowInner({
 
     return (
         <div
-            onClick={() => onSelect(commit.hash)}
+            onClick={(event) => onSelect(commit.hash, event)}
+            aria-selected={isSelected}
             onContextMenu={(event) => onContextMenu(event, commit)}
             style={{
                 "--commit-ref-background": isSelected

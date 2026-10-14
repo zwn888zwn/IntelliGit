@@ -65,7 +65,7 @@ interface Props {
     onRevealCommit?: (hash: string) => void;
     onFilterText: (text: string) => void;
     onLoadMore: () => void | Promise<void>;
-    onCommitAction: (action: CommitAction, hash: string) => void;
+    onCommitAction: (action: CommitAction, hash: string, hashes?: string[]) => void;
 }
 
 export function CommitList({
@@ -101,6 +101,21 @@ export function CommitList({
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
     const [viewportWidth, setViewportWidth] = useState(0);
+    const [selection, setSelection] = useState<string[] | null>(null);
+    const selectionAnchor = useRef<string | null>(null);
+    const selectionFocus = useRef<string | null>(null);
+
+    useEffect(() => {
+        setSelection(null);
+        selectionAnchor.current = null;
+    }, [repository?.root, selectedBranch, filterText, scrollToTopSignal]);
+
+    useEffect(() => {
+        if (selectedHash !== selectionFocus.current) {
+            setSelection(null);
+            selectionAnchor.current = selectedHash;
+        }
+    }, [selectedHash]);
 
     const graph = useMemo(() => computeGraph(commits), [commits]);
     const graphRows = graph.rows;
@@ -237,10 +252,74 @@ export function CommitList({
         [unpushedLookup],
     );
 
-    const handleRowContextMenu = useCallback((event: React.MouseEvent, commit: Commit) => {
-        event.preventDefault();
-        setContextMenu({ x: event.clientX, y: event.clientY, commit });
-    }, []);
+    const selectedCommits = orderedCommits.filter((commit) => selection?.includes(commit.hash));
+    const squashHashes = new Set(selectedCommits.map((commit) => commit.hash));
+    const selectedHead = currentCommitRefs.find((ref) =>
+        selectedCommits.some(
+            (commit) =>
+                commit.repoRoot === ref.repoRoot &&
+                (commit.hash === ref.hash || commit.shortHash === ref.hash),
+        ),
+    );
+    let squashCursor = selectedCommits.find(
+        (commit) => commit.hash === selectedHead?.hash || commit.shortHash === selectedHead?.hash,
+    );
+    let squashLength = 0;
+    while (squashCursor && squashLength < selectedCommits.length) {
+        squashLength++;
+        const parent = squashCursor.parentHashes[0];
+        squashCursor = selectedCommits.find(
+            (commit) =>
+                squashHashes.has(commit.hash) &&
+                (commit.hash === parent || commit.shortHash === parent),
+        );
+    }
+    const canSquashSelection =
+        selectedCommits.length > 1 && squashLength === selectedCommits.length;
+
+    const handleRowSelect = useCallback(
+        (hash: string, event: React.MouseEvent) => {
+            const anchor = orderedCommits.findIndex(
+                (commit) => commit.hash === selectionAnchor.current,
+            );
+            const target = orderedCommits.findIndex((commit) => commit.hash === hash);
+            if (event.shiftKey && anchor >= 0 && target >= 0) {
+                setSelection(
+                    orderedCommits
+                        .slice(Math.min(anchor, target), Math.max(anchor, target) + 1)
+                        .map((commit) => commit.hash),
+                );
+            } else if (event.metaKey || event.ctrlKey) {
+                setSelection((previous) => {
+                    const current = previous ?? (selectedHash ? [selectedHash] : []);
+                    return current.includes(hash)
+                        ? current.filter((item) => item !== hash)
+                        : [...current, hash];
+                });
+                selectionAnchor.current = hash;
+            } else {
+                setSelection([hash]);
+                selectionAnchor.current = hash;
+            }
+            selectionFocus.current = hash;
+            onSelectCommit(hash);
+        },
+        [orderedCommits, selectedHash, onSelectCommit],
+    );
+
+    const handleRowContextMenu = useCallback(
+        (event: React.MouseEvent, commit: Commit) => {
+            event.preventDefault();
+            if (!selection?.includes(commit.hash)) {
+                setSelection([commit.hash]);
+                selectionAnchor.current = commit.hash;
+                selectionFocus.current = commit.hash;
+                onSelectCommit(commit.hash);
+            }
+            setContextMenu({ x: event.clientX, y: event.clientY, commit });
+        },
+        [selection, onSelectCommit],
+    );
 
     const closeContextMenu = useCallback(() => setContextMenu(null), []);
 
@@ -248,9 +327,15 @@ export function CommitList({
         (action: string) => {
             if (!contextMenu) return;
             if (!isCommitAction(action)) return;
-            onCommitAction(action, contextMenu.commit.hash);
+            onCommitAction(
+                action,
+                contextMenu.commit.hash,
+                action === "squashCommits"
+                    ? selectedCommits.map((commit) => commit.hash)
+                    : undefined,
+            );
         },
-        [contextMenu, onCommitAction],
+        [contextMenu, onCommitAction, selectedCommits],
     );
 
     const maybeLoadMore = useCallback(
@@ -531,13 +616,17 @@ export function CommitList({
                                                 graphTextFloor,
                                                 (graphRows[idx]?.occupiedWidth ?? 40) * graphScale,
                                             )}
-                                            isSelected={selectedHash === commit.hash}
+                                            isSelected={
+                                                selection
+                                                    ? selection.includes(commit.hash)
+                                                    : selectedHash === commit.hash
+                                            }
                                             isUnpushed={isUnpushedCommit(commit.hash)}
                                             laneColor={graphRows[idx]?.nodeColor}
                                             showAuthor={showAuthorColumn}
                                             showDate={showDateColumn}
                                             showHash={showHashColumn}
-                                            onSelect={onSelectCommit}
+                                            onSelect={handleRowSelect}
                                             onContextMenu={handleRowContextMenu}
                                         />
                                     </div>
@@ -740,10 +829,27 @@ export function CommitList({
                 <ContextMenu
                     x={contextMenu.x}
                     y={contextMenu.y}
-                    items={getCommitMenuItems(
-                        contextMenu.commit,
-                        isUnpushedCommit(contextMenu.commit.hash),
-                    )}
+                    items={
+                        selectedCommits.length > 1
+                            ? [
+                                  {
+                                      label: `Squash ${selectedCommits.length} Commits...`,
+                                      action: "squashCommits",
+                                      disabled:
+                                          !canSquashSelection ||
+                                          selectedCommits.some(
+                                              (commit) =>
+                                                  !isUnpushedCommit(commit.hash) ||
+                                                  commit.parentHashes.length !== 1 ||
+                                                  commit.repoRoot !== contextMenu.commit.repoRoot,
+                                          ),
+                                  },
+                              ]
+                            : getCommitMenuItems(
+                                  contextMenu.commit,
+                                  isUnpushedCommit(contextMenu.commit.hash),
+                              )
+                    }
                     onSelect={handleContextMenuAction}
                     onClose={closeContextMenu}
                     minWidth={320}

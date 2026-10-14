@@ -48,6 +48,7 @@ export const COMMIT_ACTION_VALUES = [
     "pushAllUpToHere",
     "undoCommit",
     "editCommitMessage",
+    "squashCommits",
     "dropCommit",
     "interactiveRebaseFromHere",
     "newBranch",
@@ -116,7 +117,7 @@ export type CommitGraphOutbound =
           refName?: string;
           allRepositories?: boolean;
       }
-    | { type: "commitAction"; action: CommitAction; hash: string; repoRoot: string }
+    | { type: "commitAction"; action: CommitAction; hash: string; repoRoot: string; hashes?: string[] }
     | { type: "openCommitFileDiff"; commitHash: string; filePath: string; repoRoot: string }
     | { type: "openCommitChanges"; commitHash: string; repoRoot: string };
 

@@ -1040,46 +1040,67 @@ describe("CommitInfoApp integration", () => {
 });
 
 describe("MergeEditorApp integration", () => {
-    it("requests native definition navigation on modifier-click", async () => {
+    async function openMerge(segments: unknown[]) {
         vi.resetModules();
         const vscode = installVsCodeMock();
         createRootHost();
-
-        await import("../../src/webviews/react/merge-editor/MergeEditorApp");
+        await act(async () => {
+            await import("../../src/webviews/react/merge-editor/MergeEditorApp");
+        });
         await flush();
-
-        const lineText = "const value = helper();";
-        act(() => {
+        act(() =>
             window.dispatchEvent(
                 new MessageEvent("message", {
                     data: {
                         type: "setConflictData",
                         data: {
-                            filePath: "src/navigation.ts",
+                            filePath: "src/file.ts",
                             oursLabel: "main",
                             theirsLabel: "feature",
-                            segments: [{ type: "common", lines: [lineText] }],
+                            eol: "\n",
+                            hasTrailingNewline: true,
+                            segments,
                         },
                     },
                 }),
-            );
-        });
+            ),
+        );
         await flush();
+        const { EditorView } = await import("@codemirror/view");
+        const views = Array.from(document.querySelectorAll(".cm-editor"), (element) =>
+            EditorView.findFromDOM(element as HTMLElement)!,
+        );
+        return { vscode, views };
+    }
+    const conflict = {
+        type: "conflict",
+        id: 0,
+        changeKind: "conflict",
+        oursLines: ["ours"],
+        theirsLines: ["theirs"],
+        baseLines: ["base"],
+    };
 
-        const content = document.querySelector(
-            ".col-left .real-code-line .code-line-content",
-        ) as HTMLElement;
-        const helperSpan = Array.from(content.querySelectorAll("span")).find(
-            (span) => span.textContent === "helper",
-        ) as HTMLSpanElement;
-        const helperText = helperSpan.firstChild as Text;
-        Object.defineProperty(document, "caretPositionFromPoint", {
-            configurable: true,
-            value: vi.fn(() => ({ offsetNode: helperText, offset: 1 })),
-        });
+    it("keeps every conflict resolvable after deleting across their shared result range", async () => {
+        const { views } = await openMerge([
+            conflict,
+            { type: "common", lines: ["middle"] },
+            { ...conflict, id: 1 },
+        ]);
+        act(() => views[1].dispatch({ changes: { from: 0, to: views[1].state.doc.length } }));
+        expect(views[1].state.doc.toString()).toBe("");
+        expect(document.querySelectorAll('[title="Mark this conflict resolved"]')).toHaveLength(2);
+        fireClick(document.querySelector('[title="Mark this conflict resolved"]'));
+        fireClick(document.querySelector('[title="Mark this conflict resolved"]'));
+        expect(Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.includes("Apply (2/2)"))?.disabled).toBe(false);
+    });
 
-        act(() => {
-            helperSpan.dispatchEvent(
+    it("requests native definition navigation on modifier-click", async () => {
+        const lineText = "const value = helper();";
+        const { vscode, views } = await openMerge([{ type: "common", lines: [lineText] }]);
+        vi.spyOn(views[0], "posAtCoords").mockReturnValue(lineText.indexOf("helper") + 1);
+        act(() =>
+            views[0].contentDOM.dispatchEvent(
                 new MouseEvent("click", {
                     bubbles: true,
                     cancelable: true,
@@ -1087,9 +1108,8 @@ describe("MergeEditorApp integration", () => {
                     clientX: 1,
                     clientY: 1,
                 }),
-            );
-        });
-
+            ),
+        );
         expect(vscode.postMessage).toHaveBeenCalledWith({
             type: "goToDefinition",
             pane: "left",
@@ -1097,231 +1117,70 @@ describe("MergeEditorApp integration", () => {
             character: lineText.indexOf("helper") + 1,
             lineText,
         });
-        Reflect.deleteProperty(document, "caretPositionFromPoint");
     });
 
-    it("renders one-sided insertions as auto-resolved connector bands", async () => {
-        vi.resetModules();
-        const vscode = installVsCodeMock();
-        createRootHost();
-
-        await import("../../src/webviews/react/merge-editor/MergeEditorApp");
-        await flush();
-
-        act(() => {
-            window.dispatchEvent(
-                new MessageEvent("message", {
-                    data: {
-                        type: "setConflictData",
-                        data: {
-                            filePath: "src/non-conflicting.ts",
-                            oursLabel: "main",
-                            theirsLabel: "feature",
-                            eol: "\n",
-                            hasTrailingNewline: true,
-                            segments: [
-                                { type: "common", lines: ["before"] },
-                                {
-                                    type: "conflict",
-                                    id: 0,
-                                    changeKind: "theirs-only",
-                                    oursLines: [],
-                                    theirsLines: ["right"],
-                                    baseLines: [],
-                                },
-                                {
-                                    type: "conflict",
-                                    id: 1,
-                                    changeKind: "conflict",
-                                    oursLines: ["ours"],
-                                    theirsLines: ["theirs"],
-                                    baseLines: ["base"],
-                                },
-                            ],
-                        },
-                    },
-                }),
-            );
-        });
-        await flush();
-
-        expect(document.querySelectorAll(".merge-col")).toHaveLength(3);
-        expect(document.querySelector(".merge-connectors")).not.toBeNull();
-        expect(document.querySelector(".merge-connector.variant-insertion")).not.toBeNull();
-        expect(
-            document.querySelector(".segment-conflict.variant-insertion.resolved"),
-        ).not.toBeNull();
-        expect(document.querySelector(".segment-conflict.change-conflict.unresolved")).not.toBeNull();
-        expect(document.querySelector(".col-middle")?.textContent).toContain("right");
-
-        const applyButton = Array.from(document.querySelectorAll("button")).find((button) =>
+    it("renders three full documents with automatic changes and unresolved conflict controls", async () => {
+        const { views } = await openMerge([
+            { type: "common", lines: ["before"] },
+            {
+                type: "conflict",
+                id: 1,
+                changeKind: "theirs-only",
+                oursLines: [],
+                theirsLines: ["right"],
+                baseLines: [],
+            },
+            conflict,
+        ]);
+        expect(views).toHaveLength(3);
+        expect(views[1].state.doc.toString()).toBe("before\nright\nbase\n");
+        expect(document.querySelector(".merge-document-ribbons")).not.toBeNull();
+        expect(document.querySelector(".merge-line-resolved")).not.toBeNull();
+        expect(document.querySelector(".merge-line-pending")).not.toBeNull();
+        const apply = Array.from(document.querySelectorAll("button")).find((button) =>
             button.textContent?.includes("Apply (0/1)"),
-        ) as HTMLButtonElement;
-        expect(applyButton.disabled).toBe(true);
-        expect(vscode.postMessage).not.toHaveBeenCalledWith(
-            expect.objectContaining({ type: "applyResolution" }),
         );
+        expect(apply?.disabled).toBe(true);
     });
 
-    it("allows editing the result pane and applying custom content", async () => {
-        vi.resetModules();
-        const vscode = installVsCodeMock();
-        createRootHost();
-
-        await import("../../src/webviews/react/merge-editor/MergeEditorApp");
-        await flush();
-        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "ready" });
-
-        act(() => {
+    it("edits common code and conflict text, confirms discarding edits, and applies the full result", async () => {
+        const { vscode, views } = await openMerge([
+            { type: "common", lines: ["header"] },
+            conflict,
+        ]);
+        act(() =>
+            views[1].dispatch({
+                changes: {
+                    from: 0,
+                    to: views[1].state.doc.length,
+                    insert: "new header\nmanual result\n",
+                },
+            }),
+        );
+        const sides = document.querySelectorAll(".merge-document-pane");
+        fireClick(sides[0].querySelector('[title="Discard this side"]'));
+        fireClick(sides[2].querySelector('[title="Discard this side"]'));
+        const request = vscode.postMessage.mock.calls
+            .map(([message]) => message)
+            .find((message) => message.type === "confirm");
+        expect(request).toBeTruthy();
+        expect(views[1].state.doc.toString()).toBe("new header\nmanual result\n");
+        act(() =>
             window.dispatchEvent(
                 new MessageEvent("message", {
-                    data: {
-                        type: "setConflictData",
-                        data: {
-                            filePath: "src/conflicted.ts",
-                            oursLabel: "main",
-                            theirsLabel: "feature",
-                            eol: "\n",
-                            hasTrailingNewline: true,
-                            segments: [
-                                {
-                                    type: "conflict",
-                                    id: 0,
-                                    changeKind: "conflict",
-                                    oursLines: ["ours"],
-                                    theirsLines: ["theirs"],
-                                    baseLines: ["base"],
-                                },
-                            ],
-                        },
-                    },
+                    data: { type: "confirmResult", requestId: request.requestId, confirmed: false },
                 }),
-            );
-        });
-        await flush();
-
-        const applyButton = Array.from(document.querySelectorAll("button")).find((button) =>
-            button.textContent?.includes("Apply (0/1)"),
-        ) as HTMLButtonElement;
-        expect(applyButton.disabled).toBe(true);
-
-        const editableResult = document.querySelector(".result-editable") as HTMLDivElement;
-        act(() => {
-            editableResult.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-        });
-        await flush();
-
-        const resultEditor = document.querySelector(".result-edit-textarea") as HTMLTextAreaElement;
-        expect(resultEditor.style.height).toBe("20px");
-        const horizontalScroll = document.querySelector(
-            ".merge-horizontal-scroll",
-        ) as HTMLDivElement;
-        const horizontalScrollInner = document.querySelector(
-            ".merge-horizontal-scroll-inner",
-        ) as HTMLDivElement;
-        horizontalScroll.hidden = true;
-        Object.defineProperties(horizontalScroll, {
-            clientWidth: {
-                configurable: true,
-                get: () => (horizontalScroll.hidden ? 0 : 100),
-            },
-        });
-        Object.defineProperties(horizontalScrollInner, {
-            offsetWidth: {
-                configurable: true,
-                get: () => (horizontalScroll.hidden ? 0 : 300),
-            },
-        });
-        act(() => {
-            window.dispatchEvent(new Event("resize"));
-        });
-        expect(horizontalScroll.hidden).toBe(false);
-
-        Object.defineProperties(resultEditor, {
-            scrollWidth: { configurable: true, value: 300 },
-            clientWidth: { configurable: true, value: 100 },
-        });
-        act(() => {
-            horizontalScroll.scrollLeft = 45;
-            horizontalScroll.dispatchEvent(new Event("scroll", { bubbles: true }));
-        });
-        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-        expect(resultEditor.scrollLeft).toBe(45);
-
-        act(() => {
-            resultEditor.scrollLeft = 70;
-            resultEditor.dispatchEvent(new Event("scroll", { bubbles: true }));
-        });
-        await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
-        expect(horizontalScroll.scrollLeft).toBe(70);
-
-        fireInput(resultEditor, "manual\nresult");
-        await flush();
-        expect(resultEditor.style.height).toBe("40px");
-        act(() => {
-            resultEditor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-        });
-        await flush();
-
-        const discardLeft = document.querySelector(
-            'button[aria-label="Ignore left block"]',
-        ) as HTMLButtonElement;
-        fireClick(discardLeft);
-        await flush();
-        expect(document.querySelector(".col-left .conflict-column.dismissed")).not.toBeNull();
-        expect(document.querySelector('button[aria-label="Ignore left block"]')).toBeNull();
-        expect(document.querySelector(".col-middle")?.textContent).toContain("manual");
-
-        const discardRight = document.querySelector(
-            'button[aria-label="Ignore right block"]',
-        ) as HTMLButtonElement;
-        fireClick(discardRight);
-        await flush();
-        expect(document.querySelector(".col-right .conflict-column.dismissed")).not.toBeNull();
-        expect(document.querySelector(".col-middle")?.textContent).toContain("manual");
-
-        const resetManualEdit = document.querySelector(
-            'button[aria-label="Reset this block to unresolved"]',
-        ) as HTMLButtonElement;
-        fireClick(resetManualEdit);
-        await flush();
-        expect(document.querySelector(".col-middle")?.textContent).toContain("base");
-        expect(document.querySelector(".col-middle")?.textContent).not.toContain("manual");
-        expect(document.querySelector('button[aria-label="Ignore left block"]')).not.toBeNull();
-        expect(document.querySelector('button[aria-label="Ignore right block"]')).not.toBeNull();
-        expect(applyButton.disabled).toBe(true);
-
-        const restoredResult = document.querySelector(".result-editable") as HTMLDivElement;
-        act(() => {
-            restoredResult.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-        });
-        await flush();
-        const restoredEditor = document.querySelector(
-            ".result-edit-textarea",
-        ) as HTMLTextAreaElement;
-        fireInput(restoredEditor, "manual\nresult");
-        await flush();
-        act(() => {
-            restoredEditor.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-        });
-        await flush();
-
-        expect(applyButton.disabled).toBe(true);
-        const markResolved = document.querySelector(
-            'button[aria-label="Mark edited block as resolved"]',
-        ) as HTMLButtonElement;
-        fireClick(markResolved);
-        await flush();
-
-        const enabledApplyButton = Array.from(document.querySelectorAll("button")).find((button) =>
+            ),
+        );
+        fireClick(document.querySelector('[title="Mark this conflict resolved"]'));
+        const apply = Array.from(document.querySelectorAll("button")).find((button) =>
             button.textContent?.includes("Apply (1/1)"),
-        ) as HTMLButtonElement;
-        expect(enabledApplyButton.disabled).toBe(false);
-        fireClick(enabledApplyButton);
-
+        );
+        expect(apply?.disabled).toBe(false);
+        fireClick(apply!);
         expect(vscode.postMessage).toHaveBeenCalledWith({
             type: "applyResolution",
-            content: "manual\nresult\n",
+            content: "new header\nmanual result\n",
             mode: "apply",
         });
     });
