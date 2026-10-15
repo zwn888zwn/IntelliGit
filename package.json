@@ -529,6 +529,22 @@
         "configuration": {
             "title": "IntelliGit",
             "properties": {
+                "intelligit.pipeline.providers": {
+                    "type": "array",
+                    "default": [],
+                    "scope": "application",
+                    "markdownDescription": "Git services used to read commit CI status. Configure in User Settings. Only matching remotes with a non-empty token are queried. Tokens are stored as plain text in this setting. GitLab needs `read_api`; GitHub fine-grained tokens need repository Checks and Commit statuses read access.",
+                    "items": {
+                        "type": "object",
+                        "required": ["type", "url", "token"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "type": { "type": "string", "enum": ["github", "gitlab"] },
+                            "url": { "type": "string", "description": "HTTPS service URL, e.g. https://github.com or https://gitlab.company.com." },
+                            "token": { "type": "string", "description": "Access token for this service instance." }
+                        }
+                    }
+                },
                 "intelligit.jetbrainsMergeTool.path": {
                     "type": "string",
                     "default": "",

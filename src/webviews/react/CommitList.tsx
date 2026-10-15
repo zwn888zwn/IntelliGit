@@ -4,7 +4,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
-import type { Commit, RepositoryContextInfo } from "../../types";
+import type { Commit, PipelineStatus, RepositoryContextInfo } from "../../types";
 import { computeGraph, LANE_WIDTH, ROW_HEIGHT } from "./graph";
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getCommitMenuItems } from "./commit-list/commitMenu";
@@ -27,6 +27,7 @@ import {
     LOADING_MORE_STYLE,
     META_COL_GAP,
     ROOT_STYLE,
+    ROW_SIDE_PADDING,
     SCROLL_VIEWPORT_STYLE,
 } from "./commit-list/styles";
 
@@ -49,6 +50,8 @@ function commitGraphKey(repoRoot: string, hash: string): string {
 
 interface Props {
     commits: Commit[];
+    pipelineStatuses?: Record<string, PipelineStatus | undefined>;
+    onPipelineCommitsChange?: (commits: Array<{ repoRoot: string; hash: string }>) => void;
     repositories: RepositoryContextInfo[];
     repository: RepositoryContextInfo | null;
     selectedHash: string | null;
@@ -70,6 +73,8 @@ interface Props {
 
 export function CommitList({
     commits,
+    pipelineStatuses,
+    onPipelineCommitsChange,
     repositories,
     repository,
     selectedHash,
@@ -101,6 +106,7 @@ export function CommitList({
     const [scrollTop, setScrollTop] = useState(0);
     const [viewportHeight, setViewportHeight] = useState(0);
     const [viewportWidth, setViewportWidth] = useState(0);
+    const [scrollbarWidth, setScrollbarWidth] = useState(0);
     const [selection, setSelection] = useState<string[] | null>(null);
     const selectionAnchor = useRef<string | null>(null);
     const selectionFocus = useRef<string | null>(null);
@@ -175,6 +181,7 @@ export function CommitList({
     const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
     const visibleArrowMarkers = graph.arrowMarkers;
     const hasMeasuredWidth = viewportWidth > 0;
+    const showPipelineColumn = commits.some((commit) => Boolean(pipelineStatuses?.[commitGraphKey(commit.repoRoot, commit.hash)]));
     const showDateColumn = !hasMeasuredWidth || viewportWidth >= DATE_COLUMN_MIN_WIDTH;
     const showRepositoryScope = !hasMeasuredWidth || viewportWidth >= REPOSITORY_SCOPE_MIN_WIDTH;
     const showAuthorColumn = !hasMeasuredWidth || viewportWidth >= AUTHOR_COLUMN_MIN_WIDTH;
@@ -214,6 +221,7 @@ export function CommitList({
         const updateSize = () => {
             setViewportHeight(viewport.clientHeight);
             setViewportWidth(viewport.clientWidth);
+            setScrollbarWidth(Math.max(0, viewport.offsetWidth - viewport.clientWidth));
         };
         updateSize();
 
@@ -393,6 +401,18 @@ export function CommitList({
     );
 
     useEffect(() => {
+        // Report the rendered range (visible rows plus eight rows on either side).
+        // The host cancels the previous scan immediately and debounces the next one.
+        onPipelineCommitsChange?.(viewportHeight > 0
+                ? visibleCommits.map(({ repoRoot, hash }) => ({ repoRoot, hash }))
+                : []);
+    }, [visibleCommits, viewportHeight, onPipelineCommitsChange]);
+
+    useEffect(() => () => {
+        onPipelineCommitsChange?.([]);
+    }, [onPipelineCommitsChange]);
+
+    useEffect(() => {
         maybeLoadMore(visibleRange.end);
     }, [maybeLoadMore, visibleRange.end]);
 
@@ -422,6 +442,9 @@ export function CommitList({
 
     return (
         <div style={ROOT_STYLE}>
+            <style>{`@keyframes intelligit-pipeline-spin { to { transform: rotate(360deg); } }
+                .intelligit-pipeline-running { animation: intelligit-pipeline-spin 1s linear infinite; }
+                @media (prefers-reduced-motion: reduce) { .intelligit-pipeline-running { animation: none; } }`}</style>
             <div style={FILTER_BAR_STYLE}>
                 <LuSearch size={16} style={FILTER_ICON_STYLE} />
                 <div style={FILTER_INPUT_WRAP_STYLE}>
@@ -468,7 +491,7 @@ export function CommitList({
                 )}
             </div>
 
-            <div style={headerRowStyle(headerGraphWidth)}>
+            <div style={{ ...headerRowStyle(headerGraphWidth), paddingRight: ROW_SIDE_PADDING + scrollbarWidth }}>
                 <span style={{ flex: 1 }}>Commit</span>
                 {showAuthorColumn && (
                     <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
@@ -495,6 +518,9 @@ export function CommitList({
                     >
                         Hash
                     </span>
+                )}
+                {showPipelineColumn && (
+                    <span style={{ width: 22, marginLeft: 2, textAlign: "center", flexShrink: 0 }} title="Pipeline / checks">CI</span>
                 )}
             </div>
 
@@ -626,6 +652,8 @@ export function CommitList({
                                             showAuthor={showAuthorColumn}
                                             showDate={showDateColumn}
                                             showHash={showHashColumn}
+                                            showPipeline={showPipelineColumn}
+                                            pipeline={pipelineStatuses?.[commitGraphKey(commit.repoRoot, commit.hash)]}
                                             onSelect={handleRowSelect}
                                             onContextMenu={handleRowContextMenu}
                                         />

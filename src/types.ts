@@ -67,6 +67,12 @@ export interface ThemeIconFont {
     style?: string;
 }
 
+export interface PipelineStatus {
+    state: "success" | "failed" | "running" | "pending" | "canceled" | "skipped" | "unknown";
+    title: string;
+    url?: string;
+}
+
 export interface Commit {
     repoId: string;
     repoRoot: string;

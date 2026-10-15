@@ -13,6 +13,7 @@ import type {
     CommitDetail,
     GitTag,
     GitWorktree,
+    PipelineStatus,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -102,6 +103,10 @@ function useColumnDrag(
 
 function App(): React.ReactElement {
     const [commits, setCommits] = useState<Commit[]>([]);
+    const [pipelineStatuses, setPipelineStatuses] = useState<Record<string, PipelineStatus | undefined>>({});
+    const handlePipelineCommitsChange = useCallback((commits: Array<{ repoRoot: string; hash: string }>) => {
+        vscode.postMessage({ type: "setPipelineCommits", commits });
+    }, []);
     const [branches, setBranches] = useState<Branch[]>([]);
     const [repositoryBranches, setRepositoryBranches] = useState<Record<string, Branch[]>>({});
     const [repositoryTags, setRepositoryTags] = useState<Record<string, GitTag[]>>({});
@@ -232,6 +237,16 @@ function App(): React.ReactElement {
         const handler = (event: MessageEvent<CommitGraphInbound>) => {
             const data = event.data;
             switch (data.type) {
+                case "setPipelineStatuses": {
+                    setPipelineStatuses((previous) => {
+                        const next = data.reset ? {} : { ...previous };
+                        for (const item of data.statuses) {
+                            next[`${item.repoRoot}\u0000${item.hash}`] = item.pipeline;
+                        }
+                        return next;
+                    });
+                    break;
+                }
                 case "loadCommits":
                     loadingMore.current = false;
                     if (data.append) {
@@ -586,6 +601,8 @@ function App(): React.ReactElement {
                     <div style={{ flex: 1, overflow: "hidden", minWidth: 0, minHeight: 0 }}>
                         <CommitList
                             commits={commits}
+                            pipelineStatuses={pipelineStatuses}
+                            onPipelineCommitsChange={handlePipelineCommitsChange}
                             repositories={repositories}
                             repository={repository}
                             selectedHash={selectedHash}

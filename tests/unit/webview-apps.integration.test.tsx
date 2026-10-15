@@ -358,6 +358,62 @@ describe("CommitPanelApp integration", () => {
 });
 
 describe("CommitGraphApp integration", () => {
+    it("keeps cached CI visible during refresh and repository switches until updated or reset", async () => {
+        vi.resetModules();
+        installVsCodeMock();
+        createRootHost();
+        await import("../../src/webviews/react/CommitGraphApp");
+        await flush();
+
+        const hash = "a".repeat(40);
+        const repoA = { repoId: "a", name: "repo-a", root: "/repo-a", color: "#4CAF50" };
+        const repoB = { repoId: "b", name: "repo-b", root: "/repo-b", color: "#2196F3" };
+        const send = (data: unknown) => act(() => {
+            window.dispatchEvent(new MessageEvent("message", { data }));
+        });
+        const load = (repository: typeof repoA) => {
+            send({ type: "setRepositoryContext", repository });
+            send({
+                type: "loadCommits", append: false, hasMore: false, unpushedHashes: [],
+                commits: [{ hash, shortHash: hash.slice(0, 8), repoRoot: repository.root, repoId: repository.repoId,
+                    message: "commit", author: "test", email: "test@example.test", date: "2026-10-15T00:00:00Z",
+                    refs: [], parentHashes: [] }],
+            });
+        };
+        const update = (repository: typeof repoA, state: string, title: string) => send({
+            type: "setPipelineStatuses", statuses: [{ repoRoot: repository.root, hash,
+                pipeline: { state, title, url: "https://example.test/pipeline/1" } }],
+        });
+        const column = () => document.querySelector('[title="Pipeline / checks"]');
+        const indicator = (title: string) => document.querySelector(`button[title="${title}"]`);
+
+        load(repoA);
+        update(repoA, "running", "CI running");
+        expect(column()).not.toBeNull();
+        load(repoA);
+        expect(column()).not.toBeNull();
+        expect(indicator("CI running")).not.toBeNull();
+        update(repoA, "success", "CI passed");
+        expect(indicator("CI running")).toBeNull();
+        expect(indicator("CI passed")).not.toBeNull();
+
+        load(repoB);
+        expect(indicator("CI passed")).toBeNull();
+        update(repoB, "failed", "CI failed");
+        load(repoA);
+        expect(column()).not.toBeNull();
+        expect(indicator("CI passed")).not.toBeNull();
+        expect(indicator("CI failed")).toBeNull();
+        load(repoB);
+        expect(column()).not.toBeNull();
+        expect(indicator("CI failed")).not.toBeNull();
+
+        send({ type: "setPipelineStatuses", reset: true, statuses: [] });
+        expect(column()).toBeNull();
+        load(repoA);
+        expect(indicator("CI passed")).toBeNull();
+    });
+
     it("renders worktrees and sends open/delete messages", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();

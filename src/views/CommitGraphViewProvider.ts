@@ -30,6 +30,7 @@ import { registerThemeChangeListeners, disposeAll } from "./shared/themeListener
 import { buildWebviewShellHtml } from "./webviewHtml";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
 import { parseWorktreeListPorcelain } from "../services/worktreeService";
+import { PipelineService } from "../services/pipelineService";
 
 interface CommitGraphRefreshOptions {
     reset?: boolean;
@@ -60,6 +61,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private commitDetailSeq = 0;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
+    private readonly pipelines = new PipelineService();
+    private pipelineTimer?: ReturnType<typeof setTimeout>;
+    private pipelineSequence = 0;
+    private pipelineCommitKeys = new Set<string>();
+    private pipelineLinks = new Map<string, string>();
 
     private readonly _onCommitSelected = new vscode.EventEmitter<{ hash: string; repoRoot: string }>();
     readonly onCommitSelected = this._onCommitSelected.event;
@@ -131,6 +137,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken,
     ): void {
+        this.stopPipelines();
         this.disposeThemeChangeDisposables();
         this.iconTheme.dispose();
         this.view = webviewView;
@@ -142,9 +149,22 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         };
         this.iconTheme.attachWebview(webviewView.webview);
         this.registerThemeChangeListeners();
+        this.pipelines.configure(vscode.workspace.getConfiguration("intelligit").get("pipeline.providers", []));
+        this.themeChangeDisposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
+            if (!event.affectsConfiguration("intelligit.pipeline.providers")) return;
+            this.pipelines.configure(vscode.workspace.getConfiguration("intelligit").get("pipeline.providers", []));
+            this.pipelineLinks.clear();
+            this.postToWebview({ type: "setPipelineStatuses", reset: true, statuses: [] });
+            this.refreshPipelines();
+        }));
+        this.themeChangeDisposables.push(webviewView.onDidChangeVisibility(() => {
+            this.stopPipelines();
+            if (webviewView.visible) this.refreshPipelines();
+        }));
 
         webviewView.onDidDispose(() => {
             if (this.view === webviewView) {
+                this.stopPipelines();
                 this.view = undefined;
                 this.webviewReady = false;
                 this.iconTheme.dispose();
@@ -157,6 +177,18 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (msg: CommitGraphOutbound) => {
             try {
                 switch (msg.type) {
+                    case "setPipelineCommits":
+                        this.stopPipelines();
+                        this.pipelineCommitKeys = new Set(msg.commits.map(({ repoRoot, hash }) => `${repoRoot}\u0000${hash}`));
+                        if (this.pipelineCommitKeys.size > 0) {
+                            this.pipelineTimer = setTimeout(() => this.refreshPipelines(), 250);
+                        }
+                        break;
+                    case "openPipeline": {
+                        const url = this.pipelineLinks.get(`${msg.repoRoot}\u0000${msg.hash}`);
+                        if (url) await vscode.env.openExternal(vscode.Uri.parse(url));
+                        break;
+                    }
                     case "ready":
                         this.webviewReady = true;
                         await this.iconTheme.initIconThemeData();
@@ -899,7 +931,40 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     private postToWebview(msg: CommitGraphInbound): void {
+        if (msg.type === "loadCommits") {
+            this.stopPipelines();
+            this.pipelineCommitKeys.clear();
+        }
         this.view?.webview.postMessage(msg);
+    }
+
+    private stopPipelines(): void {
+        this.pipelineSequence++;
+        clearTimeout(this.pipelineTimer);
+        this.pipelines.stop();
+    }
+
+    private refreshPipelines(): void {
+        this.stopPipelines();
+        if (!this.webviewReady || !this.view?.visible || !this.pipelines.enabled) return;
+        const commits = this.loadedCommits.filter((commit) => this.pipelineCommitKeys.has(`${commit.repoRoot}\u0000${commit.hash}`));
+        if (!commits.length) return;
+        const sequence = this.pipelineSequence;
+        void this.pipelines.scan(commits, this.getRepositories(), (statuses) => {
+            if (sequence !== this.pipelineSequence) return;
+            for (const item of statuses) {
+                const key = `${item.repoRoot}\u0000${item.hash}`;
+                if (item.pipeline?.url) this.pipelineLinks.set(key, item.pipeline.url);
+                else this.pipelineLinks.delete(key);
+            }
+            this.postToWebview({ type: "setPipelineStatuses", statuses });
+        }).catch(() => {
+            // CI failures must not interrupt the local Git log.
+        }).finally(() => {
+            if (sequence === this.pipelineSequence) {
+                this.pipelineTimer = setTimeout(() => this.refreshPipelines(), 30_000);
+            }
+        });
     }
 
     private postCommitDetailState(): void {
@@ -940,6 +1005,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     dispose(): void {
+        this.stopPipelines();
         this.iconTheme.dispose();
         this.disposeThemeChangeDisposables();
         this._onCommitSelected.dispose();

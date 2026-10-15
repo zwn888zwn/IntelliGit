@@ -7,6 +7,7 @@ import type {
     CommitDetail,
     GitTag,
     GitWorktree,
+    PipelineStatus,
     RepositoryContextInfo,
     ThemeFolderIconMap,
     ThemeIconFont,
@@ -93,6 +94,8 @@ export function isCommitAction(value: string): value is CommitAction {
 
 /** Messages sent FROM the webview TO the extension host. */
 export type CommitGraphOutbound =
+    | { type: "setPipelineCommits"; commits: Array<{ repoRoot: string; hash: string }> }
+    | { type: "openPipeline"; repoRoot: string; hash: string }
     | { type: "ready" }
     | { type: "selectCommit"; hash: string; repoRoot: string }
     | { type: "revealCommit"; hash: string }
@@ -123,6 +126,11 @@ export type CommitGraphOutbound =
 
 /** Messages sent FROM the extension host TO the webview. */
 export type CommitGraphInbound =
+    | {
+          type: "setPipelineStatuses";
+          reset?: boolean;
+          statuses: Array<{ repoRoot: string; hash: string; pipeline?: PipelineStatus }>;
+      }
     | {
           type: "loadCommits";
           commits: Commit[];

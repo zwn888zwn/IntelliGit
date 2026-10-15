@@ -98,6 +98,7 @@ const workspaceState: {
 const vscodeMock = {
     EventEmitter: FakeEventEmitter,
     Disposable: FakeDisposable,
+    env: { openExternal: vi.fn(async () => true) },
     TreeItem: FakeTreeItem,
     ThemeIcon: FakeThemeIcon,
     ThemeColor: FakeThemeColor,
@@ -110,6 +111,7 @@ const vscodeMock = {
     },
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
     Uri: {
+        parse: (value: string) => ({ toString: () => value }),
         from: ({
             scheme,
             path,
@@ -222,6 +224,8 @@ function createWebviewView() {
 
     const view: Record<string, unknown> = {
         webview,
+        visible: true,
+        onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
         badge: undefined as { tooltip: string; value: number } | undefined,
         description: undefined as string | undefined,
         onDidDispose: vi.fn((cb: () => void) => {
@@ -482,6 +486,81 @@ describe("view providers integration", () => {
         expect(postMessageSpy).toHaveBeenCalledWith({ type: "revealCommit", hash: "target123" });
         expect(showErrorMessage).toHaveBeenCalledWith("Commit graph error: detail failed");
         provider.dispose();
+    });
+
+    it("CommitGraphViewProvider queries only debounced visible commits and cancels obsolete requests", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        vi.useFakeTimers();
+        const originalConfiguration = vscodeMock.workspace.getConfiguration.getMockImplementation()!;
+        vscodeMock.workspace.getConfiguration.mockImplementation(() => ({
+            get: vi.fn((key: string, defaultValue?: unknown) => key === "pipeline.providers"
+                ? [{ type: "gitlab", url: "https://gitlab.example.test", token: "test-token" }] : defaultValue),
+        }));
+        const fetcher = vi.fn(async (_url: string, _options: RequestInit) => new Response(JSON.stringify([{ id: 42, status: "running" }])));
+        vi.stubGlobal("fetch", fetcher);
+        const gitOps = makeGitOpsMock();
+        gitOps.getUnpushedCommitHashes.mockResolvedValue([]);
+        const commits = Array.from({ length: 500 }, (_, index) => ({
+            hash: index === 0 ? "abc1234" : `def${index}`, shortHash: "abc1234", repoRoot: "/repo", repoId: "repo",
+            message: "commit", author: "test", email: "test@example.test", date: "2026-10-14T00:00:00Z", parentHashes: [], refs: [],
+        }));
+        gitOps.getLog.mockResolvedValue(commits);
+        const entry = { root: "/repo", info: testRepository, gitOps,
+            executor: { run: vi.fn(async () => "origin\tgit@gitlab.example.test:team/repo.git (fetch)") } };
+        const provider = new CommitGraphViewProvider({ fsPath: "/ext", path: "/ext" } as never,
+            gitOps as never, () => [entry] as never);
+        const webview = createWebviewView();
+        const report = (hashes: string[]) => webview.send({ type: "setPipelineCommits",
+            commits: hashes.map((hash) => ({ repoRoot: "/repo", hash })) });
+        try {
+            provider.setRepositoryContext(testRepository);
+            provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+            await webview.send({ type: "ready" });
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(fetcher).not.toHaveBeenCalled();
+
+            await report(["def1", "def2"]);
+            await vi.advanceTimersByTimeAsync(100);
+            await report(["abc1234", "not-a-loaded-commit"]);
+            await vi.advanceTimersByTimeAsync(249);
+            expect(fetcher).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(fetcher).toHaveBeenCalledTimes(1);
+            expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
+                type: "setPipelineStatuses", statuses: [expect.objectContaining({ repoRoot: "/repo", hash: "abc1234",
+                    pipeline: expect.objectContaining({ state: "running" }) })],
+            }));
+
+            await vi.advanceTimersByTimeAsync(30_000);
+            expect(fetcher).toHaveBeenCalledTimes(2);
+            expect(fetcher.mock.calls.every(([url]) => new URL(url).searchParams.get("sha") === "abc1234")).toBe(true);
+            await webview.send({ type: "openPipeline", repoRoot: "/repo", hash: "unknown", url: "https://untrusted.test" });
+            expect(vscodeMock.env.openExternal).not.toHaveBeenCalled();
+            await webview.send({ type: "openPipeline", repoRoot: "/repo", hash: "abc1234" });
+            expect(vscodeMock.env.openExternal.mock.calls[0][0].toString())
+                .toBe("https://gitlab.example.test/team/repo/-/pipelines/42");
+
+            let finish!: (response: Response) => void;
+            fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+            await report(["def1"]);
+            await vi.advanceTimersByTimeAsync(250);
+            expect(fetcher).toHaveBeenCalledTimes(3);
+            const signal = fetcher.mock.calls[2][1].signal!;
+            expect(signal.aborted).toBe(false);
+            await report([]);
+            expect(signal.aborted).toBe(true);
+            postMessageSpy.mockClear();
+            finish(new Response(JSON.stringify([{ id: 43, status: "failed" }])));
+            await vi.advanceTimersByTimeAsync(60_000);
+            expect(fetcher).toHaveBeenCalledTimes(3);
+            expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setPipelineStatuses" }));
+            webview.dispose();
+        } finally {
+            provider.dispose();
+            vscodeMock.workspace.getConfiguration.mockImplementation(originalConfiguration);
+            vi.unstubAllGlobals();
+            vi.useRealTimers();
+        }
     });
 
     it("CommitGraphViewProvider handles webview events and refresh/load flows", async () => {

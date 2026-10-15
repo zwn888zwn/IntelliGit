@@ -1,7 +1,9 @@
 import React from "react";
 import { createPortal } from "react-dom";
-import { LuTag } from "react-icons/lu";
-import type { Commit } from "../../../types";
+import { LuTag, LuCircleCheck, LuCircleX, LuLoaderCircle, LuClock, LuCircleSlash, LuCircleHelp, LuCircleMinus } from "react-icons/lu";
+import type { Commit, PipelineStatus } from "../../../types";
+import type { CommitGraphOutbound } from "../commitGraphTypes";
+import { getVsCodeApi } from "../shared/vscodeApi";
 import { formatDateTime } from "../shared/date";
 import { REF_BADGE_COLORS } from "../shared/tokens";
 import { splitCommitRefs } from "../shared/utils";
@@ -24,6 +26,8 @@ interface Props {
     showAuthor?: boolean;
     showDate?: boolean;
     showHash?: boolean;
+    showPipeline?: boolean;
+    pipeline?: PipelineStatus;
     onSelect: (hash: string, event: React.MouseEvent) => void;
     onContextMenu: (event: React.MouseEvent, commit: Commit) => void;
 }
@@ -316,6 +320,8 @@ function CommitRowInner({
     showAuthor = true,
     showDate = true,
     showHash = true,
+    showPipeline = false,
+    pipeline,
     onSelect,
     onContextMenu,
 }: Props): React.ReactElement {
@@ -424,6 +430,40 @@ function CommitRowInner({
                     {commit.shortHash || commit.hash.slice(0, 8)}
                 </span>
             )}
+            {showPipeline && (
+                <span style={{ width: 22, marginLeft: 2, flexShrink: 0, display: "inline-flex", justifyContent: "center" }}>
+                    {pipeline && (() => {
+                        const { state, title, url } = pipeline;
+                        const Icon = {
+                            success: LuCircleCheck, failed: LuCircleX, running: LuLoaderCircle,
+                            pending: LuClock, canceled: LuCircleSlash, skipped: LuCircleMinus, unknown: LuCircleHelp,
+                        }[state];
+                        const color = state === "success" ? "var(--vscode-testing-iconPassed, #73c991)"
+                            : state === "failed" ? "var(--vscode-testing-iconFailed, #f14c4c)"
+                            : state === "running" || state === "pending" ? "var(--vscode-charts-yellow, #e2c54b)"
+                            : "var(--vscode-descriptionForeground)";
+                        return (
+                            <button
+                                type="button"
+                                title={title}
+                                aria-label={title}
+                                aria-disabled={!url}
+                                style={{ display: "inline-flex", padding: 2, border: 0, background: "transparent", color, cursor: url ? "pointer" : "default" }}
+                                onKeyDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (url) getVsCodeApi<CommitGraphOutbound>().postMessage({
+                                        type: "openPipeline", repoRoot: commit.repoRoot, hash: commit.hash,
+                                    });
+                                }}
+                                onContextMenu={(event) => event.stopPropagation()}
+                            >
+                                <Icon size={14} aria-hidden="true" className={state === "running" ? "intelligit-pipeline-running" : undefined} />
+                            </button>
+                        );
+                    })()}
+                </span>
+            )}
         </div>
     );
 }
@@ -431,11 +471,13 @@ function CommitRowInner({
 function areEqual(prev: Props, next: Props): boolean {
     return (
         prev.commit.hash === next.commit.hash &&
+        prev.commit.repoRoot === next.commit.repoRoot &&
         prev.commit.message === next.commit.message &&
         prev.commit.author === next.commit.author &&
         prev.commit.date === next.commit.date &&
         prev.commit.refs === next.commit.refs &&
         prev.commit.graphRefs === next.commit.graphRefs &&
+        prev.pipeline === next.pipeline &&
         prev.commit.parentHashes === next.commit.parentHashes &&
         prev.isSelected === next.isSelected &&
         prev.isUnpushed === next.isUnpushed &&
@@ -443,6 +485,7 @@ function areEqual(prev: Props, next: Props): boolean {
         prev.showAuthor === next.showAuthor &&
         prev.showDate === next.showDate &&
         prev.showHash === next.showHash &&
+        prev.showPipeline === next.showPipeline &&
         prev.rowLeftOffset === next.rowLeftOffset &&
         prev.messageIndent === next.messageIndent &&
         prev.onSelect === next.onSelect &&
