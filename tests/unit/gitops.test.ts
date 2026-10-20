@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { GitOps, UpstreamPushDeclinedError } from "../../src/git/operations";
-import type { GitExecutor } from "../../src/git/executor";
+import { GitExecutor } from "../../src/git/executor";
 
 function createMockExecutor(responses: Record<string, string> = {}): GitExecutor {
     const run = vi.fn(async (args: string[]) => {
@@ -94,6 +94,52 @@ describe("GitOps", () => {
     });
 
     describe("getBranchComparisonFiles", () => {
+        it("drops restored files after refresh while preserving changes without line stats", async () => {
+            const repoRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-diff-"));
+            const executor = new GitExecutor(repoRoot);
+            const ops = new GitOps(executor);
+            const restoredPath = path.join(repoRoot, "restored.ts");
+            try {
+                await executor.run(["init", "-q"]);
+                await executor.run(["config", "core.filemode", "true"]);
+                await fs.promises.writeFile(restoredPath, "original\n");
+                await fs.promises.writeFile(path.join(repoRoot, "binary => data.dat"), Buffer.from([0, 1]));
+                await fs.promises.writeFile(path.join(repoRoot, "mode.sh"), "echo hello\n");
+                await fs.promises.writeFile(path.join(repoRoot, "empty.txt"), "");
+                await executor.run(["add", "."]);
+                await executor.run([
+                    "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                    "-c", "commit.gpgsign=false",
+                    "commit", "-qm", "chore: 🔧 Create diff regression fixture",
+                ]);
+                await fs.promises.writeFile(restoredPath, "changed\n");
+                expect(await ops.getBranchComparisonFiles("HEAD", {
+                    kind: "working-tree", label: "Working Tree",
+                })).toEqual([expect.objectContaining({ path: "restored.ts", status: "M" })]);
+
+                await fs.promises.writeFile(restoredPath, "original\n");
+                const modifiedTime = new Date(Date.now() + 2000);
+                await fs.promises.utimes(restoredPath, modifiedTime, modifiedTime);
+                await fs.promises.writeFile(path.join(repoRoot, "binary => data.dat"), Buffer.from([0, 2]));
+                await fs.promises.chmod(path.join(repoRoot, "mode.sh"), 0o755);
+                await executor.run(["mv", "empty.txt", "renamed.txt"]);
+
+                for (let refresh = 0; refresh < 2; refresh++) {
+                    const files = await ops.getBranchComparisonFiles("HEAD", {
+                        kind: "working-tree", label: "Working Tree",
+                    });
+                    expect(files.map((file) => [file.path, file.status])).toEqual([
+                        ["binary => data.dat", "M"],
+                        ["mode.sh", "M"],
+                        ["renamed.txt", "R"],
+                    ]);
+                    expect(files.every((file) => file.additions === 0 && file.deletions === 0)).toBe(true);
+                }
+            } finally {
+                await fs.promises.rm(repoRoot, { recursive: true, force: true });
+            }
+        });
+
         it("parses branch diff files with stats", async () => {
             const executor = createMockExecutor({
                 "diff --name-status --find-renames feature --": [

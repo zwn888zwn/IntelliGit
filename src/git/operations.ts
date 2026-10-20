@@ -666,14 +666,18 @@ export class GitOps {
                 "--find-renames",
                 ...diffRefs,
             ]);
+            const changedPaths = new Set<string>();
             for (const line of numstat.trim().split("\n")) {
                 if (!line.trim()) continue;
                 const cols = line.split("\t");
                 if (cols.length < 3) continue;
 
-                const filePath = normalizeNumstatPath(cols.slice(2).join("\t"));
+                const rawPath = cols.slice(2).join("\t");
+                changedPaths.add(normalizeGitOutputPath(rawPath));
+                const filePath = normalizeNumstatPath(rawPath);
                 const file = files.get(filePath);
                 if (!file) continue;
+                changedPaths.add(filePath);
 
                 const parsedAdd = cols[0] === "-" ? 0 : parseInt(cols[0]);
                 const parsedDel = cols[1] === "-" ? 0 : parseInt(cols[1]);
@@ -682,6 +686,15 @@ export class GitOps {
                     additions: Number.isNaN(parsedAdd) ? 0 : parsedAdd,
                     deletions: Number.isNaN(parsedDel) ? 0 : parsedDel,
                 });
+            }
+            if (target.kind === "working-tree") {
+                // Name-status can report stat-only changes after content is restored.
+                // Numstat checks content and still includes binary and mode-only changes.
+                for (const [filePath, file] of files) {
+                    if (file.status === "M" && !changedPaths.has(filePath)) {
+                        files.delete(filePath);
+                    }
+                }
             }
         } catch (err) {
             logGitOpsWarning("Failed to get branch comparison numstat", err, { notifyUser: true });
