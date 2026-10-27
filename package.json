@@ -37,6 +37,7 @@
         "scm"
     ],
     "activationEvents": [
+        "onStartupFinished",
         "workspaceContains:.git",
         "onView:intelligit.commitGraph",
         "onView:intelligit.commitPanel"
@@ -86,6 +87,16 @@
             ]
         },
         "commands": [
+            {
+                "command": "intelligit.copilotLogActions",
+                "title": "管理 Copilot 调试日志…",
+                "category": "IntelliGit"
+            },
+            {
+                "command": "intelligit.clearCopilotLogs",
+                "title": "清理 Copilot 历史调试日志",
+                "category": "IntelliGit"
+            },
             {
                 "command": "intelligit.openRecentProject",
                 "title": "切换最近项目…",
@@ -529,6 +540,12 @@
         "configuration": {
             "title": "IntelliGit",
             "properties": {
+                "intelligit.copilotPerformance.enabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "scope": "window",
+                    "markdownDescription": "Show the latest completed Copilot LLM request's tokens/s, TTFT and model in the right status bar. Hidden by default. When enabled, watches local Copilot debug logs and automatically removes historical logs after 7 days or above a 100 MB target, protecting the newest session and logs updated within 24 hours. Use IntelliGit: 管理 Copilot 调试日志 to enable or disable file logging, or clean historical logs, even while the status bar is hidden."
+                },
                 "intelligit.pipeline.providers": {
                     "type": "array",
                     "default": [],

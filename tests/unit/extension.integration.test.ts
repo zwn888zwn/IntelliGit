@@ -4,6 +4,10 @@ import * as os from "os";
 import * as path from "path";
 import type * as vscode from "vscode";
 
+vi.mock("../../src/services/CopilotStatusBarController", () => ({
+    CopilotStatusBarController: class { dispose = vi.fn(); },
+}));
+
 type CommandHandler = (...args: unknown[]) => unknown;
 
 const openCommitChangesMock = vi.hoisted(() => vi.fn(async () => undefined));

@@ -88,6 +88,48 @@ Why this helps:
 4. Open the bottom IntelliGit panel to inspect graph history, filter by branch, and review commit details.
 5. Use branch or commit context menus for advanced operations.
 
+## Copilot Request Performance (Status Bar)
+
+The Copilot status bar is hidden by default. Enable
+`intelligit.copilotPerformance.enabled` in Settings to show it. The right status
+bar shows the last completed Copilot LLM request, for example
+`⚡ 45.0 tok/s · TTFT 2.3s · gpt-6.1`. Hover for output tokens, request duration,
+completion time and the completed requests in the same user turn. The value stays
+visible while the next request is running. Missing metrics show `—`.
+
+Some third-party model providers, including the observed Codex Bridge request
+path, do not produce `llm_request` entries in Copilot's debug log. Completed tool
+turns alone contain no token throughput or TTFT. In that case the item reports
+**日志缺少请求指标** instead of continuing to display **等待请求**; the provider
+must supply request metrics before throughput can be calculated.
+
+Run **IntelliGit: 管理 Copilot 调试日志** from the Command Palette (also available
+while the status bar is hidden), or click the item. Choose **启用 Copilot 文件日志** to enable
+`github.copilot.chat.agentDebugLog.fileLogging.enabled`, then reload the window.
+This also limits each JSONL file to 5 MB and retains 10 sessions per storage
+location through Copilot's own settings, preserving any stricter existing limits.
+IntelliGit reads the current VS Code profile's global and workspace debug logs;
+it does not upload them or keep another copy. Copilot normally flushes logs every
+4 seconds; IntelliGit updates when the completed request reaches disk.
+
+Choose **关闭 Copilot 文件日志** in the same menu to disable file logging globally.
+Each already-open window needs to reload before it stops writing logs. Existing
+logs remain available for manual cleanup. Hiding the status bar does not change
+Copilot's file logging setting.
+
+Speed is approximately `outputTokens / ((dur - ttft) / 1000)`. Output tokens may
+include hidden reasoning, and TTFT measures the first response chunk rather than
+the first visible character.
+
+While `intelligit.copilotPerformance.enabled` is enabled, IntelliGit
+cleans historical debug logs on startup and hourly, retaining 7 days with a
+100 MB total target. It counts each session's JSONL and auxiliary files. The
+newest session in each storage location and sessions updated within 24 hours are
+protected, so the target can temporarily be exceeded. Copilot's native per-file
+limit does not cover auxiliary files. Run **IntelliGit: 清理 Copilot 历史调试日志**
+or use the status bar menu to remove all eligible historical logs immediately.
+Cleanup removes debug log directories only; chat history is preserved.
+
 ## JetBrains Merge Tool Setup (Optional)
 
 IntelliGit can open merge conflicts in a JetBrains IDE merge tool (PyCharm, IntelliJ IDEA, WebStorm, etc.).

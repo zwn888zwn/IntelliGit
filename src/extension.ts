@@ -44,6 +44,7 @@ import {
 import { EditorBlameController } from "./services/EditorBlameController";
 import { openCommitChanges } from "./services/multiDiffService";
 import { GoImplementationHints } from "./services/GoImplementationHints";
+import { CopilotStatusBarController } from "./services/CopilotStatusBarController";
 import { runWithNotificationProgress } from "./utils/notifications";
 import { showPushSuccessWithRequestLink } from "./utils/pushMergeRequest";
 import {
@@ -77,6 +78,7 @@ import {
 import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    context.subscriptions.push(new CopilotStatusBarController(context));
     registerProjectSwitcher(context);
     context.subscriptions.push(new GoImplementationHints());
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
