@@ -200,6 +200,7 @@ export class GitOps {
         branch?: string,
         filterText?: string,
         skip: number = 0,
+        showAllRefs: boolean = false,
     ): Promise<Commit[]> {
         const format =
             ["%H", "%h", "%s", "%an", "%ae", "%cI", "%P", "%D"].join(FIELD_SEP) + RECORD_SEP;
@@ -211,8 +212,12 @@ export class GitOps {
 
         if (branch) {
             args.push(branch);
-        } else {
+        } else if (showAllRefs) {
             args.push("--all");
+        } else {
+            // Keep tool checkpoints out of normal history, including detached HEAD.
+            // Ignore a missing HEAD so repositories without commits return no rows.
+            args.push("--branches", "--remotes", "--tags", "--ignore-missing", "HEAD");
         }
 
         if (filterText) {
@@ -228,6 +233,7 @@ export class GitOps {
         hashPrefix: string,
         maxCount: number = 500,
         branch?: string,
+        showAllRefs: boolean = false,
     ): Promise<Commit[]> {
         const normalizedPrefix = hashPrefix.trim().toLowerCase();
         if (!normalizedPrefix) return [];
@@ -237,7 +243,7 @@ export class GitOps {
         let skip = 0;
 
         while (matches.length < maxCount) {
-            const page = await this.getLog(pageSize, branch, undefined, skip);
+            const page = await this.getLog(pageSize, branch, undefined, skip, showAllRefs);
             if (page.length === 0) break;
 
             for (const commit of page) {

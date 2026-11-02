@@ -151,6 +151,9 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this.registerThemeChangeListeners();
         this.pipelines.configure(vscode.workspace.getConfiguration("intelligit").get("pipeline.providers", []));
         this.themeChangeDisposables.push(vscode.workspace.onDidChangeConfiguration((event) => {
+            if (event.affectsConfiguration("intelligit.log.showAllRefs")) {
+                void this.refresh({ reset: true });
+            }
             if (!event.affectsConfiguration("intelligit.pipeline.providers")) return;
             this.pipelines.configure(vscode.workspace.getConfiguration("intelligit").get("pipeline.providers", []));
             this.pipelineLinks.clear();
@@ -731,6 +734,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 this.currentBranch ?? undefined,
                 this.filterText || undefined,
                 0,
+                this.showAllLogRefs,
             );
             return {
                 commits: commits.slice(0, limit),
@@ -740,7 +744,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
 
         const pages = await Promise.all(
             this.getRepositories().map(async (entry) =>
-                entry.gitOps.getLog(limit + 1, undefined, this.filterText || undefined, 0),
+                entry.gitOps.getLog(limit + 1, undefined, this.filterText || undefined, 0, this.showAllLogRefs),
             ),
         );
 
@@ -786,6 +790,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                     this.currentBranch ?? undefined,
                     this.filterText || undefined,
                     skip,
+                    this.showAllLogRefs,
                 ),
             );
         }
@@ -797,6 +802,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                     undefined,
                     this.filterText || undefined,
                     0,
+                    this.showAllLogRefs,
                 ),
             ),
         );
@@ -822,17 +828,21 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         return normalized.length >= 4 && /^[0-9a-f]+$/i.test(normalized);
     }
 
+    private get showAllLogRefs(): boolean {
+        return vscode.workspace.getConfiguration("intelligit").get<boolean>("log.showAllRefs", false);
+    }
+
     private async loadHashSearchResults(hashPrefix: string, limit: number): Promise<Commit[]> {
         if (this.currentBranch) {
             if (!this.repository) return [];
             return this.decorateCommitsWithGraphRefs(
-                await this.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1, this.currentBranch),
+                await this.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1, this.currentBranch, this.showAllLogRefs),
             );
         }
 
         const pages = await Promise.all(
             this.getRepositories().map((entry) =>
-                entry.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1),
+                entry.gitOps.findCommitsByHashPrefix(hashPrefix, limit + 1, undefined, this.showAllLogRefs),
             ),
         );
 

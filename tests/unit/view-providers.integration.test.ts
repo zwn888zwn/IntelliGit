@@ -390,6 +390,44 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("CommitGraphViewProvider refreshes history when the all-refs setting changes", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const originalConfiguration = vscodeMock.workspace.getConfiguration.getMockImplementation()!;
+        let showAllRefs = false;
+        vscodeMock.workspace.getConfiguration.mockImplementation(() => ({
+            get: vi.fn((key: string, defaultValue?: unknown) =>
+                key === "log.showAllRefs" ? showAllRefs : defaultValue),
+        }));
+        const gitOps = makeGitOpsMock();
+        const provider = new CommitGraphViewProvider({ fsPath: "/ext", path: "/ext" } as never, gitOps as never);
+        const webview = createWebviewView();
+        try {
+            provider.setRepositoryContext(testRepository);
+            provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+            await webview.send({ type: "ready" });
+            expect(gitOps.getLog).toHaveBeenLastCalledWith(500, undefined, undefined, 0, false);
+            const listeners = vscodeMock.workspace.onDidChangeConfiguration.mock.calls.map(
+                (args) => (args as unknown as [(event: { affectsConfiguration: (key: string) => boolean }) => void])[0],
+            );
+            for (const enabled of [true, false]) {
+                showAllRefs = enabled;
+                gitOps.getLog.mockClear();
+                for (const listener of listeners) {
+                    listener({ affectsConfiguration: (key) => key === "intelligit.log.showAllRefs" });
+                }
+                await vi.waitFor(() => {
+                    expect(gitOps.getLog).toHaveBeenLastCalledWith(500, undefined, undefined, 0, enabled);
+                });
+                await webview.send({ type: "filterText", text: "abc1234" });
+                expect(gitOps.findCommitsByHashPrefix).toHaveBeenLastCalledWith("abc1234", 501, undefined, enabled);
+                await webview.send({ type: "filterText", text: "" });
+            }
+        } finally {
+            provider.dispose();
+            vscodeMock.workspace.getConfiguration.mockImplementation(originalConfiguration);
+        }
+    });
+
     it("CommitGraphViewProvider reveals a commit by resetting filters and posting a reveal message", async () => {
         const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
         const gitOps = makeGitOpsMock();

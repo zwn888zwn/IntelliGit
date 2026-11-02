@@ -540,6 +540,12 @@
         "configuration": {
             "title": "IntelliGit",
             "properties": {
+                "intelligit.log.showAllRefs": {
+                    "type": "boolean",
+                    "default": false,
+                    "scope": "window",
+                    "markdownDescription": "Include all Git references in the commit graph when viewing all branches, including Copilot/Agent checkpoints and other internal snapshots. By default, show only local branches, remote branches, tags, and HEAD. Changing this setting refreshes the graph automatically."
+                },
                 "intelligit.copilotPerformance.enabled": {
                     "type": "boolean",
                     "default": false,

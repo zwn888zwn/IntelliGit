@@ -31,6 +31,11 @@ Why this helps:
 - Text/hash search and branch filter
 - Selected commit shows changed files, file stats, and commit metadata
 
+By default, history includes local branches, remote branches, tags, and HEAD.
+Enable `intelligit.log.showAllRefs` in Settings to also show internal Git references,
+such as Copilot/Agent checkpoints, when viewing all branches. The graph refreshes
+automatically when this setting changes.
+
 Why this helps:
 - You can understand branch history and merge paths faster.
 - You can inspect any commit without leaving the graph context.

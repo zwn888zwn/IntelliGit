@@ -344,6 +344,64 @@ describe("GitOps", () => {
     });
 
     describe("getLog", () => {
+        it("limits history to normal refs by default and includes checkpoints only when enabled", async () => {
+            const repoRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-log-"));
+            const executor = new GitExecutor(repoRoot);
+            const ops = new GitOps(executor);
+            try {
+                await executor.run(["init", "-q"]);
+                await executor.run(["symbolic-ref", "HEAD", "refs/heads/main"]);
+                expect(await ops.getLog()).toEqual([]);
+                await executor.run(["config", "user.name", "Test"]);
+                await executor.run(["config", "user.email", "test@example.com"]);
+                const tree = (await executor.run(["write-tree"])).trim();
+                const createCommit = async (message: string) => (await executor.run([
+                    "-c", "commit.gpgsign=false", "commit-tree", tree, "-m", message,
+                ])).trim();
+                const refs = [
+                    ["refs/heads/main", "local"],
+                    ["refs/remotes/origin/feature", "remote"],
+                    ["refs/tags/release", "tag"],
+                    ["refs/agents/session/checkpoints/turn/0", "checkpoint"],
+                    ["refs/codex/snapshots/test", "snapshot"],
+                    ["refs/stash", "stash"],
+                ];
+                const hashes = new Map<string, string>();
+                for (const [ref, message] of refs) {
+                    const hash = await createCommit(message);
+                    hashes.set(message, hash);
+                    await executor.run(["update-ref", ref, hash]);
+                }
+                const detached = await createCommit("detached");
+                await executor.run(["checkout", "--detach", detached]);
+
+                const normal = await ops.getLog();
+                expect(normal.map((commit) => commit.message).sort()).toEqual([
+                    "detached", "local", "remote", "tag",
+                ]);
+                const all = await ops.getLog(100, undefined, undefined, 0, true);
+                expect(all.map((commit) => commit.message).sort()).toEqual([
+                    "checkpoint", "detached", "local", "remote", "snapshot", "stash", "tag",
+                ]);
+                for (const showAllRefs of [false, true]) {
+                    const expected = showAllRefs ? all : normal;
+                    const paged = [
+                        ...await ops.getLog(2, undefined, undefined, 0, showAllRefs),
+                        ...await ops.getLog(100, undefined, undefined, 2, showAllRefs),
+                    ];
+                    expect(paged.map((commit) => commit.hash)).toEqual(expected.map((commit) => commit.hash));
+                    expect(await ops.getLog(100, undefined, "checkpoint", 0, showAllRefs))
+                        .toHaveLength(showAllRefs ? 1 : 0);
+                    expect(await ops.findCommitsByHashPrefix(hashes.get("checkpoint")!, 100, undefined, showAllRefs))
+                        .toHaveLength(showAllRefs ? 1 : 0);
+                    expect((await ops.getLog(100, "main", undefined, 0, showAllRefs)).map((commit) => commit.message))
+                        .toEqual(["local"]);
+                }
+            } finally {
+                await fs.promises.rm(repoRoot, { recursive: true, force: true });
+            }
+        });
+
         const FIELD_SEP = "<<|>>";
         const RECORD_SEP = "<<||>>";
 
