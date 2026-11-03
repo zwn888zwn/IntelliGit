@@ -639,7 +639,7 @@ export class GitOps {
         };
 
         const diffRefs =
-            target.kind === "current-branch" ? [trimmedRef, "HEAD", "--"] : [trimmedRef, "--"];
+            target.kind === "current-branch" ? [trimmedRef, target.ref ?? "HEAD", "--"] : [trimmedRef, "--"];
         const nameStatus = await this.executor.run([
             "diff",
             "--name-status",

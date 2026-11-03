@@ -337,12 +337,13 @@ export async function openBranchComparisonChanges(
     target: ProjectComparisonTarget,
     repoRoot: string,
     executor: GitExecutor,
+    displayRef = ref,
 ): Promise<void> {
     const sourceHash = await resolveCommitRef(ref, "comparison ref", executor);
     if (!sourceHash) throw new Error(`Invalid comparison ref: ${ref}`);
     const targetHash =
         target.kind === "current-branch"
-            ? await resolveCommitRef("HEAD", "HEAD", executor)
+            ? await resolveCommitRef(target.ref ?? "HEAD", "comparison target", executor)
             : undefined;
     const entries =
         target.kind === "current-branch"
@@ -358,7 +359,7 @@ export async function openBranchComparisonChanges(
                   files,
               );
     await openResources(
-        `${ref.trim()} ↔ ${target.label}`,
+        `${displayRef} ↔ ${target.label}`,
         toResources(
             entries,
             repoRoot,

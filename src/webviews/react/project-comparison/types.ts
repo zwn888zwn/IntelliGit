@@ -26,6 +26,7 @@ export type ProjectComparisonInbound =
           type: "update";
           branchName: string;
           targetLabel: string;
+          scopeLabel?: string;
           repository: RepositoryContextInfo;
           files: ProjectComparisonFile[];
           folderIcon?: ThemeTreeIcon;
@@ -41,6 +42,7 @@ export type ProjectComparisonInbound =
 export interface ProjectComparisonState {
     branchName: string;
     targetLabel: string;
+    scopeLabel?: string;
     repository: RepositoryContextInfo | null;
     files: ProjectComparisonFile[];
     folderIcon?: ThemeTreeIcon;

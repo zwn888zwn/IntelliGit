@@ -134,8 +134,8 @@ export interface ProjectComparisonFile {
 }
 
 export type ProjectComparisonTarget =
-    | { kind: "current-branch"; label: string }
-    | { kind: "working-tree"; label: string };
+    | { kind: "current-branch"; label: string; ref?: string; fromMergeBase?: boolean }
+    | { kind: "working-tree"; label: string; fromMergeBase?: boolean };
 
 export interface StashEntry {
     index: number;

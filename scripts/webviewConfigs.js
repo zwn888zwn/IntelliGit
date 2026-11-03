@@ -1,4 +1,5 @@
 const WEBVIEW_CONFIGS = [
+    { entry: "react/selection-history/SelectionHistoryApp", out: "webview-selectionhistory" },
     { entry: "react/CommitGraphApp", out: "webview-commitgraph" },
     { entry: "react/commit-panel/CommitPanelApp", out: "webview-commitpanel" },
     { entry: "react/CommitInfoApp", out: "webview-commitinfo" },

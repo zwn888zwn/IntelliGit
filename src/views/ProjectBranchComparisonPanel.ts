@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { resolveBranchChanges } from "../services/branchComparison";
 import type { ProjectComparisonFile, ProjectComparisonTarget } from "../types";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
 import {
@@ -36,6 +37,10 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     private disposed = false;
     private readonly overlayReady: Promise<ComparisonOverlay | undefined>;
     private diffRequest = 0;
+    private refreshRequest = 0;
+    private comparisonRef: string;
+    private comparisonTarget: ProjectComparisonTarget;
+    private displayRef: string;
     private viewState: ProjectComparisonViewState | undefined;
 
     static open(
@@ -78,6 +83,9 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         private readonly target: ProjectComparisonTarget,
         private readonly onNavigationStateChange: () => void,
     ) {
+        this.comparisonRef = branchName;
+        this.displayRef = branchName;
+        this.comparisonTarget = target;
         this.iconTheme = new IconThemeService(extensionUri);
         this.createPanel(false);
         ProjectBranchComparisonPanel.panels.push(this);
@@ -90,7 +98,9 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         const previous = this.panel;
         const panel = vscode.window.createWebviewPanel(
             ProjectBranchComparisonPanel.viewType,
-            `Difference Between ${this.branchName} and ${this.target.label}`,
+            this.target.fromMergeBase
+                ? `共同祖先比较 · 相对 ${this.branchName}（${this.target.kind === "working-tree" ? "包含未提交修改" : "仅已提交"}）`
+                : `Difference Between ${this.branchName} and ${this.target.label}`,
             preserveFocus ? { viewColumn: vscode.ViewColumn.One, preserveFocus: true } : vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -137,14 +147,31 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
 
     private async refresh(): Promise<void> {
         this.post({ type: "refreshing", active: true });
+        const request = ++this.refreshRequest;
+        ++this.diffRequest;
         try {
+            let ref = this.branchName;
+            let target = this.target;
+            let displayRef = this.branchName;
+            if (target.fromMergeBase) {
+                const snapshot = await resolveBranchChanges(this.repository.executor, this.branchName);
+                ref = snapshot.base;
+                target = target.kind === "current-branch"
+                    ? { kind: "current-branch", ref: snapshot.head, label: `HEAD ${snapshot.head.slice(0, 8)} · 本分支已提交改动` }
+                    : { kind: "working-tree", label: "Working Tree" };
+                displayRef = `${this.branchName} 共同祖先 ${snapshot.base.slice(0, 8)}`;
+            }
             await this.iconTheme.initIconThemeData();
             const files = await this.iconTheme.decorateProjectComparisonFiles(
-                await this.repository.gitOps.getBranchComparisonFiles(this.branchName, this.target),
+                await this.repository.gitOps.getBranchComparisonFiles(ref, target),
             );
             const folderIconsByName =
                 await this.iconTheme.getFolderIconsByProjectComparisonFiles(files);
             const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
+            if (this.disposed || request !== this.refreshRequest) return;
+            this.comparisonRef = ref;
+            this.comparisonTarget = target;
+            this.displayRef = displayRef;
             this.files = files;
             this.lastError = null;
             if (this.activeFile && !files.some((file) => file.path === this.activeFile?.path)) {
@@ -152,8 +179,11 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             }
             this.post({
                 type: "update",
-                branchName: this.branchName,
-                targetLabel: this.target.label,
+                branchName: this.displayRef,
+                targetLabel: this.comparisonTarget.label,
+                scopeLabel: this.target.fromMergeBase
+                    ? this.target.kind === "working-tree" ? "从共同祖先比较 · 包含未提交修改" : "本分支已提交改动 · 不含工作区修改"
+                    : undefined,
                 repository: this.repository.info,
                 files,
                 folderIcon: folderIcons.folderIcon,
@@ -161,8 +191,19 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
                 folderIconsByName,
                 iconFonts,
             });
+            if (this.target.fromMergeBase && this.activeFile) {
+                const selected = files.find((file) => file.path === this.activeFile?.path);
+                if (selected) await this.openFileDiff(selected);
+            }
+        } catch (error) {
+            if (request !== this.refreshRequest || this.disposed) return;
+            this.files = [];
+            this.setActiveFile(null);
+            this.post({ type: "update", branchName: this.displayRef,
+                targetLabel: this.comparisonTarget.label, repository: this.repository.info, files: [] });
+            throw error;
         } finally {
-            this.post({ type: "refreshing", active: false });
+            if (request === this.refreshRequest) this.post({ type: "refreshing", active: false });
         }
     }
 
@@ -171,8 +212,11 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             case "ready":
                 this.post({
                     type: "update",
-                    branchName: this.branchName,
-                    targetLabel: this.target.label,
+                    branchName: this.displayRef,
+                    targetLabel: this.comparisonTarget.label,
+                scopeLabel: this.target.fromMergeBase
+                    ? this.target.kind === "working-tree" ? "从共同祖先比较 · 包含未提交修改" : "本分支已提交改动 · 不含工作区修改"
+                    : undefined,
                     repository: this.repository.info,
                     files: this.files,
                     iconFonts: this.iconTheme.getIconFonts(),
@@ -198,10 +242,11 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
                 if (this.files.length === 0) return;
                 const open = () => openBranchComparisonChanges(
                     this.files,
-                    this.branchName,
-                    this.target,
+                    this.comparisonRef,
+                    this.comparisonTarget,
                     this.repository.root,
                     this.repository.executor,
+                    this.displayRef,
                 );
                 const overlay = await this.overlayReady;
                 if (overlay) await overlay.openChanges(open);
@@ -220,8 +265,8 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             !this.editorLayoutAdjusted || vscode.window.tabGroups.all.length === 1;
         await openBranchComparisonFileDiff(
             file,
-            this.branchName,
-            this.target,
+            this.comparisonRef,
+            this.comparisonTarget,
             this.repository.root,
             this.repository.gitOps,
             this.repository.executor,
@@ -230,6 +275,7 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             overlay ? async (original, modified, title) => {
                 if (!this.disposed && request === this.diffRequest) await overlay.openDiff(original, modified, title);
             } : undefined,
+            this.displayRef,
         );
         if (this.disposed || request !== this.diffRequest) return;
         if (!overlay) await this.adjustEditorLayout(shouldAdjustLayout);
@@ -320,8 +366,8 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             return getRepoRelativeFilePathFromUri(uri, this.repository.root);
         }
         const ref = getDiffRefFromUri(uri);
-        const targetRef = this.target.kind === "current-branch" ? "HEAD" : "working-tree";
-        if (ref !== this.branchName && ref !== targetRef) return null;
+        const targetRef = this.comparisonTarget.kind === "current-branch" ? this.comparisonTarget.ref ?? "HEAD" : "working-tree";
+        if (ref !== this.comparisonRef && ref !== targetRef) return null;
         if (getProjectComparisonIdFromUri(uri) !== this.comparisonId) return null;
         return getDiffOriginalFilePathFromUri(uri);
     }

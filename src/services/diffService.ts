@@ -71,6 +71,7 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
             markAsCommitDiff?: boolean;
             originalPath?: string;
             sourceFsPath?: string;
+            sourceLine?: number;
             projectComparisonId?: string;
         } = {},
     ): vscode.Uri {
@@ -92,6 +93,7 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
         if (options.sourceFsPath) {
             query.set("sourceFsPath", options.sourceFsPath);
         }
+        if (options.sourceLine) query.set("sourceLine", String(options.sourceLine));
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
             path: makeTextDiffUriPath(id, filePath, options.forcePlainTextUri),
@@ -940,13 +942,14 @@ export async function openBranchComparisonFileDiff(
     viewColumn?: vscode.ViewColumn,
     projectComparisonId?: string,
     openDiffOverride?: (original: vscode.Uri, modified: vscode.Uri, title: string) => Promise<void>,
+    displayRef = ref,
 ): Promise<void> {
     const safePath = assertRepoRelativePath(file.path);
     const leftPath = file.oldPath ? assertRepoRelativePath(file.oldPath) : safePath;
     const trimmedRef = ref.trim();
     if (!trimmedRef) return;
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
-    const title = `${safePath} (${trimmedRef} ↔ ${target.label})`;
+    const title = `${safePath} (${displayRef} ↔ ${target.label})`;
     const openDiff = async (leftUri: vscode.Uri, rightUri: vscode.Uri): Promise<void> => {
         if (openDiffOverride) {
             await openDiffOverride(leftUri, rightUri, title);
@@ -966,7 +969,7 @@ export async function openBranchComparisonFileDiff(
         const [leftExists, rightExists] = await Promise.all([
             gitFileExistsAtRef(leftPath, trimmedRef, executor),
             target.kind === "current-branch"
-                ? gitFileExistsAtRef(safePath, "HEAD", executor)
+                ? gitFileExistsAtRef(safePath, target.ref ?? "HEAD", executor)
                 : fileExists(workingTreeUri),
         ]);
         if (leftExists || rightExists) {
@@ -979,7 +982,7 @@ export async function openBranchComparisonFileDiff(
                 : await createTransparentImagePlaceholderUri(leftPath, "left");
             const rightUri = rightExists
                 ? target.kind === "current-branch"
-                    ? createGitResourceUri(workingTreeUri, "HEAD", {
+                    ? createGitResourceUri(workingTreeUri, target.ref ?? "HEAD", {
                           originalPath: safePath,
                           projectComparisonId,
                       })
@@ -1007,11 +1010,11 @@ export async function openBranchComparisonFileDiff(
     if (target.kind === "current-branch") {
         const rightSnapshot = makeTextDiffSnapshot(
             safePath,
-            await gitOps.getFileContentAtRef(safePath, "HEAD").catch(() => ""),
-            "HEAD",
+            await gitOps.getFileContentAtRef(safePath, target.ref ?? "HEAD").catch(() => ""),
+            target.ref ?? "HEAD",
         );
         const rightDoc = await vscode.workspace.openTextDocument(
-            getDiffContentProvider().createUri(safePath, "HEAD", rightSnapshot.content, {
+            getDiffContentProvider().createUri(safePath, target.ref ?? "HEAD", rightSnapshot.content, {
                 forcePlainTextUri: rightSnapshot.forcePlainTextUri,
                 originalPath: safePath,
                 projectComparisonId,
@@ -1572,3 +1575,16 @@ const COMMIT_FILE_CHANGE_MODE_LABELS = {
         errorLabel: "Revert selected change",
     },
 } as const;
+
+/** Open read-only historical excerpts using the native diff editor. */
+export async function createSelectionHistoryDiffUris(
+    filePath: string, sourceFsPath: string, sourceLine: number,
+    hash: string, before: string, after: string,
+): Promise<{ original: vscode.Uri; modified: vscode.Uri }> {
+    const provider = getDiffContentProvider();
+    const options = { originalPath: filePath, sourceFsPath, sourceLine };
+    const original = provider.createUri(filePath, `${hash}^`, before, options);
+    const modified = provider.createUri(filePath, hash, after, options);
+    await Promise.all([vscode.workspace.openTextDocument(original), vscode.workspace.openTextDocument(modified)]);
+    return { original, modified };
+}

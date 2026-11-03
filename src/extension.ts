@@ -1,3 +1,4 @@
+import { showSelectionHistory } from "./services/selectionHistory";
 // Extension entry point. Registers coordinated IntelliGit webviews:
 // commit graph (with integrated branch column/details) and commit panel.
 // The extension host is the sole data coordinator -- views never talk directly.
@@ -294,6 +295,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const pickProjectComparisonBranch = async (
         repository: RepositoryEntry,
         targetKind: ProjectComparisonTarget["kind"],
+        title?: string,
+        chooseBase = true,
     ): Promise<{ refName: string; target: ProjectComparisonTarget } | null> => {
         const branches = await repository.gitOps.getBranches();
         const currentBranch = branches.find((branch) => branch.isCurrent);
@@ -318,13 +321,26 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const targetName =
             targetKind === "current-branch" ? "Current Branch" : "Working Tree";
         const picked = await vscode.window.showQuickPick(picks, {
-            title: `Compare ${targetName} with Branch`,
+            title: title ?? `Compare ${targetName} with Branch`,
             placeHolder: `Select a branch for ${repository.info.relativePath ?? repository.info.name}`,
             ignoreFocusOut: true,
             matchOnDescription: true,
             matchOnDetail: true,
         });
-        return picked ? { refName: picked.refName, target } : null;
+        if (!picked) return null;
+        if (!chooseBase) return { refName: picked.refName, target };
+        const scope = target.kind === "working-tree" ? "包含未提交修改" : "仅已提交内容，不含未提交修改";
+        const mode = await vscode.window.showQuickPick([
+            { label: "直接比较", description: scope,
+                detail: `以 ${picked.refName} 当前版本为起点（原来的比较方式）`, fromMergeBase: false },
+            { label: "从共同祖先比较", description: scope,
+                detail: `以 ${picked.refName} 与当前分支的共同祖先为起点，查看分叉以来的改动`, fromMergeBase: true },
+        ], {
+            title: `${picked.refName} · 选择比较方式`,
+            placeHolder: "选择比较起点", ignoreFocusOut: true,
+        });
+        if (!mode) return null;
+        return { refName: picked.refName, target: mode.fromMergeBase ? { ...target, fromMergeBase: true } : target };
     };
     let commitDiffSourceContextSeq = 0;
     const updateCommitDiffSourceContext = async (
@@ -1725,6 +1741,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!repository) return;
             await openMergeConflictForFile(filePath, undefined, repository);
         }),
+        vscode.commands.registerCommand("intelligit.showSelectionHistory", async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.document.uri.scheme !== "file") {
+                vscode.window.showInformationMessage("请在工作区源文件中选择代码后查看历史。");
+                return;
+            }
+            const repository = repositoryService.getRepositoryForUri(editor.document.uri);
+            if (!repository) {
+                vscode.window.showWarningMessage("所选文件不在 Git 仓库中。");
+                return;
+            }
+            await showSelectionHistory(context.extensionUri, repository, editor);
+        }),
         vscode.commands.registerCommand("intelligit.compareWithRevision", async (ctx?: unknown) => {
             const repository = resolveRepositoryForEditorContext(ctx);
             if (!repository) {
@@ -1750,6 +1779,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 repository.gitOps,
                 repository.executor,
             );
+        }),
+        vscode.commands.registerCommand("intelligit.showBranchChanges", async (ctx?: unknown) => {
+            const repository = resolveRepositoryForResourceContext(ctx);
+            if (!repository) return;
+            try {
+                const picked = await pickProjectComparisonBranch(repository, "current-branch", "查看本分支引入的改动 · 选择目标分支", false);
+                if (!picked) return;
+                ProjectBranchComparisonPanel.open(context.extensionUri, repository, picked.refName,
+                    { kind: "current-branch", label: picked.target.label, fromMergeBase: true },
+                    () => { void updateIntelliGitDiffNavigationContext(); });
+            } catch (error) {
+                vscode.window.showErrorMessage(`无法查看本分支改动：${getErrorMessage(error)}`);
+            }
         }),
         vscode.commands.registerCommand(
             "intelligit.compareProjectWithBranch",

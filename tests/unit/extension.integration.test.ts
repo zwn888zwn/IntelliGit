@@ -3107,7 +3107,7 @@ describe("extension integration", () => {
             expect.any(Array),
             expect.objectContaining({ title: "Compare Working Tree with Branch" }),
         );
-        expect(showQuickPick.mock.calls.at(-1)?.[0]).toEqual(
+        expect(showQuickPick.mock.calls.at(-2)?.[0]).toEqual(
             expect.arrayContaining([expect.objectContaining({ refName: "main" })]),
         );
         expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
@@ -3278,6 +3278,7 @@ describe("extension integration", () => {
             { kind: "current-branch", label: "main" },
             "/repo-a",
             expect.anything(),
+            "feature-local",
         );
 
         await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/changed.ts" });
@@ -3295,6 +3296,95 @@ describe("extension integration", () => {
             expect.stringContaining("feature-local ↔ main"),
             expect.objectContaining({ viewColumn: 2 }),
         );
+    });
+
+    it.each([
+        ["intelligit.compareProjectWithBranch", "working-tree"],
+        ["intelligit.compareCurrentBranchWithBranch", "current-branch"],
+    ])("chooses a common ancestor after the branch in %s", async (command, kind) => {
+        const base = "a".repeat(40);
+        const head = "b".repeat(40);
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "rev-parse" && args.includes("--end-of-options")) {
+                return args.at(-1) === "HEAD^{commit}" ? head : "c".repeat(40);
+            }
+            if (args[0] === "merge-base" && args[1] === "--all") return base;
+            return defaultExecutorRunImpl(args);
+        });
+        const { activate } = await import("../../src/extension");
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: mockDisposables } as MockExtensionContext);
+        showQuickPick.mockImplementationOnce(async (items) => items.find((item) => item.refName === "feature-local"));
+        showQuickPick.mockImplementationOnce(async (items, options) => {
+            expect(options).toEqual(expect.objectContaining({ title: "feature-local · 选择比较方式" }));
+            expect(items[0]).toEqual(expect.objectContaining({ label: "直接比较", fromMergeBase: false }));
+            return items.find((item) => item.fromMergeBase === true);
+        });
+        await registeredCommands.get(command)?.({ scheme: "file", fsPath: "/repo-a", path: "/repo-a" });
+        await vi.waitFor(() => expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "update", branchName: expect.stringContaining("共同祖先"),
+                scopeLabel: kind === "working-tree" ? "从共同祖先比较 · 包含未提交修改" : "本分支已提交改动 · 不含工作区修改" }),
+        ));
+        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenCalledWith(base,
+            kind === "working-tree" ? { kind, label: "Working Tree" }
+                : expect.objectContaining({ kind, ref: head }));
+        await latestWebviewPanel?.emitMessage({ type: "openAllDiffs" });
+        await waitForAsync();
+        expect(openBranchComparisonChangesMock).toHaveBeenLastCalledWith(expect.any(Array), base,
+            kind === "working-tree" ? { kind, label: "Working Tree" } : expect.objectContaining({ kind, ref: head }),
+            "/repo-a", expect.anything(), expect.stringContaining("共同祖先"));
+    });
+
+    it.each(["intelligit.compareProjectWithBranch", "intelligit.compareCurrentBranchWithBranch"])(
+        "cancels %s without opening a panel when comparison mode is dismissed", async (command) => {
+            const { activate } = await import("../../src/extension");
+            const vscode = await import("vscode");
+            await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: mockDisposables } as MockExtensionContext);
+            vi.mocked(vscode.window.createWebviewPanel).mockClear();
+            showQuickPick.mockImplementationOnce(async (items) => items[0]);
+            showQuickPick.mockResolvedValueOnce(undefined);
+            await registeredCommands.get(command)?.();
+            expect(vscode.window.createWebviewPanel).not.toHaveBeenCalled();
+        },
+    );
+
+    it("pins branch changes across the list, individual diffs and compact diff until refresh", async () => {
+        const base = "a".repeat(40);
+        let head = "b".repeat(40);
+        executorRun.mockImplementation(async (args: string[]) => {
+            if (args[0] === "rev-parse" && args.includes("--end-of-options")) {
+                return args.at(-1) === "HEAD^{commit}" ? head : "c".repeat(40);
+            }
+            if (args[0] === "merge-base" && args[1] === "--all") return base;
+            return defaultExecutorRunImpl(args);
+        });
+        const { activate } = await import("../../src/extension");
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: mockDisposables } as MockExtensionContext);
+        showQuickPick.mockImplementationOnce(async (items) => items.find((item) => item.refName === "feature-local"));
+        showQuickPick.mockImplementationOnce(async (items) => items.find((item) => item.fromMergeBase === true));
+        await registeredCommands.get("intelligit.compareCurrentBranchWithBranch")?.({
+            scheme: "file", fsPath: "/repo-b", path: "/repo-b",
+        });
+        await waitForAsync();
+        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenLastCalledWith(base,
+            expect.objectContaining({ kind: "current-branch", ref: "b".repeat(40) }));
+        await vi.waitFor(() => expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "update", files: expect.arrayContaining([
+                expect.objectContaining({ path: "src/changed.ts" }),
+            ]) }),
+        ));
+        head = "d".repeat(40);
+        await latestWebviewPanel?.emitMessage({ type: "openDiff", path: "src/changed.ts" });
+        await waitForAsync();
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith("src/changed.ts", base);
+        expect(gitOpsState.getFileContentAtRef).toHaveBeenCalledWith("src/changed.ts", "b".repeat(40));
+        await latestWebviewPanel?.emitMessage({ type: "openAllDiffs" });
+        await waitForAsync();
+        expect(openBranchComparisonChangesMock).toHaveBeenLastCalledWith(expect.any(Array), base,
+            expect.objectContaining({ ref: "b".repeat(40) }), "/repo-b", expect.anything(), expect.stringContaining("共同祖先"));
+        await latestWebviewPanel?.emitMessage({ type: "refresh" });
+        await waitForAsync();
+        expect(gitOpsState.getBranchComparisonFiles).toHaveBeenLastCalledWith(base,
+            expect.objectContaining({ ref: head }));
     });
 
     it("replays an initial project comparison refresh error when the webview becomes ready", async () => {
@@ -3344,7 +3434,7 @@ describe("extension integration", () => {
         } as unknown as MockExtensionContext;
         await activate(context);
         showQuickPick.mockImplementation(async (items: Array<Record<string, unknown>>) => {
-            return items.find((item) => item.refName === "feature-local");
+            return items.find((item) => item.refName === "feature-local" || item.fromMergeBase === false);
         });
 
         await registeredCommands.get("intelligit.compareProjectWithBranch")?.({

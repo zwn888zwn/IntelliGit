@@ -346,6 +346,18 @@
                 "title": "Open Conflict Session",
                 "category": "IntelliGit",
                 "icon": "$(diff-multiple)"
+            },
+            {
+                "command": "intelligit.showBranchChanges",
+                "title": "查看本分支引入的改动…",
+                "category": "IntelliGit",
+                "icon": "$(git-compare)"
+            },
+            {
+                "command": "intelligit.showSelectionHistory",
+                "title": "查看选中代码的历史",
+                "category": "IntelliGit",
+                "icon": "$(history)"
             }
         ],
         "submenus": [
@@ -366,6 +378,11 @@
                     "command": "intelligit.compareCurrentBranchWithBranch",
                     "when": "resourceScheme == file",
                     "group": "navigation@10"
+                },
+                {
+                    "command": "intelligit.showBranchChanges",
+                    "when": "resourceScheme == file",
+                    "group": "navigation@11"
                 }
             ],
             "editor/context": [
@@ -407,6 +424,11 @@
                     "command": "intelligit.compareWithBranch",
                     "when": "resourceScheme == file",
                     "group": "1_compare@2"
+                },
+                {
+                    "command": "intelligit.showSelectionHistory",
+                    "when": "resourceScheme == file",
+                    "group": "2_history@1"
                 }
             ],
             "view/title": [

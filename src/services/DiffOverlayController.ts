@@ -288,7 +288,10 @@ export class DiffOverlayController implements vscode.Disposable {
             return;
         }
         const editor = findModifiedEditor(input.modified, tab.group);
-        const selection = editor?.selection;
+        const historyLine = input.modified.scheme === "intelligit-diff"
+            ? Number(new URLSearchParams(input.modified.query).get("sourceLine")) : 0;
+        const selection = Number.isInteger(historyLine) && historyLine > 0
+            ? new vscode.Selection(historyLine - 1, 0, historyLine - 1, 0) : editor?.selection;
         try {
             await vscode.workspace.fs.stat(source);
             const document = await vscode.workspace.openTextDocument(source);

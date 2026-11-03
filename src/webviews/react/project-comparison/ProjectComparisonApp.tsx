@@ -81,6 +81,7 @@ function App(): React.ReactElement {
                     ...prev,
                     branchName: message.branchName,
                     targetLabel: message.targetLabel,
+                    scopeLabel: message.scopeLabel,
                     repository: message.repository,
                     files: message.files,
                     folderIcon: message.folderIcon,
@@ -245,7 +246,7 @@ function Header({
             borderBottom="1px solid var(--vscode-panel-border)"
             fontFamily={SYSTEM_FONT_STACK}
         >
-            <Box flex={1} minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+            <Box flex={1} minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title={`${state.branchName} ↔ ${state.targetLabel}`}>
                 <Box as="span" fontWeight={600}>
                     {state.branchName || "Branch"} {"\u2194"} {state.targetLabel || "Current"}
                 </Box>
@@ -259,6 +260,7 @@ function Header({
                         {repoLabel}
                     </Box>
                 )}
+                {state.scopeLabel && <Box fontSize="11px" mt="3px" whiteSpace="normal" color="var(--vscode-descriptionForeground)">{state.scopeLabel}</Box>}
             </Box>
             <Box
                 as="button"

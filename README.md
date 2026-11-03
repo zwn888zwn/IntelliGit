@@ -95,6 +95,45 @@ Why this helps:
 
 ## Diff Review Overlay
 
+### Selected code history
+
+Select a function or a block of code in a working source file, then right-click
+**IntelliGit > 查看选中代码的历史**. The overlay lists commits that affected that
+fragment on the left and shows its historical before/after text on the right.
+The newest matching change opens automatically; **再加载 100 条** loads older results.
+Without a selection, IntelliGit uses the enclosing function when the language
+provider supplies symbols, otherwise the current line. History is pinned to the
+HEAD captured when opened.
+
+Saved and unsaved local edits are mapped back to HEAD without saving the buffer
+or changing the Git index. New uncommitted code has no Git history. Ambiguous
+partial replacements and paths absent from HEAD are reported instead of showing
+history for the wrong lines. Git's line-history tracking follows historical
+renames, but does not promise semantic tracking across arbitrary refactors or
+code moved between files. The source-file button returns to the original selection.
+
+### Changes introduced by the current branch
+
+The existing **Compare Working Tree with Branch...** and **Compare Current
+Branch with Branch...** flows now ask for the comparison mode after you select
+a branch: **直接比较** uses that branch's tip; **从共同祖先比较** uses its common
+ancestor with HEAD. Working-tree comparisons include uncommitted changes in
+either mode; current-branch comparisons include only committed changes.
+Cancelling either picker leaves the current editors alone.
+
+**查看本分支引入的改动…** is also available from the Explorer context menu
+and Command Palette, with a target-branch picker. This shortcut
+opens the committed common-ancestor comparison directly.
+
+This compares the common ancestor with the current committed HEAD. It excludes
+uncommitted edits and changes made only on the target branch. The file list,
+individual diffs and compact **Open All Changes** view use the same pinned
+commits; Refresh resolves the endpoints again and reloads the selected file.
+Unrelated histories or multiple merge bases are reported without guessing.
+The existing direct branch and working-tree comparisons remain available.
+
+### Overlay navigation
+
 Opening a native file diff automatically shows it in a large overlay inside the
 current project window. This includes IntelliGit and VS Code Source Control file
 diffs. Press **Escape** or close the overlay to return; the Git Log stays behind it.

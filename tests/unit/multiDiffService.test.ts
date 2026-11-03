@@ -237,6 +237,25 @@ describe("multi diff resources", () => {
         expect(executeCommand).not.toHaveBeenCalled();
     });
 
+    it("uses the pinned target rather than HEAD for compact branch changes", async () => {
+        const base = hash("a");
+        const pinned = hash("b");
+        const executor = makeExecutor((args) => {
+            if (args[0] === "rev-parse") return args.some(arg => arg.startsWith(pinned)) ? pinned : base;
+            if (args[0] === "diff") {
+                expect(args).toContain(base);
+                expect(args).toContain(pinned);
+                return "M\0selected.txt\0";
+            }
+            throw new Error(`unexpected git args: ${args.join(" ")}`);
+        });
+        await openBranchComparisonChanges([comparisonFile("selected.txt")], base,
+            { kind: "current-branch", ref: pinned, label: "feature" }, repoRoot, executor);
+        const resources = getResourceTuples();
+        expect(query(resources[0][1]!).ref).toBe(base);
+        expect(query(resources[0][2]!).ref).toBe(pinned);
+    });
+
     it("filters branch comparison changes by selected path", async () => {
         const source = hash("5");
         const head = hash("6");
