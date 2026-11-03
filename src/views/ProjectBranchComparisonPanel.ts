@@ -15,8 +15,10 @@ import { IconThemeService } from "./shared";
 import type {
     ProjectComparisonInbound,
     ProjectComparisonOutbound,
+    ProjectComparisonViewState,
 } from "../webviews/react/project-comparison/types";
 import type { DiffNavigationState } from "./CommitPanelViewProvider";
+import { showComparisonInOverlay, type ComparisonOverlay } from "../services/DiffOverlayController";
 
 export class ProjectBranchComparisonPanel implements vscode.Disposable {
     static readonly viewType = "intelligit.projectBranchComparison";
@@ -24,7 +26,7 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     private static nextPanelId = 1;
     private static activePanel: ProjectBranchComparisonPanel | null = null;
 
-    private readonly panel: vscode.WebviewPanel;
+    private panel!: vscode.WebviewPanel;
     private readonly iconTheme: IconThemeService;
     private readonly comparisonId = String(ProjectBranchComparisonPanel.nextPanelId++);
     private files: ProjectComparisonFile[] = [];
@@ -32,6 +34,9 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
     private lastError: string | null = null;
     private editorLayoutAdjusted = false;
     private disposed = false;
+    private readonly overlayReady: Promise<ComparisonOverlay | undefined>;
+    private diffRequest = 0;
+    private viewState: ProjectComparisonViewState | undefined;
 
     static open(
         extensionUri: vscode.Uri,
@@ -73,21 +78,31 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
         private readonly target: ProjectComparisonTarget,
         private readonly onNavigationStateChange: () => void,
     ) {
-        this.panel = vscode.window.createWebviewPanel(
-            ProjectBranchComparisonPanel.viewType,
-            `Difference Between ${branchName} and ${target.label}`,
-            vscode.ViewColumn.One,
-            {
-                enableScripts: true,
-                localResourceRoots: [vscode.Uri.joinPath(extensionUri, "dist")],
-            },
-        );
+        this.iconTheme = new IconThemeService(extensionUri);
+        this.createPanel(false);
         ProjectBranchComparisonPanel.panels.push(this);
         this.markActive();
-        this.iconTheme = new IconThemeService(extensionUri);
-        this.iconTheme.attachWebview(this.panel.webview);
+        this.overlayReady = showComparisonInOverlay(this.panel, () => this.createPanel(true));
+        void this.refresh().catch((error) => this.reportError(error));
+    }
+
+    private createPanel(preserveFocus: boolean): vscode.WebviewPanel {
+        const previous = this.panel;
+        const panel = vscode.window.createWebviewPanel(
+            ProjectBranchComparisonPanel.viewType,
+            `Difference Between ${this.branchName} and ${this.target.label}`,
+            preserveFocus ? { viewColumn: vscode.ViewColumn.One, preserveFocus: true } : vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist")],
+            },
+        );
+        this.panel = panel;
+        this.iconTheme.attachWebview(panel.webview);
 
         this.panel.webview.onDidReceiveMessage((message) => {
+            if (this.panel !== panel) return;
             this.markActive();
             this.updateNavigationContexts();
             void this.handleMessage(message).catch((error) => {
@@ -99,9 +114,10 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             this.markActive();
             this.updateNavigationContexts();
         });
-        this.panel.onDidDispose(() => this.dispose());
+        panel.onDidDispose(() => { if (this.panel === panel) this.dispose(); });
         this.panel.webview.html = this.getHtml();
-        void this.refresh().catch((error) => this.reportError(error));
+        previous?.dispose();
+        return panel;
     }
 
     dispose(): void {
@@ -160,10 +176,14 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
                     repository: this.repository.info,
                     files: this.files,
                     iconFonts: this.iconTheme.getIconFonts(),
+                    viewState: this.viewState ?? null,
                 });
                 if (this.lastError) {
                     this.post({ type: "error", message: this.lastError });
                 }
+                return;
+            case "viewState":
+                this.viewState = message.state;
                 return;
             case "refresh":
                 await this.refresh();
@@ -174,20 +194,27 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
                 await this.openFileDiff(file);
                 return;
             }
-            case "openAllDiffs":
+            case "openAllDiffs": {
                 if (this.files.length === 0) return;
-                await openBranchComparisonChanges(
+                const open = () => openBranchComparisonChanges(
                     this.files,
                     this.branchName,
                     this.target,
                     this.repository.root,
                     this.repository.executor,
                 );
+                const overlay = await this.overlayReady;
+                if (overlay) await overlay.openChanges(open);
+                else await open();
                 return;
+            }
         }
     }
 
     private async openFileDiff(file: ProjectComparisonFile): Promise<void> {
+        const request = ++this.diffRequest;
+        const overlay = await this.overlayReady;
+        if (this.disposed || request !== this.diffRequest) return;
         this.markActive();
         const shouldAdjustLayout =
             !this.editorLayoutAdjusted || vscode.window.tabGroups.all.length === 1;
@@ -200,8 +227,12 @@ export class ProjectBranchComparisonPanel implements vscode.Disposable {
             this.repository.executor,
             this.getAdjacentEditorColumn(),
             this.comparisonId,
+            overlay ? async (original, modified, title) => {
+                if (!this.disposed && request === this.diffRequest) await overlay.openDiff(original, modified, title);
+            } : undefined,
         );
-        await this.adjustEditorLayout(shouldAdjustLayout);
+        if (this.disposed || request !== this.diffRequest) return;
+        if (!overlay) await this.adjustEditorLayout(shouldAdjustLayout);
         this.setActiveFile(file);
     }
 

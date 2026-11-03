@@ -241,6 +241,10 @@ describe("multi-diff UI scopes", () => {
                         branchName: "feature",
                         targetLabel: "main",
                         repository: repository("/repo"),
+                        viewState: {
+                            filterText: "visible", activePath: "src/visible.ts",
+                            expandedDirs: ["src"], seenDirs: ["src"], scrollTop: 60,
+                        },
                         files: [
                             {
                                 repoId: "/repo",
@@ -268,11 +272,22 @@ describe("multi-diff UI scopes", () => {
         const filter = document.querySelector(
             'input[aria-label="Filter files by name or path"]',
         ) as HTMLInputElement;
+        expect(filter.value).toBe("visible");
+        const tree = document.querySelector('[role="tree"]') as HTMLDivElement;
+        expect(tree.scrollTop).toBe(60);
+        input(filter, "hidden");
+        await flush();
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "viewState", state: {
+            filterText: "hidden", activePath: "src/visible.ts",
+            expandedDirs: ["src"], seenDirs: ["src"], scrollTop: 60,
+        } });
         input(filter, "visible");
         await flush();
         expect(document.body.textContent).toContain("1 / 2");
         expect(document.querySelector('[title="src/hidden.ts"]')).toBeNull();
 
+        click(document.querySelector('button[aria-label="Refresh"]'));
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "refresh" });
         click(document.querySelector('button[aria-label="Open All Changes"]'));
         expect(vscode.postMessage).toHaveBeenCalledWith({ type: "openAllDiffs" });
 

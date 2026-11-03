@@ -88,6 +88,19 @@
         },
         "commands": [
             {
+                "command": "intelligit.returnToComparison",
+                "title": "返回比较",
+                "category": "IntelliGit",
+                "icon": "$(diff)",
+                "enablement": "intelligit.canReturnToComparison"
+            },
+            {
+                "command": "intelligit.openOverlaySource",
+                "title": "在编辑器中打开源文件",
+                "category": "IntelliGit",
+                "icon": "$(go-to-file)"
+            },
+            {
                 "command": "intelligit.copilotLogActions",
                 "title": "管理 Copilot 调试日志…",
                 "category": "IntelliGit"
@@ -428,7 +441,19 @@
                     "group": "navigation@2"
                 }
             ],
+            "modalEditor/editorTitle": [
+                {
+                    "command": "intelligit.openOverlaySource",
+                    "when": "textCompareEditorActive",
+                    "group": "navigation@8"
+                }
+            ],
             "editor/title": [
+                {
+                    "command": "intelligit.returnToComparison",
+                    "when": "intelligit.canReturnToComparison",
+                    "group": "navigation@5"
+                },
                 {
                     "command": "intelligit.previousDiffFile",
                     "when": "intelligit.diffNavigation.active && intelligit.diffNavigation.hasPrevious",
@@ -540,6 +565,12 @@
         "configuration": {
             "title": "IntelliGit",
             "properties": {
+                "intelligit.diff.openInOverlay": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "window",
+                    "markdownDescription": "Automatically open native file diffs in a large overlay in the current project window. Press Escape to return. Applies to IntelliGit and other file diff entry points. Requires a VS Code host with modal editors and `workbench.editor.useModal` set to `some` or `all`; older hosts keep regular editor tabs. Disable to use normal diff tabs."
+                },
                 "intelligit.log.showAllRefs": {
                     "type": "boolean",
                     "default": false,
@@ -599,6 +630,7 @@
         "typecheck:webview": "tsc -p tsconfig.webview.json --noEmit",
         "typecheck": "bun run typecheck:ext && bun run typecheck:webview",
         "test": "bun vitest run",
+        "test:diff-overlay": "node scripts/test-diff-overlay.cjs",
         "test:coverage": "bun vitest run --coverage",
         "test:watch": "bun vitest",
         "package": "vsce package --no-dependencies",

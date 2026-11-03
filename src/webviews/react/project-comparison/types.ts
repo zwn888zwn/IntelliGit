@@ -10,7 +10,16 @@ export type ProjectComparisonOutbound =
     | { type: "ready" }
     | { type: "refresh" }
     | { type: "openDiff"; path: string }
-    | { type: "openAllDiffs" };
+    | { type: "openAllDiffs" }
+    | { type: "viewState"; state: ProjectComparisonViewState };
+
+export interface ProjectComparisonViewState {
+    filterText: string;
+    activePath: string | null;
+    expandedDirs: string[];
+    seenDirs: string[];
+    scrollTop: number;
+}
 
 export type ProjectComparisonInbound =
     | {
@@ -23,6 +32,7 @@ export type ProjectComparisonInbound =
           folderExpandedIcon?: ThemeTreeIcon;
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
+          viewState?: ProjectComparisonViewState | null;
       }
     | { type: "refreshing"; active: boolean }
     | { type: "setActiveFile"; path: string | null }

@@ -93,6 +93,35 @@ Why this helps:
 4. Open the bottom IntelliGit panel to inspect graph history, filter by branch, and review commit details.
 5. Use branch or commit context menus for advanced operations.
 
+## Diff Review Overlay
+
+Opening a native file diff automatically shows it in a large overlay inside the
+current project window. This includes IntelliGit and VS Code Source Control file
+diffs. Press **Escape** or close the overlay to return; the Git Log stays behind it.
+The native editor keeps the real document, including unsaved changes and saving.
+Use **在编辑器中打开源文件** in the overlay toolbar to open the working file at the
+current position in the main editor. The native **Open Modal Editor in Main
+Window** button docks the diff without automatically popping it back out.
+
+Project/branch comparisons show their file tree on the left and the native diff on
+the right inside one overlay. Selecting another file reuses the right-hand pane.
+Opening a source file keeps this comparison in background tabs; **返回比较** in the
+editor toolbar restores the tree's filter, expansion and selection, and the last
+diff position and tree scroll position. The comparison's **Open All Changes**
+button shows the compact multi-file diff in the right-hand pane. Closing the
+comparison itself ends that session. Ordinary files and other multi-file changes
+summaries keep their existing presentation.
+
+Set `intelligit.diff.openInOverlay` to `false` to use regular diff tabs.
+The feature respects `workbench.editor.useModal: "off"` and falls back to normal
+tabs on hosts without modal editors. It uses VS Code's internal modal-group command
+because the public extension API does not expose this placement yet; host updates
+may require compatibility adjustments. It has been exercised in VS Code 1.144.1.
+
+Run `npm run test:diff-overlay` for the isolated native-host smoke test. On platforms
+other than macOS, set `VSCODE_EXECUTABLE_PATH` to the installed VS Code executable.
+The test creates its own temporary profile and example files.
+
 ## Copilot Request Performance (Status Bar)
 
 The Copilot status bar is hidden by default. Enable

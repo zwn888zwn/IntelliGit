@@ -15,6 +15,7 @@ import type {
     ProjectComparisonInbound,
     ProjectComparisonOutbound,
     ProjectComparisonState,
+    ProjectComparisonViewState,
 } from "./types";
 
 const INDENT_BASE = 10;
@@ -35,6 +36,22 @@ function App(): React.ReactElement {
     const [state, setState] = useState<ProjectComparisonState>(initialState);
     const [activePath, setActivePath] = useState<string | null>(null);
     const [filterText, setFilterText] = useState("");
+    const [treeState, setTreeState] = useState({ expandedDirs: [] as string[], seenDirs: [] as string[] });
+    const [restoredTree, setRestoredTree] = useState<typeof treeState>();
+    const restored = useRef(false);
+    const pendingScroll = useRef<number | undefined>();
+    const treeContainer = useRef<HTMLDivElement>(null);
+    const saveTreeState = useCallback((next: typeof treeState) => {
+        setTreeState((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+    }, []);
+    const saveViewState = useCallback(() => {
+        if (!restored.current) return;
+        const viewState: ProjectComparisonViewState = {
+            filterText, activePath, ...treeState, scrollTop: treeContainer.current?.scrollTop ?? 0,
+        };
+        vscode.postMessage({ type: "viewState", state: viewState });
+    }, [vscode, filterText, activePath, treeState]);
+    useEffect(saveViewState, [saveViewState]);
     const filterNeedle = filterText.trim().toLowerCase();
     const filteredFiles = useMemo(
         () =>
@@ -48,6 +65,18 @@ function App(): React.ReactElement {
         const listener = (event: MessageEvent<ProjectComparisonInbound>): void => {
             const message = event.data;
             if (message.type === "update") {
+                if ("viewState" in message && !restored.current) {
+                    restored.current = true;
+                    const saved = message.viewState;
+                    if (saved) {
+                        setFilterText(saved.filterText);
+                        setActivePath(saved.activePath);
+                        const tree = { expandedDirs: saved.expandedDirs, seenDirs: saved.seenDirs };
+                        setTreeState(tree);
+                        setRestoredTree(tree);
+                        pendingScroll.current = saved.scrollTop;
+                    }
+                }
                 setState((prev) => ({
                     ...prev,
                     branchName: message.branchName,
@@ -78,6 +107,12 @@ function App(): React.ReactElement {
         vscode.postMessage({ type: "ready" });
         return () => window.removeEventListener("message", listener);
     }, [vscode]);
+
+    useEffect(() => {
+        if (!state.files.length || pendingScroll.current === undefined || !treeContainer.current) return;
+        treeContainer.current.scrollTop = pendingScroll.current;
+        pendingScroll.current = undefined;
+    }, [state.files, filterText]);
 
     const openDiff = useCallback(
         (file: ProjectComparisonFile) => {
@@ -158,7 +193,7 @@ function App(): React.ReactElement {
                     {state.error}
                 </Box>
             )}
-            <Box flex={1} overflow="auto" role="tree" aria-label="Project comparison files">
+            <Box ref={treeContainer} onScroll={saveViewState} flex={1} overflow="auto" role="tree" aria-label="Project comparison files">
                 {filteredFiles.length === 0 ? (
                     <Box
                         color="var(--vscode-descriptionForeground)"
@@ -181,6 +216,8 @@ function App(): React.ReactElement {
                         folderExpandedIcon={state.folderExpandedIcon}
                         folderIconsByName={state.folderIconsByName}
                         onOpenDiff={openDiff}
+                        restoredState={restoredTree}
+                        onStateChange={saveTreeState}
                     />
                 )}
             </Box>
@@ -259,6 +296,8 @@ function ComparisonTree({
     folderExpandedIcon,
     folderIconsByName,
     onOpenDiff,
+    restoredState,
+    onStateChange,
 }: {
     files: ProjectComparisonFile[];
     filterNeedle: string;
@@ -267,10 +306,22 @@ function ComparisonTree({
     folderExpandedIcon?: ProjectComparisonState["folderExpandedIcon"];
     folderIconsByName?: ProjectComparisonState["folderIconsByName"];
     onOpenDiff: (file: ProjectComparisonFile) => void;
+    restoredState?: { expandedDirs: string[]; seenDirs: string[] };
+    onStateChange: (state: { expandedDirs: string[]; seenDirs: string[] }) => void;
 }): React.ReactElement {
     const tree = useMemo(() => buildFileTree(files), [files]);
     const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
     const seenDirsRef = useRef<Set<string>>(new Set());
+
+    useEffect(() => {
+        if (!restoredState) return;
+        seenDirsRef.current = new Set(restoredState.seenDirs);
+        setExpandedDirs(new Set(restoredState.expandedDirs));
+    }, [restoredState]);
+
+    useEffect(() => {
+        onStateChange({ expandedDirs: [...expandedDirs], seenDirs: [...seenDirsRef.current] });
+    }, [expandedDirs, onStateChange]);
 
     useEffect(() => {
         const allDirs = collectDirPaths(tree);

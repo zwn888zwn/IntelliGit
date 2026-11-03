@@ -159,6 +159,7 @@ class IntelliGitEditableDiffFileSystemProvider
                 ref: "working-tree",
                 id,
                 path: normalizeGitPath(filePath),
+                sourceFsPath: targetUri.fsPath,
             }).toString(),
         });
         this.files.set(uri.toString(), content);
@@ -938,6 +939,7 @@ export async function openBranchComparisonFileDiff(
     executor?: GitExecutor,
     viewColumn?: vscode.ViewColumn,
     projectComparisonId?: string,
+    openDiffOverride?: (original: vscode.Uri, modified: vscode.Uri, title: string) => Promise<void>,
 ): Promise<void> {
     const safePath = assertRepoRelativePath(file.path);
     const leftPath = file.oldPath ? assertRepoRelativePath(file.oldPath) : safePath;
@@ -946,6 +948,10 @@ export async function openBranchComparisonFileDiff(
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
     const title = `${safePath} (${trimmedRef} ↔ ${target.label})`;
     const openDiff = async (leftUri: vscode.Uri, rightUri: vscode.Uri): Promise<void> => {
+        if (openDiffOverride) {
+            await openDiffOverride(leftUri, rightUri, title);
+            return;
+        }
         if (viewColumn === undefined) {
             await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
             return;

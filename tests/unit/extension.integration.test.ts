@@ -7,6 +7,10 @@ import type * as vscode from "vscode";
 vi.mock("../../src/services/CopilotStatusBarController", () => ({
     CopilotStatusBarController: class { dispose = vi.fn(); },
 }));
+vi.mock("../../src/services/DiffOverlayController", () => ({
+    DiffOverlayController: class { dispose = vi.fn(); },
+    showComparisonInOverlay: vi.fn(async () => undefined),
+}));
 
 type CommandHandler = (...args: unknown[]) => unknown;
 
