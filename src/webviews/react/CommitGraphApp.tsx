@@ -117,6 +117,7 @@ function App(): React.ReactElement {
     const [revealHash, setRevealHash] = useState<string | null>(null);
     const [scrollToTopSignal, setScrollToTopSignal] = useState(0);
     const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
+    const [filteredBranch, setFilteredBranch] = useState<string | null>(null);
     const [hasMore, setHasMore] = useState(false);
     const [filterText, setFilterText] = useState("");
     const [selectedDetail, setSelectedDetail] = useState<CommitDetail | null>(null);
@@ -315,6 +316,7 @@ function App(): React.ReactElement {
                     setRepositoryWorktrees(data.worktreesByRoot);
                     break;
                 case "setSelectedBranch":
+                    setFilteredBranch(data.branch ?? null);
                     if (
                         data.branch === null &&
                         preserveSelectedBranchOnReveal.current &&
@@ -322,6 +324,9 @@ function App(): React.ReactElement {
                     ) {
                         break;
                     }
+                    pendingRevealHash.current = null;
+                    setRevealHash(null);
+                    pendingScrollToTop.current = true;
                     setSelectedBranch(data.branch ?? null);
                     break;
                 case "setFilterText":
@@ -466,6 +471,7 @@ function App(): React.ReactElement {
             return;
         }
         setSelectedBranch(name);
+        setFilteredBranch(name);
         pendingRevealHash.current = null;
         preserveSelectedBranchOnReveal.current = false;
         setRevealHash(null);
@@ -612,7 +618,9 @@ function App(): React.ReactElement {
                             filterText={filterText}
                             hasMore={hasMore}
                             unpushedHashes={unpushedHashes}
-                            selectedBranch={null}
+                            selectedBranch={filteredBranch}
+                            onChooseBranchFilter={() => vscode.postMessage({ type: "chooseBranchFilter" })}
+                            onClearBranchFilter={() => handleSelectBranch(null)}
                             repoRailExpanded={repoRailExpanded}
                             onToggleRepoRail={() => setRepoRailExpanded((value) => !value)}
                             onSelectCommit={handleSelectCommit}

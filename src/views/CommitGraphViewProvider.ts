@@ -225,12 +225,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         await this.filterByText(msg.text);
                         break;
                     case "filterBranch":
-                        this.currentBranch = msg.branch;
-                        this.filterText = "";
-                        this._onBranchFilterChanged.fire(msg.branch);
-                        this.postToWebview({ type: "setSelectedBranch", branch: msg.branch });
-                        this.postToWebview({ type: "setFilterText", text: "" });
-                        await this.loadInitial();
+                        await this.filterByBranch(msg.branch);
+                        break;
+                    case "chooseBranchFilter":
+                        await this.chooseBranchFilter();
                         break;
                     case "branchAction":
                         this._onBranchAction.fire({
@@ -387,8 +385,10 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     async filterByBranch(branch: string | null): Promise<void> {
+        this.pendingRevealHash = null;
         this.currentBranch = branch;
         this.filterText = "";
+        this._onBranchFilterChanged.fire(branch);
         this.postToWebview({ type: "setSelectedBranch", branch });
         this.postToWebview({ type: "setFilterText", text: "" });
         await this.loadInitial();
@@ -438,6 +438,24 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 executor: {} as RepositoryEntry["executor"],
             },
         ];
+    }
+
+    private async chooseBranchFilter(): Promise<void> {
+        const repositoryRoot = this.repository?.root;
+        const items: Array<vscode.QuickPickItem & { branch: string | null }> = [
+            { label: "All branches", description: "Show all branch histories", branch: null },
+            ...this.branches.map((branch) => ({
+                label: branch.name,
+                description: branch.isCurrent ? "Current branch" : branch.isRemote ? "Remote branch" : "Local branch",
+                branch: branch.name,
+            })),
+        ];
+        const selected = await vscode.window.showQuickPick(items, {
+            title: "Filter commits by branch",
+            placeHolder: "Search branches, or choose All branches",
+        });
+        if (!selected || this.repository?.root !== repositoryRoot) return;
+        await this.filterByBranch(selected.branch);
     }
 
     async revealCommit(hash: string): Promise<void> {

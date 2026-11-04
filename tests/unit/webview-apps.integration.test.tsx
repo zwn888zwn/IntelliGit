@@ -844,7 +844,9 @@ describe("CommitGraphApp integration", () => {
             );
         });
         await flush();
-        expect(document.body.textContent).toContain("Branch: All branches");
+        expect(document.body.textContent).toContain("Branch: features/right-click-context");
+        fireClick(document.querySelector('button[aria-label="Filter commits by branch"]'));
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "chooseBranchFilter" });
         expect(vscode.postMessage).not.toHaveBeenCalledWith(
             expect.objectContaining({ type: "selectCommit" }),
         );
@@ -895,6 +897,11 @@ describe("CommitGraphApp integration", () => {
             row.textContent?.trim() === "HEAD",
         ) as HTMLElement;
         fireClick(branchRow);
+        act(() => window.dispatchEvent(new MessageEvent("message", {
+            data: { type: "setSelectedBranch", branch: null },
+        })));
+        await flush();
+        expect(document.body.textContent).toContain("Branch: All branches");
         act(() => {
             window.dispatchEvent(
                 new MessageEvent("message", {

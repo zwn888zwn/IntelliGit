@@ -102,6 +102,7 @@ export type CommitGraphOutbound =
     | { type: "filterText"; text: string }
     | { type: "loadMore" }
     | { type: "filterBranch"; branch: string | null }
+    | { type: "chooseBranchFilter" }
     | {
           type: "branchAction";
           action: BranchAction;

@@ -27,6 +27,7 @@ Why this helps:
 ### 2) Commit Graph and History (Bottom Panel)
 
 - Three-pane layout: branch column, commit list/graph, and commit detail pane
+- Click **Branch: All branches** above the commit list to search for a local or remote branch and filter its history. Click the **×** beside an active branch filter to return to **All branches**. Clicking a branch in the left column locates its tip in the full graph.
 - Canvas-based lane graph with infinite scroll pagination for large histories
 - Text/hash search and branch filter
 - Selected commit shows changed files, file stats, and commit metadata

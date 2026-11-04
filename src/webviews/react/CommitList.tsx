@@ -1,9 +1,9 @@
 // Renders the commit graph canvas alongside a scrollable commit list.
 // Layout: [Graph lanes] [Commit message + inline ref badges] [Author] [Date] [Hash].
-// Includes a text search filter bar. Branch filtering is handled by the sidebar.
+// Includes text search and a branch-filter picker in the toolbar.
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
+import { LuChevronDown, LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
 import type { Commit, PipelineStatus, RepositoryContextInfo } from "../../types";
 import { computeGraph, LANE_WIDTH, ROW_HEIGHT } from "./graph";
 import { ContextMenu } from "./shared/components/ContextMenu";
@@ -62,6 +62,8 @@ interface Props {
     hasMore: boolean;
     unpushedHashes: Set<string>;
     selectedBranch: string | null;
+    onChooseBranchFilter?: () => void;
+    onClearBranchFilter?: () => void;
     repoRailExpanded: boolean;
     onToggleRepoRail: () => void;
     onSelectCommit: (hash: string) => void;
@@ -85,6 +87,8 @@ export function CommitList({
     hasMore,
     unpushedHashes,
     selectedBranch,
+    onChooseBranchFilter,
+    onClearBranchFilter,
     repoRailExpanded,
     onToggleRepoRail,
     onSelectCommit,
@@ -479,7 +483,34 @@ export function CommitList({
                         Repo: {repository?.relativePath ?? repository?.name ?? "No repository"}
                     </span>
                 )}
-                {showBranchScope && (
+                {onChooseBranchFilter ? (
+                    <button
+                        type="button"
+                        aria-label="Filter commits by branch"
+                        title={`Filter commits by branch: ${selectedBranch ?? "All branches"}`}
+                        onClick={onChooseBranchFilter}
+                        style={{
+                            ...BRANCH_SCOPE_STYLE,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            minWidth: 80,
+                            maxWidth: 240,
+                            flexShrink: 1,
+                            background: "var(--vscode-dropdown-background)",
+                            color: "var(--vscode-dropdown-foreground)",
+                            border: "1px solid var(--vscode-dropdown-border, transparent)",
+                            borderRadius: 3,
+                            padding: "2px 6px",
+                            cursor: "pointer",
+                        }}
+                    >
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                            Branch: {selectedBranch ?? "All branches"}
+                        </span>
+                        <LuChevronDown size={12} style={{ flexShrink: 0 }} />
+                    </button>
+                ) : showBranchScope && (
                     <span
                         style={BRANCH_SCOPE_STYLE}
                         title={
@@ -488,6 +519,30 @@ export function CommitList({
                     >
                         Branch: {selectedBranch ?? "All branches"}
                     </span>
+                )}
+                {selectedBranch && onClearBranchFilter && (
+                    <button
+                        type="button"
+                        aria-label="Clear branch filter"
+                        title="Show all branches"
+                        onClick={onClearBranchFilter}
+                        style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            flexShrink: 0,
+                            width: 18,
+                            height: 18,
+                            padding: 0,
+                            border: "none",
+                            borderRadius: 3,
+                            background: "transparent",
+                            color: "var(--vscode-descriptionForeground)",
+                            cursor: "pointer",
+                        }}
+                    >
+                        <LuX size={14} />
+                    </button>
                 )}
             </div>
 

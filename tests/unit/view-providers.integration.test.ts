@@ -54,6 +54,7 @@ const showErrorMessage = vi.fn(async () => undefined);
 const showWarningMessage = vi.fn(async () => undefined);
 const showInformationMessage = vi.fn(async () => undefined);
 const showTextDocument = vi.fn(async () => undefined);
+const showQuickPick = vi.fn();
 const executeCommand = vi.fn(async () => undefined);
 const openTextDocument = vi.fn(async (arg) => {
     if (arg && typeof arg === "object" && "scheme" in arg && "path" in arg) {
@@ -157,6 +158,7 @@ const vscodeMock = {
         showWarningMessage,
         showInformationMessage,
         showTextDocument,
+        showQuickPick,
         withProgress,
         onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
     },
@@ -599,6 +601,54 @@ describe("view providers integration", () => {
             vi.unstubAllGlobals();
             vi.useRealTimers();
         }
+    });
+
+    it("filters local and remote branch histories through the picker and retains the filter on pagination", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        const provider = new CommitGraphViewProvider(
+            { fsPath: "/ext", path: "/ext" } as unknown as { fsPath: string; path: string },
+            gitOps as unknown as object,
+        );
+        provider.setRepositoryContext(testRepository);
+        provider.setBranches(["main", "origin/feature/demo"].map((name) => ({
+            name, hash: "abc1234", isRemote: name.startsWith("origin/"),
+            isCurrent: name === "main", ahead: 0, behind: 0,
+        })));
+        const webview = createWebviewView();
+        provider.resolveWebviewView(webview.view as unknown as object, {} as unknown as object, {} as unknown as object);
+        await webview.send({ type: "ready" });
+        const commit = (await gitOps.getLog())[0];
+        gitOps.getLog.mockResolvedValue(Array.from({ length: 500 }, (_, i) => ({ ...commit, hash: `commit${i}` })));
+
+        for (const branch of ["main", "origin/feature/demo"]) {
+            showQuickPick.mockResolvedValueOnce({ label: branch, branch });
+            await webview.send({ type: "chooseBranchFilter" });
+            expect(gitOps.getLog).toHaveBeenLastCalledWith(500, branch, undefined, 0, false);
+            expect(postMessageSpy).toHaveBeenCalledWith({ type: "setSelectedBranch", branch });
+            await webview.send({ type: "loadMore" });
+            expect(gitOps.getLog).toHaveBeenLastCalledWith(500, branch, undefined, 500, false);
+        }
+        expect(showQuickPick).toHaveBeenCalledWith(
+            expect.arrayContaining([
+                expect.objectContaining({ branch: null }),
+                expect.objectContaining({ branch: "origin/feature/demo", description: "Remote branch" }),
+            ]),
+            expect.objectContaining({ title: "Filter commits by branch" }),
+        );
+
+        gitOps.getLog.mockClear();
+        postMessageSpy.mockClear();
+        showQuickPick.mockResolvedValueOnce(undefined);
+        await webview.send({ type: "chooseBranchFilter" });
+        expect(gitOps.getLog).not.toHaveBeenCalled();
+        expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setSelectedBranch" }));
+
+        showQuickPick.mockResolvedValueOnce({ label: "All branches", branch: null });
+        await webview.send({ type: "chooseBranchFilter" });
+        expect(gitOps.getLog).toHaveBeenLastCalledWith(500, undefined, undefined, 0, false);
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "setSelectedBranch", branch: null });
+        provider.dispose();
     });
 
     it("CommitGraphViewProvider handles webview events and refresh/load flows", async () => {
