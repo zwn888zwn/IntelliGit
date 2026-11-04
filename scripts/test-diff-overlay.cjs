@@ -37,6 +37,11 @@ async function main() {
             outfile: path.join(extension, "controller.js"),
             bundle: true, platform: "node", external: ["vscode"],
         });
+        await build({
+            entryPoints: [path.join(__dirname, "../src/services/diffService.ts")],
+            outfile: path.join(extension, "diffService.js"),
+            bundle: true, platform: "node", external: ["vscode"],
+        });
         await fs.copyFile(path.join(__dirname, "../tests/native/diffOverlay.cjs"), path.join(extension, "test.js"));
         // Test Electron must start as a desktop app, not the parent CLI's Node mode.
         delete process.env.ELECTRON_RUN_AS_NODE;

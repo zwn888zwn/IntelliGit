@@ -651,6 +651,57 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("does not append stale history while a branch filter is loading", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        const provider = new CommitGraphViewProvider({ fsPath: "/ext", path: "/ext" } as never, gitOps as never);
+        provider.setRepositoryContext(testRepository);
+        provider.setBranches([{ name: "feature", hash: "abc1234", isRemote: false, isCurrent: false, ahead: 0, behind: 0 }]);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+        await webview.send({ type: "ready" });
+        const newCommits = [{ ...(await gitOps.getLog())[0], hash: "feature-commit" }];
+        let finish!: (commits: typeof newCommits) => void;
+        gitOps.getLog.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+        gitOps.getLog.mockClear();
+        postMessageSpy.mockClear();
+        const filtering = provider.filterByBranch("feature");
+        await webview.send({ type: "loadMore" });
+        finish(newCommits);
+        await filtering;
+        expect(gitOps.getLog).toHaveBeenCalledTimes(1);
+        expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "loadCommits", append: true }));
+        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
+            type: "loadCommits", append: false,
+            commits: [expect.objectContaining({ hash: "feature-commit" })],
+        }));
+        await webview.send({ type: "loadMore" });
+        expect(gitOps.getLog).toHaveBeenLastCalledWith(500, "feature", undefined, 1, false);
+        provider.dispose();
+    });
+
+    it("restores active branch and text filters when the graph webview is recreated", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const gitOps = makeGitOpsMock();
+        const provider = new CommitGraphViewProvider({ fsPath: "/ext", path: "/ext" } as never, gitOps as never);
+        provider.setRepositoryContext(testRepository);
+        provider.setBranches([{ name: "feature", hash: "abc1234", isRemote: false, isCurrent: false, ahead: 0, behind: 0 }]);
+        const first = createWebviewView();
+        provider.resolveWebviewView(first.view as never, {} as never, {} as never);
+        await first.send({ type: "ready" });
+        await provider.filterByBranch("feature");
+        await first.send({ type: "filterText", text: "fix bug" });
+        first.dispose();
+        const second = createWebviewView();
+        provider.resolveWebviewView(second.view as never, {} as never, {} as never);
+        postMessageSpy.mockClear();
+        await second.send({ type: "ready" });
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "setSelectedBranch", branch: "feature" });
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "setFilterText", text: "fix bug" });
+        expect(gitOps.getLog).toHaveBeenLastCalledWith(500, "feature", "fix bug", 0, false);
+        provider.dispose();
+    });
+
     it("CommitGraphViewProvider handles webview events and refresh/load flows", async () => {
         const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
         const gitOps = makeGitOpsMock();
@@ -1624,6 +1675,7 @@ describe("view providers integration", () => {
         const diffCall = executeCommand.mock.calls.find((call) => call[0] === "vscode.diff");
         expect(diffCall?.[1]?.query).toContain("intelligitProjectComparison=comparison-1");
         expect(diffCall?.[2]?.query).toContain("intelligitProjectComparison=comparison-1");
+        expect(new URLSearchParams(diffCall?.[2]?.query).get("sourceFsPath")).toBe("/repo/src/new-name.ts");
     });
 
     it("openBranchComparisonFileDiff previews an added HEAD image against a placeholder", async () => {

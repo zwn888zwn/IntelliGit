@@ -3,6 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { DiffOverlayController, showComparisonInOverlay } = require("./controller");
+const { registerDiffContentProvider, openBranchComparisonFileDiff } = require("./diffService");
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, label) {
@@ -23,6 +24,8 @@ exports.run = async () => {
     const provider = vscode.workspace.registerTextDocumentContentProvider("diff-test", {
         provideTextDocumentContent: () => "package main\n// committed version\n",
     });
+    const subscriptions = [];
+    registerDiffContentProvider(subscriptions);
     const controller = new DiffOverlayController();
     try {
         await vscode.window.showTextDocument(anchor, { preview: false });
@@ -129,6 +132,25 @@ exports.run = async () => {
         await panel.webview.postMessage({ report: true });
         await until(() => dimensions?.height > 300, "restored tree has valid modal geometry");
         assert(await (await vscode.workspace.openTextDocument(another)).save());
+        // Branch comparisons use two committed snapshots, not a file URI on the
+        // right. Source navigation must still resolve the current (renamed) file.
+        await openBranchComparisonFileDiff(
+            { repoId: ".", repoRoot: workspace, path: "games.go", oldPath: "old-games.go",
+                status: "R", additions: 1, deletions: 1 },
+            "main", { kind: "current-branch", label: "Current Branch" }, workspace,
+            { getFileContentAtRef: async (_, ref) => `package main\n// ${ref} snapshot\n` },
+            undefined, undefined, "branch-comparison",
+            (left, right, title) => comparison.openDiff(left, right, title),
+        );
+        const snapshot = vscode.window.tabGroups.activeTabGroup.activeTab.input.modified;
+        assert.equal(snapshot.scheme, "intelligit-diff");
+        await vscode.commands.executeCommand("intelligit.openOverlaySource");
+        await until(() => vscode.window.tabGroups.all.length === 1, "branch comparison opens source");
+        assert.equal(main.activeTab.input.uri.toString(), modified.toString());
+        await vscode.commands.executeCommand("intelligit.returnToComparison");
+        await until(() => vscode.window.tabGroups.all.length === 3, "restore branch comparison");
+        assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.input.modified.toString(), snapshot.toString());
+
         await comparison.openChanges(() => vscode.commands.executeCommand("vscode.changes", "Compact comparison", [
             [modified, original, modified], [another, original, another],
         ]));
@@ -151,9 +173,10 @@ exports.run = async () => {
         await delay(100);
         assert.equal(vscode.window.tabGroups.all.length, 1);
         assert.equal(main.activeTab.input.modified.toString(), modified.toString());
-        console.log("PASS: automatic overlay, dirty content, source jump, native docking, split comparison, switching files, retained tree, return to comparison, modal opt-out");
+        console.log("PASS: automatic overlay, dirty content, source jump, native docking, split comparison, switching files, retained tree, return to comparison, branch snapshot source round-trip, modal opt-out");
     } finally {
         controller.dispose();
         provider.dispose();
+        for (const subscription of subscriptions) subscription.dispose();
     }
 };

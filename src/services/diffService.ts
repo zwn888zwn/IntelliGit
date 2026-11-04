@@ -1017,6 +1017,7 @@ export async function openBranchComparisonFileDiff(
             getDiffContentProvider().createUri(safePath, target.ref ?? "HEAD", rightSnapshot.content, {
                 forcePlainTextUri: rightSnapshot.forcePlainTextUri,
                 originalPath: safePath,
+                sourceFsPath: workingTreeUri.fsPath,
                 projectComparisonId,
             }),
         );
