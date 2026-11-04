@@ -33,13 +33,8 @@ export function getBranchMenuItems(
 ): BranchMenuItem[] {
     const current = quoted(currentBranchName);
     const selected = quoted(branch.name);
-    const worktreeItem: BranchMenuItem[] = options.checkedOutWorktree
-        ? [{ label: "Open Worktree...", action: "openWorktree" }, separator("sep-worktree-open")]
-        : [];
-
     if (branch.isCurrent) {
         return [
-            ...worktreeItem,
             { label: `New Branch from ${current}...`, action: "newBranchFrom" },
             { label: `New Worktree from ${current}...`, action: "newWorktreeFrom" },
             separator("sep-current-1"),
@@ -52,7 +47,8 @@ export function getBranchMenuItems(
 
     if (options.checkedOutWorktree && !branch.isRemote) {
         return [
-            ...worktreeItem,
+            { label: "Open Worktree...", action: "openWorktree" },
+            separator("sep-worktree-open"),
             { label: `New Branch from ${selected}...`, action: "newBranchFrom" },
             { label: `New Worktree from ${selected}...`, action: "newWorktreeFrom" },
             separator("sep-shared-1"),

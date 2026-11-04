@@ -44,7 +44,9 @@ function makeCommit(overrides: Partial<Commit> = {}): Commit {
 
 describe("branch menu", () => {
     it("builds current-branch menu without delete and with push/rename actions", () => {
-        const items = getBranchMenuItems(makeBranch({ isCurrent: true, name: "main" }), "main");
+        const items = getBranchMenuItems(makeBranch({ isCurrent: true, name: "main" }), "main", {
+            checkedOutWorktree: { path: "/repo", branch: "main", detached: false },
+        });
         const actions = items.filter((item) => !item.separator).map((item) => item.action);
         expect(actions).toContain("newBranchFrom");
         expect(actions).toContain("newWorktreeFrom");
@@ -53,6 +55,8 @@ describe("branch menu", () => {
         expect(actions).toContain("pushBranch");
         expect(actions).toContain("renameBranch");
         expect(actions).not.toContain("deleteBranch");
+        expect(actions).not.toContain("openWorktree");
+        expect(items[0].action).toBe("newBranchFrom");
     });
 
     it("builds non-current local branch menu with worktree action next to new branch", () => {
