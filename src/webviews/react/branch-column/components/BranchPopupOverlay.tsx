@@ -15,12 +15,13 @@ import { GitBranchIcon, StarIcon, TagRightIcon } from "../icons";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 import { buildPrefixTree, buildRemoteGroups } from "../treeModel";
 import type { TreeNode } from "../types";
+import { COMPACT_SCROLLBAR_CSS, PANEL_SEARCH_FIELD_STYLE, PANEL_SEARCH_INPUT_STYLE } from "../../shared/panelStyles";
 
 const CURRENT_BRANCH_ICON_TEAL = "var(--vscode-charts-green, #7fd4cf)";
 const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 const BRANCH_TREE_ICON_BLUE = "var(--vscode-charts-blue, #58a6ff)";
-const POPUP_WIDTH = 380;
-const SUBMENU_WIDTH = 380;
+const POPUP_WIDTH = 360;
+const SUBMENU_WIDTH = 360;
 const POPUP_ROW_CSS = `
     .intelligit-branch-popup-row:hover {
         background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.08)) !important;
@@ -223,6 +224,7 @@ export function BranchPopupOverlay({
         <div
             ref={ref}
             role="dialog"
+            className="intelligit-compact-scrollbar"
             aria-label="IntelliGit Branches"
             onMouseLeave={() => setActiveRowKey(null)}
             style={{
@@ -237,18 +239,28 @@ export function BranchPopupOverlay({
                 overflowX: "hidden",
                 overflowY: "auto",
                 overscrollBehavior: "contain",
-                borderRadius: 8,
+                borderRadius: 5,
                 border: "1px solid var(--vscode-menu-border, rgba(255,255,255,0.16))",
                 background: "var(--vscode-menu-background, #3a3f42)",
                 color: "var(--vscode-menu-foreground, #d7d7d7)",
-                boxShadow: "0 18px 42px rgba(0,0,0,0.52), 0 2px 7px rgba(0,0,0,0.45)",
+                boxShadow: "0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.35))",
                 fontFamily: SYSTEM_FONT_STACK,
                 fontSize: 13,
-                padding: "8px 8px 10px",
+                padding: "4px",
             }}
         >
-            <style>{POPUP_ROW_CSS}</style>
-            <SearchBox value={query} onChange={setQuery} />
+            <style>{`${COMPACT_SCROLLBAR_CSS}${POPUP_ROW_CSS}`}</style>
+            <div
+                style={{
+                    position: "sticky",
+                    top: 0,
+                    zIndex: 1,
+                    padding: "2px 0 6px",
+                    background: "var(--vscode-menu-background, #3a3f42)",
+                }}
+            >
+                <SearchBox value={query} onChange={setQuery} />
+            </div>
             <TopActionRow
                 icon={<LuArrowDown size={15} />}
                 label="Update Project..."
@@ -488,33 +500,21 @@ export function BranchPopupOverlay({
 function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }): React.ReactElement {
     return (
         <div
+            className="intelligit-search-field"
             style={{
-                height: 30,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "0 10px",
-                marginBottom: 8,
-                borderRadius: 4,
-                border: "1px solid var(--vscode-input-border, rgba(255,255,255,0.18))",
-                background: "var(--vscode-input-background, rgba(0,0,0,0.18))",
-                color: "var(--vscode-icon-foreground, #c9c9c9)",
+                ...PANEL_SEARCH_FIELD_STYLE,
+                height: 28,
             }}
         >
-            <LuSearch size={17} />
+            <LuSearch size={14} style={{ flexShrink: 0 }} />
             <input
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
                 autoFocus
+                aria-label="Search branches, actions and repositories"
                 placeholder="Search for branches, actions, repositories"
                 style={{
-                    flex: 1,
-                    minWidth: 0,
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    color: "var(--vscode-input-foreground, #d7d7d7)",
-                    font: "inherit",
+                    ...PANEL_SEARCH_INPUT_STYLE,
                 }}
             />
         </div>
@@ -540,11 +540,12 @@ function TopActionRow({
             className="intelligit-branch-popup-row"
             data-selected="false"
             onClick={onClick}
-            style={rowButtonStyle(20)}
+            style={rowButtonStyle(8)}
         >
             <span
                 style={{
-                    width: 22,
+                    width: 16,
+                    flexShrink: 0,
                     display: "inline-flex",
                     alignItems: "center",
                     opacity: icon || !alignWithIconLabel ? 1 : 0,
@@ -552,8 +553,8 @@ function TopActionRow({
             >
                 {icon}
             </span>
-            <span style={{ flex: 1, textAlign: "left" }}>{label}</span>
-            {hint && <span style={{ opacity: 0.55 }}>{hint}</span>}
+            <span title={label} style={{ flex: 1, minWidth: 0, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+            {hint && <span style={{ fontSize: 11, flexShrink: 0, color: "var(--vscode-descriptionForeground)" }}>{hint}</span>}
         </button>
     );
 }
@@ -755,6 +756,7 @@ const RepositorySubmenu = React.forwardRef<
         <div
             ref={ref}
             role="menu"
+            className="intelligit-compact-scrollbar"
             aria-label={`Branches in ${repository.name}`}
             onMouseLeave={() => setActiveRowKey(null)}
             style={{
@@ -769,14 +771,14 @@ const RepositorySubmenu = React.forwardRef<
                 overflowY: "auto",
                 overscrollBehavior: "contain",
                 zIndex: 9999,
-                borderRadius: 8,
+                borderRadius: 5,
                 border: "1px solid var(--vscode-menu-border, rgba(255,255,255,0.16))",
                 background: "var(--vscode-menu-background, #3a3f42)",
                 color: "var(--vscode-menu-foreground, #d7d7d7)",
-                boxShadow: "0 18px 42px rgba(0,0,0,0.52), 0 2px 7px rgba(0,0,0,0.45)",
+                boxShadow: "0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.35))",
                 fontFamily: SYSTEM_FONT_STACK,
                 fontSize: 13,
-                padding: "8px 8px 10px",
+                padding: "4px",
             }}
         >
             <TopActionRow
@@ -1092,7 +1094,7 @@ function Separator(): React.ReactElement {
         <div
             style={{
                 height: 1,
-                margin: "8px 0",
+                margin: "4px 4px",
                 background: "var(--vscode-menu-separatorBackground, rgba(255,255,255,0.12))",
             }}
         />
@@ -1102,18 +1104,18 @@ function Separator(): React.ReactElement {
 function rowButtonStyle(paddingLeft: number): React.CSSProperties {
     return {
         width: "100%",
-        minHeight: 31,
+        minHeight: 24,
         display: "flex",
         alignItems: "center",
-        gap: 8,
-        padding: `4px 14px 4px ${paddingLeft}px`,
+        gap: 7,
+        padding: `3px 8px 3px ${paddingLeft}px`,
         border: "none",
-        borderRadius: 4,
+        borderRadius: 3,
         background: "transparent",
         color: "var(--vscode-menu-foreground, #d7d7d7)",
         cursor: "pointer",
         font: "inherit",
-        lineHeight: "20px",
+        lineHeight: "18px",
         whiteSpace: "nowrap",
         overflow: "hidden",
     };

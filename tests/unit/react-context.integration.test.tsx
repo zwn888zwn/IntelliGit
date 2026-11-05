@@ -103,7 +103,7 @@ describe("BranchColumn integration", () => {
         expect(container.textContent).toContain("HEAD");
 
         const headRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
-            row.textContent?.trim() === "HEAD",
+            row.getAttribute("aria-label")?.endsWith("(HEAD)"),
         ) as HTMLElement;
         expect(headRow.classList.contains("selected")).toBe(false);
         act(() => {

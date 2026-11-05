@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SYSTEM_FONT_STACK } from "../../../utils/constants";
 import { Box, Flex } from "@chakra-ui/react";
+import { LuChevronDown, LuChevronRight } from "react-icons/lu";
 import type { CommitDetail, CommitFile, ThemeFolderIconMap, ThemeTreeIcon } from "../../../types";
 import { formatDateTime } from "../shared/date";
 import { FileTypeIcon } from "../commit-panel/components/FileTypeIcon";
@@ -9,6 +10,7 @@ import { useDragResize } from "../commit-panel/hooks/useDragResize";
 import { RefTypeIcon, TreeFolderIcon } from "../shared/components";
 import { OpenChangesButton } from "../shared/components/OpenChangesButton";
 import { TEST_FILE_ROW_BACKGROUND } from "../shared/tokens";
+import { PANEL_BORDER, PANEL_COUNT_STYLE, PANEL_HEADER_SURFACE } from "../shared/panelStyles";
 import { getLeafName, isTestFilePath, resolveFolderIcon, splitCommitRefs } from "../shared/utils";
 import {
     buildFileTree,
@@ -26,7 +28,7 @@ const INFO_INDENT_STEP = 14;
 const INFO_GUIDE_BASE = 23;
 const INFO_SECTION_GUIDE = 7;
 const COMMIT_DETAILS_DEFAULT_HEIGHT = 110;
-const COMMIT_DETAILS_HEIGHT_RATIO = 1 / 3;
+const COMMIT_DETAILS_HEIGHT_RATIO = 0.4;
 
 function CommitRefRow({
     kind,
@@ -99,6 +101,13 @@ export function CommitInfoPane({
         [detail?.refs],
     );
     const containingBranches = detail?.containingBranches ?? [];
+    const changeTotals = useMemo(
+        () => (detail?.files ?? []).reduce(
+            (total, file) => ({ additions: total.additions + file.additions, deletions: total.deletions + file.deletions }),
+            { additions: 0, deletions: 0 },
+        ),
+        [detail?.files],
+    );
     const containingBranchPreview = containingBranches.slice(0, 2);
     const hasHiddenContainingBranches = containingBranchPreview.length < containingBranches.length;
 
@@ -132,18 +141,21 @@ export function CommitInfoPane({
     return (
         <Flex ref={containerRef} direction="column" h="100%" overflow="hidden">
             <Box
-                px="8px"
-                py="4px"
+                px="10px"
+                h="36px"
+                bg={PANEL_HEADER_SURFACE}
+                flexShrink={0}
                 fontWeight={600}
                 fontSize="12px"
-                color="var(--vscode-descriptionForeground)"
-                borderBottom="1px solid var(--vscode-panel-border)"
+                color="var(--vscode-foreground)"
+                borderBottom={`1px solid ${PANEL_BORDER}`}
                 cursor="pointer"
                 tabIndex={0}
                 role="button"
                 aria-expanded={!filesCollapsed}
                 display="flex"
                 alignItems="center"
+                gap="6px"
                 onClick={() => setFilesCollapsed((v) => !v)}
                 onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -152,9 +164,13 @@ export function CommitInfoPane({
                     }
                 }}
             >
-                <Box as="span" flex={1}>
-                    {filesCollapsed ? "\u25B6" : "\u25BC"} Changed Files
-                </Box>
+                {filesCollapsed ? <LuChevronRight size={13} /> : <LuChevronDown size={13} />}
+                <Box as="span">Changed Files</Box>
+                <span style={PANEL_COUNT_STYLE}>{detail.files.length}</span>
+                <Flex ml="auto" gap="5px" fontSize="10px" fontWeight={500} whiteSpace="nowrap">
+                    <Box as="span" color="var(--vscode-gitDecoration-addedResourceForeground, #73c991)">+{changeTotals.additions}</Box>
+                    <Box as="span" color="var(--vscode-gitDecoration-deletedResourceForeground, #c74e39)">−{changeTotals.deletions}</Box>
+                </Flex>
                 <OpenChangesButton
                     onClick={() => onOpenChanges?.(detail.hash, detail.repoRoot)}
                     disabled={!onOpenChanges || detail.files.length === 0}
@@ -162,7 +178,7 @@ export function CommitInfoPane({
                 />
             </Box>
             {!filesCollapsed && (
-                <Box flex="1 1 auto" overflowY="auto" minH="40px" py="4px">
+                <Box flex="1 1 auto" overflowY="auto" minH="40px">
                     <TreeRows
                         entries={tree}
                         depth={0}
@@ -190,23 +206,20 @@ export function CommitInfoPane({
 
             {!filesCollapsed && !detailCollapsed && (
                 <Box
-                    flex="0 0 5px"
+                    flex="0 0 4px"
                     cursor="row-resize"
-                    bg="var(--vscode-panel-border, #444)"
+                    bg="transparent"
                     position="relative"
                     _hover={{ bg: "var(--vscode-focusBorder, #007acc)" }}
                     onMouseDown={onResizeStart}
                     _after={{
                         content: '""',
                         position: "absolute",
-                        left: "50%",
-                        top: "50%",
-                        transform: "translate(-50%, -50%)",
-                        w: "30px",
-                        h: "2px",
-                        bg: "var(--vscode-descriptionForeground)",
-                        opacity: 0.4,
-                        borderRadius: "1px",
+                        left: 0,
+                        right: 0,
+                        top: "1px",
+                        h: "1px",
+                        bg: PANEL_BORDER,
                     }}
                 />
             )}
@@ -215,14 +228,19 @@ export function CommitInfoPane({
                 flexShrink={filesCollapsed ? 1 : 0}
                 flexGrow={filesCollapsed ? 1 : 0}
                 minH={filesCollapsed ? 0 : undefined}
-                h={filesCollapsed ? undefined : detailCollapsed ? "30px" : `${bottomHeight}px`}
+                h={filesCollapsed ? undefined : detailCollapsed ? "24px" : `${bottomHeight}px`}
                 overflow="hidden"
+                bg="var(--vscode-editor-background)"
             >
                 <Box
                     px="8px"
-                    py="4px"
+                    h="24px"
+                    display="flex"
+                    alignItems="center"
+                    gap="6px"
                     fontWeight={600}
                     fontSize="12px"
+                    bg={PANEL_HEADER_SURFACE}
                     color="var(--vscode-descriptionForeground)"
                     cursor="pointer"
                     tabIndex={0}
@@ -236,11 +254,26 @@ export function CommitInfoPane({
                         }
                     }}
                 >
-                    {detailCollapsed ? "\u25B6" : "\u25BC"} Commit Details
+                    {detailCollapsed ? <LuChevronRight size={13} /> : <LuChevronDown size={13} />}
+                    Commit Details
+                    <Box
+                        as="span"
+                        ml="auto"
+                        px="5px"
+                        fontSize="10px"
+                        fontWeight={400}
+                        fontFamily="var(--vscode-editor-font-family, monospace)"
+                        color="var(--vscode-textLink-foreground)"
+                        bg="color-mix(in srgb, var(--vscode-focusBorder) 10%, transparent)"
+                        borderRadius="3px"
+                        title={detail.hash}
+                    >
+                        {detail.shortHash}
+                    </Box>
                 </Box>
                 {!detailCollapsed && (
-                    <Box px="12px" py="6px" overflowY="auto" h={`calc(100% - 28px)`}>
-                        <Box fontWeight={600} whiteSpace="pre-wrap" lineHeight="1.4" mb="6px">
+                    <Box px="12px" py="6px" overflowY="auto" h="calc(100% - 24px)" overflowWrap="anywhere">
+                        <Box fontSize="13px" fontWeight={600} whiteSpace="pre-wrap" lineHeight="19px" mb="6px">
                             {detail.message}
                         </Box>
                         {detail.body && (
@@ -253,28 +286,23 @@ export function CommitInfoPane({
                                 {detail.body}
                             </Box>
                         )}
-                        <Box
-                            color="var(--vscode-descriptionForeground)"
-                            fontSize="12px"
-                            lineHeight="1.5"
-                        >
-                            <span
-                                style={{
-                                    fontFamily: "var(--vscode-editor-font-family, monospace)",
-                                    color: "var(--vscode-textLink-foreground)",
-                                }}
+                        <Flex align="center" gap="6px" color="var(--vscode-descriptionForeground)" fontSize="11px">
+                            <Flex
+                                align="center" justify="center" w="18px" h="18px" flexShrink={0}
+                                borderRadius="50%" fontSize="10px"
+                                bg="color-mix(in srgb, var(--vscode-focusBorder) 15%, transparent)"
+                                color="var(--vscode-textLink-foreground)"
+                                aria-hidden="true"
                             >
-                                {detail.shortHash}
-                            </span>{" "}
-                            by {detail.author}
-                        </Box>
-                        <Box
-                            color="var(--vscode-descriptionForeground)"
-                            fontSize="12px"
-                            lineHeight="1.5"
-                        >
-                            {detail.email} on {formatDateTime(detail.date)}
-                        </Box>
+                                {detail.author.slice(0, 1).toUpperCase()}
+                            </Flex>
+                            <Box as="span" flex={1} minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title={detail.email}>
+                                {detail.author}
+                            </Box>
+                            <Box as="span" fontSize="10px" whiteSpace="nowrap" title={detail.date}>
+                                {formatDateTime(detail.date)}
+                            </Box>
+                        </Flex>
                         {(branchRefs.length > 0 || tagRefs.length > 0) && (
                             <Box mt="14px">
                                 {branchRefs.length > 0 && (
@@ -498,7 +526,7 @@ function CommitFolderRow({
             pl={`${padLeft}px`}
             pr="6px"
             lineHeight="22px"
-            fontSize="13px"
+            fontSize="12px"
             fontFamily={SYSTEM_FONT_STACK}
             cursor="pointer"
             position="relative"
@@ -521,10 +549,10 @@ function CommitFolderRow({
                 &#9654;
             </Box>
             <TreeFolderIcon isExpanded={isExpanded} icon={resolvedIcon} />
-            <Box as="span" flex={1} opacity={0.85}>
+            <Box as="span" flex={1} minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
                 {folder.name}
             </Box>
-            <Box as="span" ml="auto" fontSize="11px" color="var(--vscode-descriptionForeground)">
+            <Box as="span" ml="auto" flexShrink={0} fontSize="11px" color="var(--vscode-descriptionForeground)">
                 {fileCount} file{fileCount !== 1 ? "s" : ""}
             </Box>
         </Flex>
@@ -603,7 +631,7 @@ const CommitFileRow = React.memo(function CommitFileRow({
             pl={`${padLeft}px`}
             pr="6px"
             lineHeight="22px"
-            fontSize="13px"
+            fontSize="12px"
             fontFamily={SYSTEM_FONT_STACK}
             cursor="pointer"
             position="relative"
@@ -625,7 +653,7 @@ const CommitFileRow = React.memo(function CommitFileRow({
             <InfoIndentGuides treeDepth={depth} />
             <Box as="span" w="14px" flexShrink={0} />
             <FileTypeIcon status={file.status} icon={file.icon} />
-            <Box as="span" flex={1} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
+            <Box as="span" flex={1} minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap">
                 {fileName}
             </Box>
             {(file.additions > 0 || file.deletions > 0) && (

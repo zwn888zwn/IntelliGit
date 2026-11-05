@@ -2,12 +2,13 @@
 // Shows HEAD, local branches grouped by prefix, and remote branches grouped by remote.
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
-import React, { useMemo, useState, useCallback, useEffect } from "react";
+import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
     LuChevronsDown,
     LuChevronsUp,
     LuChevronRight,
+    LuCheck,
     LuFolderGit2,
     LuGitBranch,
     LuListTree,
@@ -49,6 +50,7 @@ import {
 import { RepoIcon, TagRightIcon } from "./branch-column/icons";
 import { renderHighlightedLabel } from "./branch-column/highlight";
 import { getVsCodeApi } from "./shared/vscodeApi";
+import { PANEL_BORDER, PANEL_COUNT_STYLE, PANEL_TOOLBAR_STYLE } from "./shared/panelStyles";
 import {
     BASE_ICON_STYLE,
     BRANCH_ROW_CLASS_CSS,
@@ -58,9 +60,9 @@ import {
     HEAD_WRAPPER_STYLE,
     MULTI_REPOSITORY_PANEL_STYLE,
     NODE_ICON_SIZE,
+    NODE_LABEL_STYLE,
     NO_MATCH_STYLE,
     PANEL_STYLE,
-    REPOSITORY_BRANCH_STYLE,
     REPOSITORY_COLOR_STYLE,
     REPOSITORY_LIST_STYLE,
     REPOSITORY_NAME_LINE_STYLE,
@@ -116,6 +118,7 @@ interface BranchColumnPersistState {
     branchFilter: string;
     expandedSections: string[];
     expandedFolders: string[];
+    repositoriesCollapsed?: boolean;
 }
 
 interface CommitGraphViewState {
@@ -278,6 +281,10 @@ export function BranchColumn({
         allRepositories?: boolean;
     } | null>(null);
     const [branchPopupOpen, setBranchPopupOpen] = useState(false);
+    const [repositoriesCollapsed, setRepositoriesCollapsed] = useState(
+        () => persistedState?.repositoriesCollapsed ?? false,
+    );
+    const repositoriesRef = useRef<HTMLDivElement>(null);
 
     const hasMultipleRepositories = repositories.length > 1;
     const filterNeedle = branchFilter.trim().toLowerCase();
@@ -428,8 +435,15 @@ export function BranchColumn({
             branchFilter,
             expandedSections: Array.from(expandedSections),
             expandedFolders: Array.from(expandedFolders),
+            repositoriesCollapsed,
         });
-    }, [branchFilter, expandedSections, expandedFolders]);
+    }, [branchFilter, expandedSections, expandedFolders, repositoriesCollapsed]);
+
+    useEffect(() => {
+        repositoriesRef.current
+            ?.querySelector<HTMLButtonElement>('[data-selected="true"]')
+            ?.scrollIntoView?.({ block: "nearest" });
+    }, [repository?.root, repositoriesCollapsed]);
 
     useEffect(() => {
         if (!openPopupRequest) return;
@@ -503,7 +517,8 @@ export function BranchColumn({
                     alignItems: "center",
                     gap: 4,
                     padding: "5px 3px",
-                    borderRight: "1px solid var(--vscode-panel-border)",
+                    background: "var(--vscode-editor-background)",
+                    borderRight: `1px solid ${PANEL_BORDER}`,
                     color: "var(--vscode-icon-foreground)",
                 }}
             >
@@ -547,16 +562,32 @@ export function BranchColumn({
                 }}
             >
 
-                <div title="Search branches and tags">
-                    <BranchSearchBar
-                        value={branchFilter}
-                        onChange={setBranchFilter}
-                        onClear={() => setBranchFilter("")}
-                    />
+                {hasMultipleRepositories ? (
+                    <button
+                        type="button"
+                        aria-label={repositoriesCollapsed ? "Expand projects" : "Collapse projects"}
+                        aria-expanded={!repositoriesCollapsed}
+                        title={repository?.root}
+                        onClick={() => setRepositoriesCollapsed((collapsed) => !collapsed)}
+                        style={{ ...PANEL_TOOLBAR_STYLE, width: "100%", border: "none", borderBottom: `1px solid ${PANEL_BORDER}`, color: "inherit", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}
+                    >
+                        <LuChevronRight size={12} style={{ flexShrink: 0, transform: repositoriesCollapsed ? undefined : "rotate(90deg)" }} />
+                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 600 }}>
+                            {repositoriesCollapsed && repository ? repository.name : "Projects"}
+                        </span>
+                        <span style={PANEL_COUNT_STYLE}>{repositories.length}</span>
+                    </button>
+                ) : (
+                <div style={{ ...PANEL_TOOLBAR_STYLE, justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>Branches</span>
+                    <span style={PANEL_COUNT_STYLE} title={`${branches.length} branches`}>
+                        {branches.length}
+                    </span>
                 </div>
+                )}
 
-            {hasMultipleRepositories && (
-                <div aria-label="Repositories" style={REPOSITORY_LIST_STYLE}>
+            {hasMultipleRepositories && !repositoriesCollapsed && (
+                <div ref={repositoriesRef} className="intelligit-repositories" aria-label="Repositories" style={REPOSITORY_LIST_STYLE}>
                     {repositories.map((repo) => {
                         const currentBranch = repositoryBranches[repo.root]?.find(
                             (branch) => branch.isCurrent,
@@ -570,7 +601,8 @@ export function BranchColumn({
                                 className="repository-row"
                                 data-selected={selected ? "true" : "false"}
                                 aria-label={`Switch to repository ${repo.name}`}
-                                aria-expanded={selected}
+                                aria-current={selected ? "true" : undefined}
+                                title={`${repo.root}${currentBranchName ? `\nBranch: ${currentBranchName}` : ""}`}
                                 onClick={() => {
                                     if (!selected)
                                         onBranchPopupAction("switchRepository", repo.root);
@@ -621,33 +653,37 @@ export function BranchColumn({
                                                 </span>
                                             )}
                                     </span>
-                                    <span style={REPOSITORY_BRANCH_STYLE}>{currentBranchName}</span>
                                 </span>
-                                <LuChevronRight
+                                {selected && <LuCheck
                                     aria-hidden="true"
-                                    size={14}
-                                    style={{
-                                        flexShrink: 0,
-                                        opacity: 0.65,
-                                        transform: selected
-                                            ? "rotate(90deg)"
-                                            : "rotate(0deg)",
-                                        transition: "transform 0.1s",
-                                    }}
-                                />
+                                    size={12}
+                                    style={{ flexShrink: 0, color: "var(--vscode-textLink-foreground)" }}
+                                />}
                             </button>
                         );
                     })}
                 </div>
             )}
 
+            <div
+                title={hasMultipleRepositories ? `Search branches and tags in ${repository?.name ?? "the selected project"}` : "Search branches and tags"}
+                style={{ flexShrink: 0, borderTop: hasMultipleRepositories ? `1px solid ${PANEL_BORDER}` : undefined }}
+            >
+                <BranchSearchBar
+                    value={branchFilter}
+                    onChange={setBranchFilter}
+                    onClear={() => setBranchFilter("")}
+                />
+            </div>
+
             {(!hasMultipleRepositories || !!repository) && (
-                <div style={hasMultipleRepositories ? BRANCH_TREE_SCROLL_STYLE : undefined}>
+                <>
                     {current && (
                         <div style={HEAD_WRAPPER_STYLE}>
                             <div
                                 className="branch-row"
                                 role="button"
+                                aria-label={`Current branch ${current.name} (HEAD)`}
                                 tabIndex={0}
                                 onClick={() => onSelectBranch(current.name, current.hash)}
                                 onContextMenu={(event) => handleBranchContextMenu(event, current)}
@@ -678,6 +714,9 @@ export function BranchColumn({
                                     focusable="false"
                                 />
                                 <span style={HEAD_LABEL_STYLE}>HEAD</span>
+                                <span title={current.name} style={{ ...NODE_LABEL_STYLE, marginLeft: 6, fontWeight: 400 }}>
+                                    {current.name}
+                                </span>
                                 <TrackingBadge
                                     branch={current}
                                     remoteBranchNames={remoteBranchNames}
@@ -686,6 +725,7 @@ export function BranchColumn({
                         </div>
                     )}
 
+                <div aria-label="Branch tree" style={BRANCH_TREE_SCROLL_STYLE}>
                     <BranchSectionHeader
                         label="Local"
                         expanded={expandedSections.has("local")}
@@ -813,6 +853,7 @@ export function BranchColumn({
                         filteredTags.length === 0 &&
                         !current && <div style={NO_MATCH_STYLE}>No matching branches or tags</div>}
                 </div>
+                </>
             )}
 
             {contextMenu && (

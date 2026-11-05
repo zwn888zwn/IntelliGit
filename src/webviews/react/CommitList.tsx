@@ -3,11 +3,12 @@
 // Includes text search and a branch-filter picker in the toolbar.
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { LuChevronDown, LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
+import { LuChevronDown, LuFolderGit2, LuGitBranch, LuPanelLeftClose, LuPanelLeftOpen, LuSearch, LuX } from "react-icons/lu";
 import type { Commit, PipelineStatus, RepositoryContextInfo } from "../../types";
 import { computeGraph, LANE_WIDTH, ROW_HEIGHT } from "./graph";
 import { ContextMenu } from "./shared/components/ContextMenu";
 import { getCommitMenuItems } from "./commit-list/commitMenu";
+import { PANEL_SURFACE } from "./shared/panelStyles";
 import { CommitRow } from "./commit-list/CommitRow";
 import { useCommitGraphCanvas } from "./commit-list/useCommitGraphCanvas";
 import { isCommitAction, type CommitAction } from "./commitGraphTypes";
@@ -42,7 +43,7 @@ const AUTHOR_COLUMN_MIN_WIDTH = 620;
 const BRANCH_SCOPE_MIN_WIDTH = 680;
 const HASH_COLUMN_MIN_WIDTH = 760;
 const CURRENT_BRANCH_ROW_BACKGROUND =
-    "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 30%, transparent)";
+    "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 12%, transparent)";
 
 function commitGraphKey(repoRoot: string, hash: string): string {
     return `${repoRoot}\u0000${hash}`;
@@ -450,37 +451,19 @@ export function CommitList({
                 .intelligit-pipeline-running { animation: intelligit-pipeline-spin 1s linear infinite; }
                 @media (prefers-reduced-motion: reduce) { .intelligit-pipeline-running { animation: none; } }`}</style>
             <div style={FILTER_BAR_STYLE}>
-                <LuSearch size={16} style={FILTER_ICON_STYLE} />
-                <div style={FILTER_INPUT_WRAP_STYLE}>
-                    <input
-                        type="text"
-                        placeholder="Text or hash"
-                        value={filterText}
-                        onChange={(event) => onFilterText(event.target.value)}
-                        style={FILTER_INPUT_STYLE}
-                    />
-                    {filterText.length > 0 && (
-                        <button
-                            type="button"
-                            aria-label="Clear commit search"
-                            title="Clear"
-                            onClick={() => onFilterText("")}
-                            style={FILTER_CLEAR_BUTTON_STYLE}
-                        >
-                            <LuX size={12} />
-                        </button>
-                    )}
-                </div>
                 {showRepositoryScope && (
                     <span
-                        style={BRANCH_SCOPE_STYLE}
+                        style={{ ...BRANCH_SCOPE_STYLE, maxWidth: hasRepositoryRail ? 240 : 160, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600, color: "var(--vscode-foreground)" }}
                         title={
                             repository
                                 ? `Repository: ${repository.relativePath ?? repository.root}`
                                 : "No repository selected"
                         }
                     >
-                        Repo: {repository?.relativePath ?? repository?.name ?? "No repository"}
+                        <LuFolderGit2 size={14} style={{ flexShrink: 0, color: repository?.color }} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {repository?.name ?? "No repository"}
+                        </span>
                     </span>
                 )}
                 {onChooseBranchFilter ? (
@@ -493,20 +476,22 @@ export function CommitList({
                             ...BRANCH_SCOPE_STYLE,
                             display: "inline-flex",
                             alignItems: "center",
-                            gap: 4,
+                            gap: 6,
                             minWidth: 80,
+                            height: 24,
                             maxWidth: 240,
                             flexShrink: 1,
-                            background: "var(--vscode-dropdown-background)",
+                            background: "transparent",
                             color: "var(--vscode-dropdown-foreground)",
-                            border: "1px solid var(--vscode-dropdown-border, transparent)",
-                            borderRadius: 3,
-                            padding: "2px 6px",
+                            border: "1px solid color-mix(in srgb, var(--vscode-focusBorder) 35%, transparent)",
+                            borderRadius: 5,
+                            padding: "2px 8px",
                             cursor: "pointer",
                         }}
                     >
+                        <LuGitBranch size={13} style={{ flexShrink: 0, color: "var(--vscode-textLink-foreground)" }} />
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-                            Branch: {selectedBranch ?? "All branches"}
+                            {selectedBranch ?? "All branches"}
                         </span>
                         <LuChevronDown size={12} style={{ flexShrink: 0 }} />
                     </button>
@@ -544,6 +529,28 @@ export function CommitList({
                         <LuX size={14} />
                     </button>
                 )}
+                <div className="intelligit-search-field" style={FILTER_INPUT_WRAP_STYLE}>
+                    <LuSearch size={14} style={FILTER_ICON_STYLE} />
+                    <input
+                        type="text"
+                        aria-label="Search commits"
+                        placeholder="Text or hash"
+                        value={filterText}
+                        onChange={(event) => onFilterText(event.target.value)}
+                        style={FILTER_INPUT_STYLE}
+                    />
+                    {filterText.length > 0 && (
+                        <button
+                            type="button"
+                            aria-label="Clear commit search"
+                            title="Clear"
+                            onClick={() => onFilterText("")}
+                            style={FILTER_CLEAR_BUTTON_STYLE}
+                        >
+                            <LuX size={12} />
+                        </button>
+                    )}
+                </div>
             </div>
 
             <div style={{ ...headerRowStyle(headerGraphWidth), paddingRight: ROW_SIDE_PADDING + scrollbarWidth }}>
@@ -617,18 +624,15 @@ export function CommitList({
                                                 height: ROW_HEIGHT,
                                                 border: "none",
                                                 borderRight: "1px solid rgba(255,255,255,0.08)",
-                                                borderLeft: repoRailExpanded
-                                                    ? "none"
-                                                    : `4px solid ${repo?.color ?? "#666"}`,
+                                                borderLeft: `${repoRailExpanded ? 2 : 4}px solid ${repo?.color ?? "#666"}`,
                                                 background: repoRailExpanded
-                                                    ? (repo?.color ?? "#666")
+                                                    ? PANEL_SURFACE
                                                     : "transparent",
-                                                color: "rgba(255,255,255,0.92)",
+                                                color: "var(--vscode-foreground)",
                                                 padding: repoRailExpanded ? "0 8px" : 0,
                                                 textAlign: "left",
                                                 overflow: "hidden",
                                                 cursor: "pointer",
-                                                opacity: selectedHash === commit.hash ? 1 : 0.72,
                                             }}
                                         >
                                             {repoRailExpanded && (
@@ -639,7 +643,7 @@ export function CommitList({
                                                         textOverflow: "ellipsis",
                                                         whiteSpace: "nowrap",
                                                         fontSize: "11px",
-                                                        fontWeight: 700,
+                                                        fontWeight: 500,
                                                     }}
                                                 >
                                                     {repo?.name ?? commit.repoId}

@@ -33,6 +33,7 @@ import { getVsCodeApi } from "./shared/vscodeApi";
 import theme from "./commit-panel/theme";
 import { CommitInfoPane } from "./commit-info/CommitInfoPane";
 import { ThemeIconFontFaces } from "./shared/components";
+import { GRAPH_PANEL_CSS, PANEL_SURFACE } from "./shared/panelStyles";
 
 const vscode = getVsCodeApi<CommitGraphOutbound, unknown>();
 const MIN_BRANCH_WIDTH = 80;
@@ -550,9 +551,10 @@ function App(): React.ReactElement {
     return (
         <>
             <ThemeIconFontFaces fonts={iconFonts} />
-            <div style={{ display: "flex", height: "100%", overflow: "hidden", minHeight: 0 }}>
+            <style>{GRAPH_PANEL_CSS}</style>
+            <div className="intelligit-graph-panel" style={{ display: "flex", height: "100%", overflow: "hidden", minHeight: 0 }}>
                 {/* Branch column */}
-                <div style={{ width: branchWidth, flexShrink: 0, overflow: "hidden" }}>
+                <div style={{ width: branchWidth, flexShrink: 0, overflow: "hidden", background: PANEL_SURFACE }}>
                     <BranchColumn
                         branches={branches}
                         repositoryBranches={repositoryBranches}
@@ -591,12 +593,13 @@ function App(): React.ReactElement {
                 {/* Resizable divider */}
                 <div
                     data-testid="commit-graph-divider"
+                    className="intelligit-panel-divider"
                     onMouseDown={onDividerMouseDown}
                     style={{
                         width: 4,
                         flexShrink: 0,
                         cursor: "col-resize",
-                        background: "var(--vscode-panel-border)",
+                        background: "transparent",
                     }}
                 />
 
@@ -632,12 +635,13 @@ function App(): React.ReactElement {
                     </div>
                     <div
                         data-testid="commit-info-divider"
+                        className="intelligit-panel-divider"
                         onMouseDown={onInfoDividerMouseDown}
                         style={{
                             width: 4,
                             flexShrink: 0,
                             cursor: "col-resize",
-                            background: "var(--vscode-panel-border)",
+                            background: "transparent",
                         }}
                     />
                     <div
@@ -646,6 +650,7 @@ function App(): React.ReactElement {
                             flexShrink: 0,
                             overflow: "hidden",
                             minHeight: 0,
+                            background: PANEL_SURFACE,
                         }}
                     >
                         <CommitInfoPane

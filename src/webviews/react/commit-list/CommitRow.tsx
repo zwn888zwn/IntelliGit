@@ -136,6 +136,10 @@ function BranchRefsIndicator({
                 gap: 4,
                 minWidth: branchRefs.length > 0 ? 34 : 13,
                 maxWidth: 260,
+                padding: "0 5px",
+                borderRadius: 4,
+                border: "1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 20%, transparent)",
+                background: "color-mix(in srgb, var(--vscode-descriptionForeground) 8%, transparent)",
                 flex: "0 1 auto",
                 fontSize: "11px",
                 lineHeight: "16px",
@@ -331,10 +335,11 @@ function CommitRowInner({
         <div
             onClick={(event) => onSelect(commit.hash, event)}
             aria-selected={isSelected}
+            className="intelligit-commit-row"
             onContextMenu={(event) => onContextMenu(event, commit)}
             style={{
                 "--commit-ref-background": isSelected
-                    ? "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 36%, var(--vscode-editor-background, #222))"
+                    ? "var(--vscode-list-activeSelectionBackground)"
                     : "var(--vscode-editor-background, #222)",
                 height: ROW_HEIGHT,
                 width: `calc(100% - ${rowLeftOffset}px)`,
@@ -351,13 +356,13 @@ function CommitRowInner({
                     ? `2px solid ${laneColor ?? "#4CAF50"}`
                     : "2px solid transparent",
                 background: isSelected
-                    ? "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 36%, transparent)"
+                    ? "var(--vscode-list-activeSelectionBackground)"
                     : "transparent",
-                borderRadius: isSelected ? 4 : 0,
+                borderRadius: isSelected ? 2 : 0,
                 color: isSelected
                     ? "var(--vscode-list-activeSelectionForeground)"
                     : isMergeCommit
-                      ? "var(--vscode-disabledForeground)"
+                      ? "var(--vscode-descriptionForeground)"
                       : "inherit",
             } as React.CSSProperties}
         >
@@ -384,7 +389,7 @@ function CommitRowInner({
                     style={{
                         width: AUTHOR_COL_WIDTH,
                         textAlign: "right",
-                        opacity: isMergeCommit ? 1 : 0.7,
+                        color: isSelected ? "inherit" : "var(--vscode-descriptionForeground)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         flexShrink: 0,
@@ -400,7 +405,7 @@ function CommitRowInner({
                     style={{
                         width: DATE_COL_WIDTH,
                         textAlign: "right",
-                        opacity: isMergeCommit ? 0.8 : 0.5,
+                        color: isSelected ? "inherit" : "var(--vscode-descriptionForeground)",
                         flexShrink: 0,
                         marginLeft: META_COL_GAP,
                         fontSize: "11px",
@@ -417,7 +422,7 @@ function CommitRowInner({
                     style={{
                         width: HASH_COL_WIDTH,
                         textAlign: "right",
-                        opacity: isMergeCommit ? 0.78 : 0.62,
+                        color: isSelected ? "inherit" : "var(--vscode-descriptionForeground)",
                         flexShrink: 0,
                         marginLeft: META_COL_GAP,
                         overflow: "hidden",

@@ -532,7 +532,7 @@ describe("low coverage components", () => {
         unmount(root, container);
     });
 
-    it("BranchColumn shows and switches repositories in the persistent sidebar list", () => {
+    it("BranchColumn switches repositories and collapses the compact project list", () => {
         const repositories: RepositoryContextInfo[] = [
             {
                 repoId: "pic",
@@ -592,21 +592,22 @@ describe("low coverage components", () => {
             'button[aria-label="Switch to repository IosLatex"]',
         ) as HTMLButtonElement;
         expect(picRow.dataset.selected).toBe("true");
-        expect(picRow.getAttribute("aria-expanded")).toBe("true");
+        expect(picRow.getAttribute("aria-current")).toBe("true");
         expect(iosRow.dataset.selected).toBe("false");
-        expect(iosRow.getAttribute("aria-expanded")).toBe("false");
+        expect(iosRow.getAttribute("aria-current")).toBeNull();
         expect(picRow.textContent).toContain("PicMath");
-        expect(picRow.textContent).toContain("pic-current");
+        expect(picRow.title).toContain("Branch: pic-current");
         expect(picRow.querySelector(".branch-track-push")?.textContent).toBe("⬆1");
         expect(picRow.querySelector(".branch-track-pull")?.textContent).toBe("⬇2");
-        expect(iosRow.textContent).toContain("IosLatexios-current");
+        expect(iosRow.textContent).toContain("IosLatex");
+        expect(iosRow.title).toContain("/repos/IosLatex\nBranch: ios-current");
         expect(iosRow.querySelector(".branch-track-push")).toBeNull();
         expect(iosRow.querySelector(".branch-track-pull")).toBeNull();
 
         act(() => {
             picRow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         });
-        expect(picRow.getAttribute("aria-expanded")).toBe("true");
+        expect(picRow.getAttribute("aria-current")).toBe("true");
         expect(container.textContent).toContain("HEAD");
 
         act(() => {
@@ -644,6 +645,17 @@ describe("low coverage components", () => {
             "switchRepository",
             "/repos/IosLatex",
         );
+
+        act(() => {
+            container.querySelector<HTMLButtonElement>('[aria-label="Collapse projects"]')!.click();
+        });
+        expect(container.querySelector('[aria-label="Repositories"]')).toBeNull();
+        expect(container.querySelector('[aria-label="Search branches"]')).toBeTruthy();
+        expect(container.querySelector('[aria-label="Expand projects"]')?.textContent).toContain("PicMath");
+        act(() => {
+            container.querySelector<HTMLButtonElement>('[aria-label="Expand projects"]')!.click();
+        });
+        expect(container.querySelector('[aria-label="Repositories"]')).toBeTruthy();
 
         unmount(root, container);
     });
@@ -1249,7 +1261,7 @@ describe("low coverage components", () => {
         });
 
         const headRow = Array.from(container.querySelectorAll(".branch-row")).find((row) =>
-            row.textContent?.trim() === "HEAD",
+            row.getAttribute("aria-label")?.endsWith("(HEAD)"),
         ) as HTMLElement;
         // Force the no-icon fallback path so anchor math uses rowRect.left + 20.
         Object.defineProperty(headRow, "querySelector", {
@@ -1635,7 +1647,7 @@ describe("low coverage components", () => {
             );
 
             const headRow = Array.from(container.querySelectorAll(".branch-row")).find(
-                (row) => row.textContent?.trim() === "HEAD",
+                (row) => row.getAttribute("aria-label")?.endsWith("(HEAD)"),
             ) as HTMLElement;
             const localRow = container.querySelector(".branch-row.selected") as HTMLElement;
             const trackedRow = Array.from(container.querySelectorAll(".branch-row")).find(

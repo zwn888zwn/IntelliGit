@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { ROW_HEIGHT } from "../graph";
+import { PANEL_BORDER, PANEL_SEARCH_FIELD_STYLE, PANEL_SEARCH_INPUT_STYLE, PANEL_TOOLBAR_STYLE } from "../shared/panelStyles";
 
 export const AUTHOR_COL_WIDTH = 96;
 export const DATE_COL_WIDTH = 102;
@@ -12,47 +13,31 @@ export const ROOT_STYLE: CSSProperties = {
     flexDirection: "column",
     height: "100%",
     minHeight: 0,
+    background: "var(--vscode-editor-background)",
 };
 
 export const FILTER_BAR_STYLE: CSSProperties = {
-    minHeight: 22,
-    padding: "1px 8px",
-    borderBottom: "1px solid var(--vscode-panel-border)",
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    flexShrink: 0,
+    ...PANEL_TOOLBAR_STYLE,
 };
 
 export const FILTER_ICON_STYLE: CSSProperties = {
-    opacity: 0.95,
     flexShrink: 0,
 };
 
 export const FILTER_INPUT_WRAP_STYLE: CSSProperties = {
-    position: "relative",
-    flex: "0 1 420px",
-    minWidth: 170,
-    maxWidth: 460,
+    ...PANEL_SEARCH_FIELD_STYLE,
+    flex: "1 1 140px",
+    minWidth: 80,
+    maxWidth: 260,
+    marginLeft: "auto",
 };
 
 export const FILTER_INPUT_STYLE: CSSProperties = {
-    width: "100%",
-    height: 18,
-    padding: "0 22px 0 8px",
-    background: "var(--vscode-input-background)",
-    color: "var(--vscode-input-foreground)",
-    border: "1px solid var(--vscode-input-border)",
-    borderRadius: "3px",
-    fontSize: "12px",
-    outline: "none",
+    ...PANEL_SEARCH_INPUT_STYLE,
 };
 
 export const FILTER_CLEAR_BUTTON_STYLE: CSSProperties = {
-    position: "absolute",
-    right: 4,
-    top: "50%",
-    transform: "translateY(-50%)",
+    flexShrink: 0,
     width: 14,
     height: 14,
     border: "none",
@@ -67,24 +52,26 @@ export const FILTER_CLEAR_BUTTON_STYLE: CSSProperties = {
 };
 
 export const BRANCH_SCOPE_STYLE: CSSProperties = {
-    maxWidth: 300,
+    maxWidth: 160,
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    opacity: 0.82,
+    color: "var(--vscode-descriptionForeground)",
     fontSize: "11px",
-    marginLeft: 6,
-    flexShrink: 0,
+    flexShrink: 1,
 };
 
 export function headerRowStyle(graphWidth: number): CSSProperties {
     return {
         display: "flex",
         alignItems: "center",
-        height: 22,
-        fontSize: "11px",
-        borderBottom: "1px solid var(--vscode-panel-border)",
-        opacity: 0.5,
+        height: 24,
+        fontSize: "10px",
+        fontWeight: 600,
+        letterSpacing: "0.04em",
+        textTransform: "uppercase",
+        borderBottom: `1px solid ${PANEL_BORDER}`,
+        color: "var(--vscode-descriptionForeground)",
         paddingLeft: graphWidth,
         paddingRight: ROW_SIDE_PADDING,
         flexShrink: 0,
