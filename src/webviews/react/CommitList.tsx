@@ -43,7 +43,7 @@ const AUTHOR_COLUMN_MIN_WIDTH = 620;
 const BRANCH_SCOPE_MIN_WIDTH = 680;
 const HASH_COLUMN_MIN_WIDTH = 760;
 const CURRENT_BRANCH_ROW_BACKGROUND =
-    "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 12%, transparent)";
+    "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 30%, transparent)";
 
 function commitGraphKey(repoRoot: string, hash: string): string {
     return `${repoRoot}\u0000${hash}`;
