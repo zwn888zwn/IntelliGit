@@ -935,7 +935,7 @@ export function CommitList({
                     }
                     onSelect={handleContextMenuAction}
                     onClose={closeContextMenu}
-                    minWidth={320}
+                    minWidth={280}
                 />
             )}
         </div>

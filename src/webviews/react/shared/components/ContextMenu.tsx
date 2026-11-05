@@ -9,10 +9,30 @@ import React, {
 import { createPortal } from "react-dom";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 
-const ITEM_HEIGHT = 28;
+const ITEM_HEIGHT = 24;
 const ITEM_FONT_SIZE = 13;
 const CONTEXT_MENU_STYLE_ID = "intelligit-ctx-styles";
 const CONTEXT_MENU_STYLE_RULES = `
+    .intelligit-context-menu {
+        /* VS Code's inherited scrollbar-color overrides the custom scrollbar below. */
+        scrollbar-color: auto;
+    }
+    .intelligit-context-menu::-webkit-scrollbar {
+        width: 6px;
+    }
+    .intelligit-context-menu::-webkit-scrollbar-track {
+        background: transparent;
+        margin: 4px 0;
+    }
+    .intelligit-context-menu::-webkit-scrollbar-thumb {
+        background: var(--vscode-scrollbarSlider-background, rgba(128,128,128,0.4));
+        border: 1px solid transparent;
+        background-clip: padding-box;
+        border-radius: 3px;
+    }
+    .intelligit-context-menu::-webkit-scrollbar-thumb:hover {
+        background-color: var(--vscode-scrollbarSlider-hoverBackground, rgba(128,128,128,0.65));
+    }
     .intelligit-context-item[data-disabled="false"]:hover,
     .intelligit-context-item[data-disabled="false"]:focus-visible {
         background: var(--vscode-menu-selectionBackground, #094771);
@@ -56,7 +76,7 @@ export function ContextMenu({
 }: Props): React.ReactElement {
     const ref = useRef<HTMLDivElement>(null);
     const [pos, setPos] = useState({ left: x, top: y });
-    const menuBodyPaddingX = 4;
+    const menuBodyPaddingX = 3;
     const hasAnyIcon = items.some((item) => !item.separator && !!item.icon);
     const hasAnyTrailing = items.some((item) => !item.separator && (!!item.hint || !!item.submenu));
 
@@ -70,18 +90,25 @@ export function ContextMenu({
     }, []);
 
     useLayoutEffect(() => {
-        if (!ref.current) return;
-        const rect = ref.current.getBoundingClientRect();
-        const pad = 4;
-        let left = x;
-        let top = y;
-        if (top + rect.height > window.innerHeight - pad) {
-            top = Math.max(pad, window.innerHeight - rect.height - pad);
-        }
-        if (left + rect.width > window.innerWidth - pad) {
-            left = Math.max(pad, window.innerWidth - rect.width - pad);
-        }
-        setPos({ left, top });
+        const menu = ref.current;
+        if (!menu) return;
+        const updatePosition = () => {
+            const rect = menu.getBoundingClientRect();
+            const pad = 4;
+            const left = Math.max(pad, Math.min(x, window.innerWidth - rect.width - pad));
+            const top = Math.max(pad, Math.min(y, window.innerHeight - rect.height - pad));
+            setPos((previous) =>
+                previous.left === left && previous.top === top ? previous : { left, top },
+            );
+        };
+        updatePosition();
+        const observer = new ResizeObserver(updatePosition);
+        observer.observe(menu);
+        window.addEventListener("resize", updatePosition);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", updatePosition);
+        };
     }, [x, y, items.length]);
 
     useEffect(() => {
@@ -116,19 +143,25 @@ export function ContextMenu({
         <div
             ref={ref}
             role="menu"
+            className="intelligit-context-menu"
             style={{
                 position: "fixed",
                 left: pos.left,
                 top: pos.top,
                 zIndex: 9999,
-                background: "var(--vscode-menu-background, #3a4254)",
+                background: "var(--vscode-menu-background, #252526)",
                 border: "1px solid var(--vscode-menu-border, rgba(255,255,255,0.14))",
-                borderRadius: 9,
-                padding: "4px 0",
-                minWidth,
+                borderRadius: 5,
+                padding: "3px 0",
+                boxSizing: "border-box",
+                minWidth: `min(${minWidth}px, calc(100vw - 8px))`,
+                maxWidth: "min(480px, calc(100vw - 8px))",
+                maxHeight: "calc(100vh - 8px)",
+                overflowX: "hidden",
+                overflowY: "auto",
+                overscrollBehavior: "contain",
                 fontFamily: SYSTEM_FONT_STACK,
-                boxShadow:
-                    "0 18px 36px rgba(0,0,0,0.46), 0 3px 9px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
+                boxShadow: "0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.35))",
             }}
         >
             {items.map((item, i) => {
@@ -138,7 +171,7 @@ export function ContextMenu({
                             key={`sep-${i}`}
                             style={{
                                 height: 1,
-                                margin: `5px ${menuBodyPaddingX + 2}px`,
+                                margin: `3px ${menuBodyPaddingX + 3}px`,
                                 background:
                                     "var(--vscode-menu-separatorBackground, rgba(255,255,255,0.12))",
                             }}
@@ -167,11 +200,12 @@ export function ContextMenu({
                         style={{
                             display: "flex",
                             alignItems: "center",
-                            gap: hasAnyIcon ? 8 : 0,
+                            gap: hasAnyIcon ? 7 : 0,
                             minHeight: ITEM_HEIGHT,
-                            padding: `4px ${hasAnyTrailing ? 9 : 4}px 4px ${hasAnyIcon ? 8 : 4}px`,
+                            boxSizing: "border-box",
+                            padding: "3px 8px",
                             margin: `0 ${menuBodyPaddingX}px`,
-                            borderRadius: 4,
+                            borderRadius: 3,
                             cursor: item.disabled ? "default" : "pointer",
                             fontSize: ITEM_FONT_SIZE,
                             lineHeight: "18px",
@@ -179,7 +213,6 @@ export function ContextMenu({
                                 ? "var(--vscode-disabledForeground, rgba(255,255,255,0.4))"
                                 : "var(--vscode-menu-foreground, #d8dbe2)",
                             whiteSpace: "nowrap",
-                            opacity: item.disabled ? 0.72 : 1,
                         }}
                     >
                         {hasAnyIcon && (
@@ -197,7 +230,12 @@ export function ContextMenu({
                                 {item.icon}
                             </span>
                         )}
-                        <span style={{ flex: 1, flexShrink: 1 }}>{item.label}</span>
+                        <span
+                            title={item.label}
+                            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+                        >
+                            {item.label}
+                        </span>
                         {hasAnyTrailing && (
                             <span
                                 style={{
