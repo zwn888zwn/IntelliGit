@@ -207,6 +207,11 @@
                 "category": "IntelliGit"
             },
             {
+                "command": "intelligit.fileCopyPath",
+                "title": "Copy Path",
+                "category": "IntelliGit"
+            },
+            {
                 "command": "intelligit.openCommitDiffSource",
                 "title": "Open in Editor",
                 "category": "IntelliGit",
@@ -539,6 +544,11 @@
                     "command": "intelligit.fileJumpToSource",
                     "when": "webviewId == 'intelligit.commitPanel' && webviewSection == 'file'",
                     "group": "1_actions@2"
+                },
+                {
+                    "command": "intelligit.fileCopyPath",
+                    "when": "webviewId == 'intelligit.commitPanel' && webviewSection == 'file'",
+                    "group": "1_actions@3"
                 },
                 {
                     "command": "intelligit.fileDelete",

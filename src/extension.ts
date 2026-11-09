@@ -2049,6 +2049,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 await vscode.window.showTextDocument(uri);
             },
         ),
+        vscode.commands.registerCommand(
+            "intelligit.fileCopyPath",
+            async (ctx: { filePath?: string; repoRoot?: string }) => {
+                if (!ctx?.filePath) return;
+                const repository = ctx.repoRoot
+                    ? repositoryService.listRepositories().find((entry) => entry.root === ctx.repoRoot)
+                    : getCurrentRepository();
+                if (!repository) return;
+                const uri = vscode.Uri.joinPath(repository.uri, assertRepoRelativePath(ctx.filePath));
+                await vscode.env.clipboard.writeText(uri.fsPath);
+            },
+        ),
         vscode.commands.registerCommand("intelligit.openCommitDiffSource", async (ctx: unknown) => {
             const repository = getCurrentRepository();
             if (!repository) return;
