@@ -16,6 +16,7 @@ import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 import { buildPrefixTree, buildRemoteGroups } from "../treeModel";
 import type { TreeNode } from "../types";
 import { COMPACT_SCROLLBAR_CSS, PANEL_SEARCH_FIELD_STYLE, PANEL_SEARCH_INPUT_STYLE } from "../../shared/panelStyles";
+import { MENU_SURFACE_CSS } from "../../shared/menuSurface";
 
 const CURRENT_BRANCH_ICON_TEAL = "var(--vscode-charts-green, #7fd4cf)";
 const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
@@ -224,7 +225,7 @@ export function BranchPopupOverlay({
         <div
             ref={ref}
             role="dialog"
-            className="intelligit-compact-scrollbar"
+            className="intelligit-compact-scrollbar intelligit-menu-surface"
             aria-label="IntelliGit Branches"
             onMouseLeave={() => setActiveRowKey(null)}
             style={{
@@ -239,24 +240,20 @@ export function BranchPopupOverlay({
                 overflowX: "hidden",
                 overflowY: "auto",
                 overscrollBehavior: "contain",
-                borderRadius: 5,
-                border: "1px solid var(--vscode-menu-border, rgba(255,255,255,0.16))",
-                background: "var(--vscode-menu-background, #3a3f42)",
                 color: "var(--vscode-menu-foreground, #d7d7d7)",
-                boxShadow: "0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.35))",
                 fontFamily: SYSTEM_FONT_STACK,
                 fontSize: 13,
-                padding: "4px",
+                padding: "5px",
             }}
         >
-            <style>{`${COMPACT_SCROLLBAR_CSS}${POPUP_ROW_CSS}`}</style>
+            <style>{`${MENU_SURFACE_CSS}${COMPACT_SCROLLBAR_CSS}${POPUP_ROW_CSS}`}</style>
             <div
+                className="intelligit-menu-search-header"
                 style={{
                     position: "sticky",
                     top: 0,
                     zIndex: 1,
                     padding: "2px 0 6px",
-                    background: "var(--vscode-menu-background, #3a3f42)",
                 }}
             >
                 <SearchBox value={query} onChange={setQuery} />
@@ -479,7 +476,9 @@ export function BranchPopupOverlay({
                     )}
                 </>
             )}
-            {repositorySubmenu && (
+            {/* A backdrop filter creates a containing block for fixed children.
+                Keep the submenu in the viewport, outside the scrolling surface. */}
+            {repositorySubmenu && createPortal(
                 <RepositorySubmenu
                     ref={repositorySubmenuRef}
                     repository={repositorySubmenu.repository}
@@ -490,7 +489,8 @@ export function BranchPopupOverlay({
                     y={repositorySubmenu.y}
                     onTopAction={onTopAction}
                     onOpenBranchMenu={onOpenBranchMenu}
-                />
+                />,
+                document.body,
             )}
         </div>,
         document.body,
@@ -756,7 +756,7 @@ const RepositorySubmenu = React.forwardRef<
         <div
             ref={ref}
             role="menu"
-            className="intelligit-compact-scrollbar"
+            className="intelligit-compact-scrollbar intelligit-menu-surface"
             aria-label={`Branches in ${repository.name}`}
             onMouseLeave={() => setActiveRowKey(null)}
             style={{
@@ -771,14 +771,10 @@ const RepositorySubmenu = React.forwardRef<
                 overflowY: "auto",
                 overscrollBehavior: "contain",
                 zIndex: 9999,
-                borderRadius: 5,
-                border: "1px solid var(--vscode-menu-border, rgba(255,255,255,0.16))",
-                background: "var(--vscode-menu-background, #3a3f42)",
                 color: "var(--vscode-menu-foreground, #d7d7d7)",
-                boxShadow: "0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.35))",
                 fontFamily: SYSTEM_FONT_STACK,
                 fontSize: 13,
-                padding: "4px",
+                padding: "5px",
             }}
         >
             <TopActionRow
@@ -1110,7 +1106,7 @@ function rowButtonStyle(paddingLeft: number): React.CSSProperties {
         gap: 7,
         padding: `3px 8px 3px ${paddingLeft}px`,
         border: "none",
-        borderRadius: 3,
+        borderRadius: 6,
         background: "transparent",
         color: "var(--vscode-menu-foreground, #d7d7d7)",
         cursor: "pointer",

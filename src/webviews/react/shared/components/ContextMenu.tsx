@@ -8,11 +8,12 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
+import { MENU_SURFACE_CSS } from "../menuSurface";
 
 const ITEM_HEIGHT = 24;
 const ITEM_FONT_SIZE = 13;
 const CONTEXT_MENU_STYLE_ID = "intelligit-ctx-styles";
-const CONTEXT_MENU_STYLE_RULES = `
+const CONTEXT_MENU_STYLE_RULES = `${MENU_SURFACE_CSS}
     .intelligit-context-menu {
         /* VS Code's inherited scrollbar-color overrides the custom scrollbar below. */
         scrollbar-color: auto;
@@ -76,7 +77,7 @@ export function ContextMenu({
 }: Props): React.ReactElement {
     const ref = useRef<HTMLDivElement>(null);
     const [pos, setPos] = useState({ left: x, top: y });
-    const menuBodyPaddingX = 3;
+    const menuBodyPaddingX = 5;
     const hasAnyIcon = items.some((item) => !item.separator && !!item.icon);
     const hasAnyTrailing = items.some((item) => !item.separator && (!!item.hint || !!item.submenu));
 
@@ -143,16 +144,13 @@ export function ContextMenu({
         <div
             ref={ref}
             role="menu"
-            className="intelligit-context-menu"
+            className="intelligit-context-menu intelligit-menu-surface"
             style={{
                 position: "fixed",
                 left: pos.left,
                 top: pos.top,
                 zIndex: 9999,
-                background: "var(--vscode-menu-background, #252526)",
-                border: "1px solid var(--vscode-menu-border, rgba(255,255,255,0.14))",
-                borderRadius: 5,
-                padding: "3px 0",
+                padding: "5px 0",
                 boxSizing: "border-box",
                 minWidth: `min(${minWidth}px, calc(100vw - 8px))`,
                 maxWidth: "min(480px, calc(100vw - 8px))",
@@ -161,7 +159,6 @@ export function ContextMenu({
                 overflowY: "auto",
                 overscrollBehavior: "contain",
                 fontFamily: SYSTEM_FONT_STACK,
-                boxShadow: "0 2px 8px var(--vscode-widget-shadow, rgba(0,0,0,0.35))",
             }}
         >
             {items.map((item, i) => {
@@ -205,7 +202,7 @@ export function ContextMenu({
                             boxSizing: "border-box",
                             padding: "3px 8px",
                             margin: `0 ${menuBodyPaddingX}px`,
-                            borderRadius: 3,
+                            borderRadius: 6,
                             cursor: item.disabled ? "default" : "pointer",
                             fontSize: ITEM_FONT_SIZE,
                             lineHeight: "18px",
