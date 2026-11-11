@@ -19,6 +19,8 @@ export function JsonTreeView({ onCodeView }: { onCodeView: () => void }): React.
     const sequence = useRef(0);
     const viewport = useRef<HTMLDivElement>(null);
     const selectedRef = useRef<number>();
+    const rootOffset = useRef<number>();
+    const autoExpandFirst = useRef(true);
     const [root, setRoot] = useState<JsonTreeNode>();
     const [info, setInfo] = useState({ name: "", size: 0 });
     const [selected, setSelected] = useState<JsonTreeNode>();
@@ -92,6 +94,7 @@ export function JsonTreeView({ onCodeView }: { onCodeView: () => void }): React.
                 if (message.generation < generation.current) return;
                 generation.current = message.generation;
                 children.current.clear(); expanded.current.clear(); nodes.current.clear();
+                rootOffset.current = undefined; autoExpandFirst.current = true;
                 selectedRef.current = undefined;
                 setRoot(undefined); setSelected(undefined); setError(""); setLoading(true);
                 setInfo({ name: message.name, size: message.size });
@@ -102,6 +105,7 @@ export function JsonTreeView({ onCodeView }: { onCodeView: () => void }): React.
             }
             if (message.generation !== generation.current) return;
             if (message.type === "root") {
+                rootOffset.current = message.node.offset;
                 setRoot(message.node); nodes.current.set(message.node.offset, message.node); setLoading(false);
                 if (container(message.node)) { expanded.current.add(message.node.offset); load(message.node); }
             } else if (message.type === "children") {
@@ -114,6 +118,14 @@ export function JsonTreeView({ onCodeView }: { onCodeView: () => void }): React.
                     state.nodes.push(node); nodes.current.set(node.offset, node);
                 }
                 if (message.complete) { state.complete = true; state.next = message.next; state.error = message.error; }
+                if (autoExpandFirst.current && message.parent === rootOffset.current && message.nodes.length) {
+                    autoExpandFirst.current = false;
+                    const first = message.nodes[0];
+                    if (container(first)) {
+                        expanded.current.add(first.offset);
+                        load(first);
+                    }
+                }
                 update();
             } else if (message.type === "value" && message.offset === selectedRef.current) {
                 setValue({ text: message.text, truncated: message.truncated });

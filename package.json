@@ -37,6 +37,7 @@
         "scm"
     ],
     "activationEvents": [
+        "onCustomEditor:intelligit.jsonPreview",
         "onStartupFinished",
         "workspaceContains:.git",
         "onView:intelligit.commitGraph",
@@ -44,6 +45,14 @@
     ],
     "main": "./dist/extension.js",
     "contributes": {
+        "customEditors": [
+            {
+                "viewType": "intelligit.jsonPreview",
+                "displayName": "IntelliGit JSON 预览",
+                "selector": [{ "filenamePattern": "*.json" }],
+                "priority": "default"
+            }
+        ],
         "viewsContainers": {
             "activitybar": [
                 {

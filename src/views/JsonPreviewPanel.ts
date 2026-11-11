@@ -6,8 +6,27 @@ import type { JsonTreeMessage, JsonTreeCursor, JsonTreeNode } from "../services/
 import type { JsonPreviewMessage } from "../services/jsonPreview/types";
 import { buildWebviewShellHtml } from "./webviewHtml";
 
+export const JSON_PREVIEW_EDITOR = "intelligit.jsonPreview";
+
 export function registerJsonPreview(context: vscode.ExtensionContext): void {
-    const panels = new Map<string, JsonPreviewPanel>();
+    const panels = new Set<JsonPreviewPanel>();
+    const provider: vscode.CustomReadonlyEditorProvider = {
+        // Deliberately do not use CustomTextEditorProvider or openTextDocument:
+        // VS Code must not load a large JSON into its text model before previewing.
+        openCustomDocument(uri) {
+            if (uri.scheme !== "file") throw new Error("此来源不支持分块读取，请使用“重新打开方式 → 文本编辑器”。");
+            return { uri, dispose() {} };
+        },
+        resolveCustomEditor(document, panel, token) {
+            if (token.isCancellationRequested) return;
+            const preview = new JsonPreviewPanel(context.extensionUri, document.uri, panel, () => panels.delete(preview));
+            panels.add(preview);
+        },
+    };
+    context.subscriptions.push(vscode.window.registerCustomEditorProvider(JSON_PREVIEW_EDITOR, provider, {
+        webviewOptions: { retainContextWhenHidden: true },
+        supportsMultipleEditorsPerDocument: true,
+    }));
     context.subscriptions.push(vscode.commands.registerCommand("intelligit.previewJson", async (resource?: vscode.Uri) => {
         let uri = resource instanceof vscode.Uri ? resource : vscode.window.activeTextEditor?.document.uri;
         if (!uri) {
@@ -18,19 +37,15 @@ export function registerJsonPreview(context: vscode.ExtensionContext): void {
             void vscode.window.showErrorMessage("JSON 大文件预览需要磁盘文件，请先将内容保存为本地 JSON 文件。");
             return;
         }
-        const key = uri.toString();
-        const existing = panels.get(key);
-        if (existing) { existing.reveal(); return; }
-        panels.set(key, new JsonPreviewPanel(context.extensionUri, uri, () => panels.delete(key)));
+        await vscode.commands.executeCommand("vscode.openWith", uri, JSON_PREVIEW_EDITOR);
     }));
     context.subscriptions.push({ dispose: () => {
-        for (const panel of panels.values()) panel.dispose();
+        for (const panel of panels) panel.dispose();
         panels.clear();
     } });
 }
 
 class JsonPreviewPanel {
-    private readonly panel: vscode.WebviewPanel;
     private reader: PagedJsonReader | undefined;
     private tree: JsonTreeReader | undefined;
     private mode: "tree" | "code" = "tree";
@@ -39,10 +54,11 @@ class JsonPreviewPanel {
     private closed = false;
     private busy = false;
 
-    constructor(extensionUri: vscode.Uri, private readonly uri: vscode.Uri, onClose: () => void) {
-        this.panel = vscode.window.createWebviewPanel("intelligit.jsonPreview", `JSON 预览 · ${path.basename(uri.fsPath)}`,
-            vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true,
-                localResourceRoots: [vscode.Uri.joinPath(extensionUri, "dist")] });
+    constructor(extensionUri: vscode.Uri, private readonly uri: vscode.Uri,
+        private readonly panel: vscode.WebviewPanel, onClose: () => void) {
+        panel.title = `JSON 预览 · ${path.basename(uri.fsPath)}`;
+        panel.webview.options = { ...panel.webview.options, enableScripts: true,
+            localResourceRoots: [vscode.Uri.joinPath(extensionUri, "dist")] };
         this.panel.webview.html = buildWebviewShellHtml({ extensionUri, webview: this.panel.webview,
             title: "JSON 格式化预览", scriptFile: "webview-jsonpreview.js" });
         this.panel.webview.onDidReceiveMessage((message: unknown) => {
@@ -81,7 +97,6 @@ class JsonPreviewPanel {
         });
     }
 
-    reveal(): void { this.panel.reveal(); }
     dispose(): void { this.panel.dispose(); }
 
     private send(message: JsonPreviewMessage | JsonTreeMessage): void {

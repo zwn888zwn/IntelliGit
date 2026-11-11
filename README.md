@@ -15,9 +15,9 @@ IntelliGit brings a JetBrains-style Git workflow into VS Code, so you can stage,
 
 ### Large JSON Preview
 
-Right-click a `.json` file in Explorer or the editor and select **IntelliGit: JSON 格式化预览**. The JSON editor title also has a preview button. The command works without a Git repository or an open workspace.
+Opening a `.json` file defaults to **IntelliGit JSON 预览**, a readonly custom editor that reads the file directly without creating VS Code's full text model first. You can also right-click a file and select **IntelliGit: JSON 格式化预览**. It works without a Git repository or an open workspace. To edit the original text, use **Reopen Editor With → Text Editor**. An existing explicit editor association takes precedence; set `"workbench.editorAssociations": { "*.json": "intelligit.jsonPreview" }` to select this preview explicitly while preserving your other associations.
 
-- Opens in a read-only **Structure** view with independently expandable objects/arrays, collapse-all, and node selection. Selected scalar values appear in a selectable text box (up to 16 KB); larger values are explicitly marked as partial.
+- Opens in a read-only **Structure** view with independently expandable objects/arrays, collapse-all, and node selection. The first direct child opens automatically if it is an object or array; deeper nodes stay collapsed. Selected scalar values appear in a selectable text box (up to 16 KB); larger values are explicitly marked as partial.
 - Structure view reads only a batch of direct children at a time, with **Previous/Next batch** navigation. Headers appear before scanning large values. Locating later siblings may require a sequential scan past the preceding value; collapsing the parent cancels that scan. It does not build a complete object tree or pre-count children. The view limits retained nodes to keep memory bounded.
 - Switch to **Code** for the formatted view with syntax colors and 2/4-space indentation. UTF-8 JSON is read incrementally in 64 KB chunks, with up to 1,000 display lines per page. Scrolling loads the next or previous page.
 - Both views render only visible rows. Code view keeps at most three pages in the webview; earlier pages are cached on temporary disk storage and removed when the preview closes. Switching views also releases the previous view's reader and cache.

@@ -629,6 +629,7 @@ vi.mock("vscode", () => ({
         }),
         onDidChangeActiveColorTheme: vi.fn(() => ({ dispose: vi.fn() })),
         registerWebviewViewProvider,
+        registerCustomEditorProvider: vi.fn(() => ({ dispose: vi.fn() })),
         createTreeView: vi.fn(() => ({
             badge: undefined,
             dispose: vi.fn(),
