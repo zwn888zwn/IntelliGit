@@ -13,6 +13,18 @@ IntelliGit brings a JetBrains-style Git workflow into VS Code, so you can stage,
 
 ## Core Workflows
 
+### Large JSON Preview
+
+Right-click a `.json` file in Explorer or the editor and select **IntelliGit: JSON 格式化预览**. The JSON editor title also has a preview button. The command works without a Git repository or an open workspace.
+
+- Opens in a read-only **Structure** view with independently expandable objects/arrays, collapse-all, and node selection. Selected scalar values appear in a selectable text box (up to 16 KB); larger values are explicitly marked as partial.
+- Structure view reads only a batch of direct children at a time, with **Previous/Next batch** navigation. Headers appear before scanning large values. Locating later siblings may require a sequential scan past the preceding value; collapsing the parent cancels that scan. It does not build a complete object tree or pre-count children. The view limits retained nodes to keep memory bounded.
+- Switch to **Code** for the formatted view with syntax colors and 2/4-space indentation. UTF-8 JSON is read incrementally in 64 KB chunks, with up to 1,000 display lines per page. Scrolling loads the next or previous page.
+- Both views render only visible rows. Code view keeps at most three pages in the webview; earlier pages are cached on temporary disk storage and removed when the preview closes. Switching views also releases the previous view's reader and cache.
+- Long strings/numbers are split into bounded display segments marked **↪**, preserving the original text and number precision. Line numbers refer to the formatted preview.
+- Both views are read-only and leave the source file unchanged. Field editing/addition/deletion are not enabled in this version.
+- Invalid JSON reports an error at the point reached; unvisited content has not been fully validated. Save unsaved edits before previewing; refresh after the source file changes. Nesting beyond 512 levels in a scanned value is reported rather than expanded indefinitely.
+
 ### 1) Commit and Shelf Workflow (Sidebar)
 
 - Commit tab with file tree, selective staging checkboxes (section/folder/file), diff open on click, and commit message area

@@ -88,6 +88,12 @@
         },
         "commands": [
             {
+                "command": "intelligit.previewJson",
+                "title": "JSON 格式化预览",
+                "category": "IntelliGit",
+                "icon": "$(preview)"
+            },
+            {
                 "command": "intelligit.returnToComparison",
                 "title": "返回比较",
                 "category": "IntelliGit",
@@ -375,6 +381,11 @@
         "menus": {
             "explorer/context": [
                 {
+                    "command": "intelligit.previewJson",
+                    "when": "resourceScheme == file && resourceExtname == .json",
+                    "group": "navigation@12"
+                },
+                {
                     "command": "intelligit.compareProjectWithBranch",
                     "when": "resourceScheme == file",
                     "group": "navigation@9"
@@ -391,6 +402,11 @@
                 }
             ],
             "editor/context": [
+                {
+                    "command": "intelligit.previewJson",
+                    "when": "resourceScheme == file && resourceExtname == .json",
+                    "group": "navigation@12"
+                },
                 {
                     "submenu": "intelligit.editorContext",
                     "when": "resourceScheme == file",
@@ -476,6 +492,11 @@
                 }
             ],
             "editor/title": [
+                {
+                    "command": "intelligit.previewJson",
+                    "when": "resourceScheme == file && resourceExtname == .json",
+                    "group": "navigation@12"
+                },
                 {
                     "command": "intelligit.returnToComparison",
                     "when": "intelligit.canReturnToComparison",

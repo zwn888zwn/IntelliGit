@@ -1,3 +1,4 @@
+import { registerJsonPreview } from "./views/JsonPreviewPanel";
 import { showSelectionHistory } from "./services/selectionHistory";
 // Extension entry point. Registers coordinated IntelliGit webviews:
 // commit graph (with integrated branch column/details) and commit panel.
@@ -80,6 +81,7 @@ import {
 import type { CreateWorktreePayload } from "./webviews/react/commitGraphTypes";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    registerJsonPreview(context);
     context.subscriptions.push(new DiffOverlayController());
     context.subscriptions.push(new CopilotStatusBarController(context));
     registerProjectSwitcher(context);

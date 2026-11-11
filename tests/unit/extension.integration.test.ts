@@ -3990,7 +3990,7 @@ describe("extension integration", () => {
 
         workspaceFolders = undefined;
         await activate(context);
-        expect([...registeredCommands.keys()]).toEqual(["intelligit.openRecentProject"]);
+        expect([...registeredCommands.keys()]).toEqual(["intelligit.previewJson", "intelligit.openRecentProject"]);
         await registeredCommands.get("intelligit.openRecentProject")!();
         expect(executeCommandFallback).toHaveBeenCalledWith("workbench.action.openRecent");
         expect(registerWebviewViewProvider).toHaveBeenCalledTimes(2);
