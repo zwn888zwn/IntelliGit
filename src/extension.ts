@@ -144,12 +144,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await repositoryService.initialize();
     const symbolInsights = new SymbolInsightsProvider(
         (uri) => repositoryService.getRepositoryForUri(uri),
-        async (document, range) => {
-            const repository = repositoryService.getRepositoryForUri(document.uri);
-            if (!repository) return;
-            await showSelectionHistory(context.extensionUri, repository, {
-                document, selection: new vscode.Selection(range.start, range.end),
-            }, range);
+        async (document) => {
+            const editor = vscode.window.activeTextEditor?.document.uri.toString() === document.uri.toString()
+                ? vscode.window.activeTextEditor
+                : vscode.window.visibleTextEditors.find(candidate => candidate.document.uri.toString() === document.uri.toString());
+            if (editor) await blameController.toggleEditor(editor);
         },
     );
     context.subscriptions.push(symbolInsights);
@@ -210,6 +209,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         },
         () => repositoryService.getCurrentRepository()?.root ?? null,
         () => repositoryService.requireCurrentRepository().gitOps,
+        (uri) => repositoryService.getRepositoryForUri(uri),
     );
 
     const getCurrentRepository = () => repositoryService.getCurrentRepository();

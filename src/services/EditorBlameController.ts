@@ -27,6 +27,8 @@ const BLAME_TEXT_COLOR = new vscode.ThemeColor("editor.foreground");
 export class EditorBlameController implements vscode.Disposable {
     private readonly disposables: vscode.Disposable[] = [];
     private session: BlameSession | null = null;
+    private request = 0;
+    private pendingUri: string | undefined;
 
     constructor(
         private readonly repoRoot: string,
@@ -34,6 +36,7 @@ export class EditorBlameController implements vscode.Disposable {
         private readonly revealCommitInGraph: (hash: string) => Promise<void>,
         private readonly getRepoRoot: () => string | null = () => repoRoot,
         private readonly getGitOps: () => GitOps = () => gitOps,
+        private readonly repositoryForUri?: (uri: vscode.Uri) => { root: string; gitOps: GitOps } | null,
     ) {
         this.disposables.push(
             vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -53,7 +56,19 @@ export class EditorBlameController implements vscode.Disposable {
     }
 
     async annotateActiveEditor(): Promise<void> {
-        const editor = vscode.window.activeTextEditor;
+        await this.annotateEditor(vscode.window.activeTextEditor);
+    }
+
+    async toggleEditor(editor: vscode.TextEditor): Promise<void> {
+        const uri = editor.document.uri.toString();
+        if (this.session?.uri === uri || this.pendingUri === uri) {
+            await this.clear();
+        } else {
+            await this.annotateEditor(editor);
+        }
+    }
+
+    private async annotateEditor(editor: vscode.TextEditor | undefined): Promise<void> {
         const filePath = this.getRepoRelativeFilePath(editor);
         if (!editor || !filePath) {
             vscode.window.showWarningMessage(
@@ -70,9 +85,18 @@ export class EditorBlameController implements vscode.Disposable {
         }
 
         this.disposeSession();
+        const request = ++this.request;
+        const version = editor.document.version;
+        this.pendingUri = editor.document.uri.toString();
 
         try {
-            const blameLines = await this.getGitOps().getBlame(filePath);
+            const gitOps = this.repositoryForUri
+                ? this.repositoryForUri(editor.document.uri)?.gitOps : this.getGitOps();
+            if (!gitOps) return;
+            const blameLines = editor.document.isDirty
+                ? await gitOps.getBlame(filePath, { contents: editor.document.getText() })
+                : await gitOps.getBlame(filePath);
+            if (request !== this.request || editor.document.version !== version || editor.document.isClosed) return;
             const decorationType = vscode.window.createTextEditorDecorationType({});
             const decorations = buildBlameDecorations(blameLines);
             this.session = {
@@ -85,6 +109,7 @@ export class EditorBlameController implements vscode.Disposable {
             };
             this.applySessionToEditor(editor);
         } catch (err) {
+            if (request !== this.request) return;
             const message = getErrorMessage(err);
             if (isPathMissingInHeadError(message)) {
                 vscode.window.showWarningMessage(
@@ -94,17 +119,23 @@ export class EditorBlameController implements vscode.Disposable {
                 vscode.window.showErrorMessage(`Git blame failed: ${message}`);
             }
             this.disposeSession();
+        } finally {
+            if (request === this.request) this.pendingUri = undefined;
         }
 
         await this.updateContextKeys(editor);
     }
 
     async clear(): Promise<void> {
+        ++this.request;
+        this.pendingUri = undefined;
         this.disposeSession();
         await this.updateContextKeys(vscode.window.activeTextEditor);
     }
 
     dispose(): void {
+        ++this.request;
+        this.pendingUri = undefined;
         this.disposeSession();
         for (const disposable of this.disposables) {
             disposable.dispose();
@@ -164,7 +195,8 @@ export class EditorBlameController implements vscode.Disposable {
 
     private getRepoRelativeFilePath(editor: vscode.TextEditor | undefined): string | null {
         if (!editor || editor.document.uri.scheme !== "file") return null;
-        const repoRoot = this.getRepoRoot();
+        const repoRoot = this.repositoryForUri
+            ? this.repositoryForUri(editor.document.uri)?.root : this.getRepoRoot();
         if (!repoRoot) return null;
         return getRepoRelativeFilePathFromUri(editor.document.uri, repoRoot);
     }

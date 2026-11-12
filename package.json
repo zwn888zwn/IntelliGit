@@ -45,6 +45,15 @@
     ],
     "main": "./dist/extension.js",
     "contributes": {
+        "icons": {
+            "intelligit-author": {
+                "description": "Code author outline",
+                "default": {
+                    "fontPath": "./media/author-outline.woff",
+                    "fontCharacter": "\\E001"
+                }
+            }
+        },
         "customEditors": [
             {
                 "viewType": "intelligit.jsonPreview",
@@ -627,6 +636,11 @@
                 "mac": "alt+9"
             }
         ],
+        "configurationDefaults": {
+            "[go]": {
+                "editor.codeLensFontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+            }
+        },
         "configuration": {
             "title": "IntelliGit",
             "properties": {
@@ -635,7 +649,7 @@
                     "type": "boolean",
                     "default": true,
                     "scope": "resource",
-                    "description": "Show reference counts and Git authors at the end of function, method, type, constant and package variable declarations. Cmd/Ctrl-click to peek references or view code history. Uses document symbols from the language extension; skips files over 20,000 lines or 1 MiB of text."
+                    "description": "Show reference counts and Git authors above function, method, type, constant and package variable declarations. Click to peek references or toggle the file’s Git blame annotations. Requires editor.codeLens. Uses document symbols from the language extension; skips files over 20,000 lines or 1 MiB of text."
                 },
                 "intelligit.diff.openInOverlay": {
                     "type": "boolean",

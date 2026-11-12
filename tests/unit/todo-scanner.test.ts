@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, mkdir, symlink, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
-import { findTodos, scanTodos, inDirectory, TODO_FILE_LIMIT } from '../../src/services/todo/scanner';
+import { findTodos, scanTodos, TODO_FILE_LIMIT } from '../../src/services/todo/scanner';
 import { GitExecutor } from '../../src/git/executor';
 
 describe('TODO comment parsing',()=>{
@@ -20,10 +20,7 @@ describe('TODO comment parsing',()=>{
   expect(findTodos("select 'TODO'; -- FIXME: query",'a.sql').map(x=>x.text)).toEqual(['FIXME: query']);
   expect(findTodos('{"TODO":"no"}','a.json')).toEqual([]);
  });
- it('does not confuse similarly named directories',()=>{
-  expect(inDirectory('server/admin/a.go','server/admin')).toBe(true);
-  expect(inDirectory('server/administrator/a.go','server/admin')).toBe(false);
- });
+
 });
 let root:string;
 beforeEach(async()=>{
@@ -49,7 +46,40 @@ it('filters the scope before scanning and does not follow symlinks outside the p
   await writeFile(join(outside,'outside.go'),'// TODO: outside');await symlink(join(outside,'outside.go'),join(root,'link.go'));
   const all=await scanTodos(root,new GitExecutor(root),new Map(),new AbortController().signal);
   expect(all.files.map(x=>x.path)).toEqual(['a.go','sub/b.go']);
-  const scoped=await scanTodos(root,new GitExecutor(root),new Map(),new AbortController().signal,p=>inDirectory(p,'sub'));
+  const scoped=await scanTodos(root,new GitExecutor(root),new Map(),new AbortController().signal,p=>p.startsWith('sub/'));
   expect(scoped.files.map(x=>x.path)).toEqual(['sub/b.go']);
  }finally{await rm(outside,{recursive:true,force:true});}
+});
+
+it('includes Godot, template comments and lowercase markers like GoLand', () => {
+ expect(findTodos('# todo: generated client\nvar x="TODO: string"','client.gd').map(m=>m.text)).toEqual(['todo: generated client']);
+ expect(findTodos('{{!--\nTODO: template parent\n--}}\n{{! fixme: description }}\n# TODO: generated code','model.handlebars').map(m=>m.tag)).toEqual(['TODO','FIXME','TODO']);
+ expect(findTodos('const x = `escaped \\` // TODO: string`;\n// todo: actual','file.js').map(m=>m.text)).toEqual(['todo: actual']);
+});
+
+it('streams files above the old size limit, keeps chunk boundaries and allows cancellation', async () => {
+ const {readTodoPreview}=await import('../../src/services/todo/scanner');
+ const prefix='// padding\n'.repeat(110000);
+ await writeFile(join(root,'large.js'),prefix+'/*\nTODO: large source\n*/\n');
+ let ticks=0;const timer=setInterval(()=>ticks++,1);
+ try{
+  const result=await scanTodos(root,new GitExecutor(root),new Map(),new AbortController().signal);
+  expect(result.files[0].matches[0]).toMatchObject({line:110001,text:'TODO: large source'});
+  expect(result.skipped).toEqual([]);expect(ticks).toBeGreaterThan(0);
+  expect(await readTodoPreview(root,'large.js',110000,110002)).toEqual(['/*','TODO: large source','*/']);
+  const abort=new AbortController();setTimeout(()=>abort.abort(),5);
+  const cancelled=await scanTodos(root,new GitExecutor(root),new Map(),abort.signal).catch(()=>({files:[]}));
+  expect(cancelled.files).toEqual([]);
+ }finally{clearInterval(timer);}
+});
+
+it('reports oversized inputs instead of silently returning an incomplete count',async()=>{
+ await writeFile(join(root,'giant.go'),'x'.repeat(17*1024*1024));
+ await writeFile(join(root,'long.go'),'// TODO: '+'x'.repeat(600*1024));
+ const result=await scanTodos(root,new GitExecutor(root),new Map(),new AbortController().signal);
+ expect(result.files).toEqual([]);
+ expect(result.skipped).toEqual(expect.arrayContaining([
+  {path:'giant.go',reason:'文件超过 16 MiB'},
+  {path:'long.go',reason:'单行超过 512 KiB'},
+ ]));
 });

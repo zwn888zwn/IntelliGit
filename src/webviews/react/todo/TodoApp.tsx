@@ -5,13 +5,13 @@ import { detectTheme, highlightLine, initShiki, langForPath } from '../merge-edi
 import type { TodoFile, TodoMatch } from '../../../services/todo/scanner';
 import type { TodoScope } from '../../../views/TodoViewProvider';
 
-type State={files:TodoFile[];scope:TodoScope;directory:string;project:string;current?:string;loading:boolean;limited:boolean;error?:string;selected?:string;count:number};
+type State={files:TodoFile[];scope:TodoScope;project:string;current?:string;loading:boolean;limited:boolean;skipped?:{path:string;reason:string}[];error?:string;selected?:string;count:number};
 type Preview={id:string;path:string;start:number;line:number;lines:string[]};
 type Row={file:string;match?:TodoMatch;count?:number};
 const idFor=(file:string,match:TodoMatch)=>`${file}:${match.line}:${match.column}`;
 const api=getVsCodeApi<{type:string;scope?:TodoScope;id?:string}>();
 function TodoApp():React.ReactElement {
-    const [state,setState]=useState<State>({files:[],scope:'project',directory:'',project:'',loading:true,limited:false,count:0});
+    const [state,setState]=useState<State>({files:[],scope:'project',project:'',loading:true,limited:false,count:0});
     const [preview,setPreview]=useState<Preview>();
     const [collapsed,setCollapsed]=useState<Set<string>>(new Set());
     const [filter,setFilter]=useState('');
@@ -72,9 +72,9 @@ function TodoApp():React.ReactElement {
         <style>{styles}</style>
         <header>
             <nav aria-label="TODO 搜索范围">
-                {([['project','Project'],['current','Current File'],['directory','Scope Based'],['changes','Changes']] as [TodoScope,string][]).map(([scope,label])=><button key={scope} className={state.scope===scope?'active':''} aria-pressed={state.scope===scope} onClick={()=>api.postMessage({type:'scope',scope})}>{label}{state.scope===scope&&<small>{state.count}</small>}</button>)}
+                {([['project','Project'],['current','Current File']] as [TodoScope,string][]).map(([scope,label])=><button key={scope} className={state.scope===scope?'active':''} aria-pressed={state.scope===scope} onClick={()=>api.postMessage({type:'scope',scope})}>{label}{state.scope===scope&&<small>{state.count}</small>}</button>)}
             </nav>
-            <span className="project" title={state.current}>{state.scope==='directory'?(state.directory||state.project):state.scope==='current'?(state.current?.split('/').pop()||'未打开文件'):state.project}</span>
+            <span className="project" title={state.current}>{state.scope==='current'?(state.current?.split('/').pop()||'未打开文件'):''}</span>
             <input aria-label="筛选 TODO" placeholder="Filter TODOs" value={filter} onChange={event=>setFilter(event.target.value)}/>
             <button aria-label="刷新 TODO" title="刷新" onClick={()=>api.postMessage({type:'refresh'})}>↻</button>
         </header>
@@ -103,7 +103,7 @@ function TodoApp():React.ReactElement {
                 </div></>:<div className="empty">单击查看上下文，双击或 Enter 打开源码</div>}
             </div>
         </section>
-        <footer>{state.loading?'正在扫描…':`${state.count} items`}{state.limited?' · 结果已达上限，请缩小范围':''}{state.error?` · ${state.error}`:''}<span>TODO · FIXME</span></footer>
+        <footer>{state.loading?'正在扫描…':`${state.count} items`}{state.limited?' · 结果已达上限，请缩小范围':''}{state.skipped?.length?<span title={state.skipped.map(file=>`${file.path}: ${file.reason}`).join('\n')}> · {state.skipped.length} 个文件未扫描</span>:null}{state.error?` · ${state.error}`:''}<span>TODO · FIXME</span></footer>
     </main>;
 }
 const styles=`

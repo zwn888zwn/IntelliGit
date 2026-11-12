@@ -350,3 +350,32 @@ describe("EditorBlameController", () => {
         expect(createTextEditorDecorationType).not.toHaveBeenCalled();
     });
 });
+
+describe('author lens blame toggle', () => {
+    it('opens annotations for the clicked file repository and closes them on the next click', async () => {
+        const { EditorBlameController } = await import('../../src/services/EditorBlameController');
+        vi.clearAllMocks();
+        const current = { getBlame: vi.fn() };
+        const target = { getBlame: vi.fn(async () => [{ line: 0, commitHash: 'a'.repeat(40), shortHash: 'aaaaaaaa', author: 'Alice', date: '2026/11/12', summary: '', isUncommitted: false }]) };
+        const editor = makeEditor('/other/source.go');activeEditor = editor;
+        const controller = new EditorBlameController('/repo',current as never,vi.fn(),()=>'/repo',()=>current as never,()=>({root:'/other',gitOps:target as never}));
+        await controller.toggleEditor(editor as never);
+        expect(target.getBlame).toHaveBeenCalledWith('source.go');expect(current.getBlame).not.toHaveBeenCalled();
+        expect(editor.setDecorations).toHaveBeenCalledTimes(1);
+        const decoration=createTextEditorDecorationType.mock.results[0].value;
+        await controller.toggleEditor(editor as never);
+        expect(decoration.dispose).toHaveBeenCalledTimes(1);
+        expect(target.getBlame).toHaveBeenCalledTimes(1);
+        controller.dispose();
+    });
+    it('does not reopen annotations when clicked again before blame finishes', async () => {
+        const { EditorBlameController } = await import('../../src/services/EditorBlameController');
+        vi.clearAllMocks();let finish!: (lines: unknown[]) => void;
+        const ops = {getBlame:vi.fn(()=>new Promise(resolve=>{finish=resolve;}))};
+        const editor=makeEditor('/repo/source.go');activeEditor=editor;
+        const controller=new EditorBlameController('/repo',ops as never,vi.fn());
+        const first=controller.toggleEditor(editor as never);
+        await controller.toggleEditor(editor as never);finish([]);await first;
+        expect(editor.setDecorations).not.toHaveBeenCalled();controller.dispose();
+    });
+});

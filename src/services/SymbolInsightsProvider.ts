@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import type { GitBlameLine } from "../types";
 import type { RepositoryEntry } from "./RepositoryContextService";
 
-const HISTORY_COMMAND = "intelligit.showAuthorCodeHistory";
+const BLAME_COMMAND = "intelligit.toggleSymbolBlame";
 const MAX_LINES = 20000;
 const MAX_CHARACTERS = 1024 * 1024;
 
@@ -19,31 +19,46 @@ export function summarizeAuthors(lines: GitBlameLine[], start: number, end: numb
     return [...authors.values()].sort((a, b) => b.lines - a.lines || a.name.localeCompare(b.name));
 }
 
-export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode.Disposable {
+class SymbolInsightLens extends vscode.CodeLens {
+    constructor(
+        readonly document: vscode.TextDocument,
+        readonly version: number,
+        readonly symbolRange: vscode.Range,
+        readonly anchor: vscode.Position,
+        readonly metric: "references" | "authors",
+    ) {
+        super(new vscode.Range(anchor.line, 0, anchor.line, 0));
+    }
+}
+
+export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.Disposable {
     private readonly changed = new vscode.EventEmitter<void>();
-    readonly onDidChangeInlayHints = this.changed.event;
+    readonly onDidChangeCodeLenses = this.changed.event;
     private readonly subscriptions: vscode.Disposable[];
     private readonly cache = new Map<string, {
         version: number; root: string; abort: AbortController; promise: Promise<GitBlameLine[]>;
     }>();
     private readonly references = new Map<string, { version: number; values: Map<string, Promise<vscode.Location[] | undefined>> }>();
+    private activeReferenceRequests = 0;
+    private readonly referenceQueue: Array<() => void> = [];
+    private readonly symbolRetries = new Map<string, { version: number; attempts: number }>();
     private generation = 0;
     private disposed = false;
     private timer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(
         private readonly repositoryForUri: (uri: vscode.Uri) => RepositoryEntry | null,
-        showHistory: (document: vscode.TextDocument, range: vscode.Range) => Promise<void>,
+        toggleBlame: (document: vscode.TextDocument) => Promise<void>,
     ) {
         this.subscriptions = [
-            vscode.languages.registerInlayHintsProvider({ scheme: "file" }, this),
-            vscode.commands.registerCommand(HISTORY_COMMAND, async (uri: vscode.Uri, range: vscode.Range, version: number) => {
+            vscode.languages.registerCodeLensProvider({ scheme: "file" }, this),
+            vscode.commands.registerCommand(BLAME_COMMAND, async (uri: vscode.Uri, version: number) => {
                 const document = await vscode.workspace.openTextDocument(uri);
                 if (document.version !== version) {
                     this.invalidate();
                     return;
                 }
-                await showHistory(document, range);
+                await toggleBlame(document);
             }),
             vscode.workspace.onDidChangeTextDocument((event) => {
                 if (event.contentChanges.length) this.invalidate(event.document.uri);
@@ -73,18 +88,28 @@ export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode
             vscode.workspace.getConfiguration("intelligit", document.uri).get("symbolInsights.enabled", true);
     }
 
-    async provideInlayHints(document: vscode.TextDocument, visibleRange: vscode.Range, token: vscode.CancellationToken): Promise<vscode.InlayHint[]> {
+    async provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
         if (token.isCancellationRequested || !this.enabled(document)) return [];
         const repository = this.repositoryForUri(document.uri);
         if (!repository) return [];
         const version = document.version;
-        const generation = this.generation;
-        const stale = () => token.isCancellationRequested || !this.enabled(document) || document.version !== version || generation !== this.generation;
+        const stale = () => token.isCancellationRequested || !this.enabled(document) || document.version !== version;
         try {
             const symbols = await vscode.commands.executeCommand<Array<vscode.DocumentSymbol | vscode.SymbolInformation>>(
                 "vscode.executeDocumentSymbolProvider", document.uri,
             );
             if (stale()) return [];
+            if (!symbols?.length) {
+                // gopls can register after our provider; an empty diagnostics list need not fire an event.
+                const key = document.uri.toString();
+                const previous = this.symbolRetries.get(key);
+                const attempts = previous?.version === version ? previous.attempts + 1 : 1;
+                if (this.symbolRetries.size >= 8 && !previous) this.symbolRetries.delete(this.symbolRetries.keys().next().value!);
+                this.symbolRetries.set(key, { version, attempts });
+                if (attempts <= 10) this.scheduleRefresh();
+                return [];
+            }
+            this.symbolRetries.delete(document.uri.toString());
             const kinds = new Set([
                 vscode.SymbolKind.Function, vscode.SymbolKind.Method, vscode.SymbolKind.Constructor,
                 vscode.SymbolKind.Class, vscode.SymbolKind.Struct, vscode.SymbolKind.Interface,
@@ -104,8 +129,7 @@ export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode
                         (document.uri.fsPath.endsWith("_test.go") && /^(?:(?:Test|Benchmark|Fuzz)(?:$|[^a-z])|Example)/.test(symbol.name))
                     );
                     const eligible = !inFunction && (!go || parentKind !== vscode.SymbolKind.Interface);
-                    if (sameFile && eligible && kinds.has(symbol.kind) && anchor.line >= visibleRange.start.line &&
-                        anchor.line <= visibleRange.end.line) {
+                    if (sameFile && eligible && kinds.has(symbol.kind)) {
                         if (seen.has(anchor.line)) {
                             const existing = targets.find(target => target.anchor.line === anchor.line);
                             if (existing && existing.anchor.character !== anchor.character) existing.references = false;
@@ -118,49 +142,66 @@ export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode
                 }
             };
             visit(symbols ?? []);
-            if (!targets.length) return [];
-            const blame = this.loadBlame(document, repository);
-            const hints: vscode.InlayHint[] = [];
-            // Only visible declarations, four reference requests at a time.
-            for (let offset = 0; offset < targets.length; offset += 4) {
-                if (stale()) return [];
-                const batch = await Promise.all(targets.slice(offset, offset + 4).map(async ({range, anchor, references: showReferences}) => {
-                    const [lines, references] = await Promise.all([blame, showReferences ? this.loadReferences(document, anchor) : undefined]);
-                    if (stale()) return;
-                    const parts: vscode.InlayHintLabelPart[] = [];
-                    if (references) {
-                        const part = new vscode.InlayHintLabelPart(`${references.length} ${references.length === 1 ? "usage" : "usages"}`);
-                        part.tooltip = "查看引用（⌘/Ctrl + 单击）";
-                        part.command = { title: "查看引用", command: "editor.action.peekLocations",
-                            arguments: [document.uri, anchor, references, "peek"] };
-                        parts.push(part);
-                    }
-                    const end = range.end.line > range.start.line && range.end.character === 0 ? range.end.line - 1 : range.end.line;
-                    const authors = summarizeAuthors(lines, range.start.line, end);
-                    if (authors.length) {
-                        if (parts.length) parts.push(new vscode.InlayHintLabelPart(" · "));
-                        const name = authors[0].name.replace(/[\r\n\t]/g, " ");
-                        const part = new vscode.InlayHintLabelPart(`${name}${authors.length > 1 ? ` +${authors.length - 1}` : ""}`);
-                        part.tooltip = `${authors.map(author => `${author.name} · ${author.lines} 行`).join("\n")}\n按当前代码的 Git blame 统计，未提交行不计入。⌘/Ctrl + 单击查看代码历史。`;
-                        part.command = { title: "查看代码历史", command: HISTORY_COMMAND, arguments: [document.uri, range, version] };
-                        parts.push(part);
-                    }
-                    if (!parts.length) return;
-                    const hint = new vscode.InlayHint(document.lineAt(anchor.line).range.end, parts);
-                    hint.paddingLeft = true;
-                    return hint;
-                }));
-                for (const hint of batch) if (hint) hints.push(hint);
+            const lenses: vscode.CodeLens[] = [];
+            for (const target of targets) {
+                if (target.references) lenses.push(new SymbolInsightLens(document, version,
+                    target.range, target.anchor, "references"));
+                lenses.push(new SymbolInsightLens(document, version,
+                    target.range, target.anchor, "authors"));
             }
-            return stale() ? [] : hints;
+            return stale() ? [] : lenses;
         } catch { return []; }
+    }
+
+    async resolveCodeLens(lens: vscode.CodeLens, token: vscode.CancellationToken, attempt = 0): Promise<vscode.CodeLens> {
+        if (!(lens instanceof SymbolInsightLens)) return lens;
+        const { document, version, symbolRange, anchor } = lens;
+        const generation = this.generation;
+        const stale = () => token.isCancellationRequested || !this.enabled(document) ||
+            document.version !== version;
+        if (stale()) return lens;
+        if (lens.metric === "references") {
+            const references = await this.loadReferences(document, anchor);
+            if (stale()) return lens;
+            if (generation !== this.generation) return attempt < 1
+                ? this.resolveCodeLens(lens, token, attempt + 1) : lens;
+            lens.command = references ? {
+                title: `${references.length} ${references.length === 1 ? "usage" : "usages"}`,
+                tooltip: "单击查看引用",
+                command: "editor.action.peekLocations",
+                arguments: [document.uri, anchor, references, "peek"],
+            } : { title: "", command: "" };
+        } else {
+            const repository = this.repositoryForUri(document.uri);
+            if (!repository) return lens;
+            const lines = await this.loadBlame(document, repository);
+            if (stale()) return lens;
+            if (generation !== this.generation) return attempt < 1
+                ? this.resolveCodeLens(lens, token, attempt + 1) : lens;
+            const end = symbolRange.end.line > symbolRange.start.line && symbolRange.end.character === 0
+                ? symbolRange.end.line - 1 : symbolRange.end.line;
+            const authors = summarizeAuthors(lines, symbolRange.start.line, end);
+            if (!authors.length) {
+                lens.command = { title: "", command: "" };
+            } else {
+                const name = authors[0].name.replace(/\$\(/g, "＄(").replace(/[\r\n\t]/g, " ");
+                lens.command = {
+                    title: `$(intelligit-author) ${name}${authors.length > 1 ? ` +${authors.length - 1}` : ""}`,
+                    tooltip: `${authors.map(author => `${author.name} · ${author.lines} 行`).join("\n")}\n按当前代码的 Git blame 统计，未提交行不计入。单击展开 / 收起当前文件左侧的 Git blame。`,
+                    command: BLAME_COMMAND,
+                    arguments: [document.uri, version],
+                };
+            }
+        }
+        return lens;
     }
 
     private loadBlame(document: vscode.TextDocument, repository: RepositoryEntry): Promise<GitBlameLine[]> {
         const key = document.uri.toString();
         let entry = this.cache.get(key);
         if (!entry || entry.version !== document.version || entry.root !== repository.root) {
-            this.drop(key);
+            this.cache.get(key)?.abort.abort();
+            this.cache.delete(key);
             if (this.cache.size >= 8) this.drop(this.cache.keys().next().value!);
             const abort = new AbortController();
             const relative = path.relative(repository.root, document.uri.fsPath).split(path.sep).join("/");
@@ -183,9 +224,7 @@ export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode
         const position = `${anchor.line}:${anchor.character}`;
         let result = entry.values.get(position);
         if (!result) {
-            result = Promise.resolve(vscode.commands.executeCommand<vscode.Location[]>(
-                "vscode.executeReferenceProvider", document.uri, anchor,
-            )).then(locations => {
+            result = this.queryReferences(document, anchor).then(locations => {
                 if (!locations) return undefined;
                 const seen = new Set<string>();
                 return locations.filter(location => {
@@ -198,6 +237,21 @@ export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode
             entry.values.set(position, result);
         }
         return result;
+    }
+
+    private async queryReferences(document: vscode.TextDocument, anchor: vscode.Position): Promise<vscode.Location[] | undefined> {
+        const version = document.version;
+        const generation = this.generation;
+        if (this.activeReferenceRequests >= 4) await new Promise<void>(resolve => this.referenceQueue.push(resolve));
+        else this.activeReferenceRequests++;
+        try {
+            if (this.disposed || document.isClosed || document.version !== version || this.generation !== generation) return undefined;
+            return await vscode.commands.executeCommand<vscode.Location[]>("vscode.executeReferenceProvider", document.uri, anchor);
+        } finally {
+            const next = this.referenceQueue.shift();
+            if (next) next();
+            else this.activeReferenceRequests--;
+        }
     }
 
     invalidate(uri?: vscode.Uri): void {
@@ -214,6 +268,7 @@ export class SymbolInsightsProvider implements vscode.InlayHintsProvider, vscode
         this.cache.get(key)?.abort.abort();
         this.cache.delete(key);
         this.references.delete(key);
+        this.symbolRetries.delete(key);
     }
 
     private scheduleRefresh(): void {

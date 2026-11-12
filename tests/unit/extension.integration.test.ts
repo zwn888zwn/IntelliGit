@@ -493,6 +493,7 @@ class MockEditorBlameController {
     }
     initialize = vi.fn(async () => undefined);
     annotateActiveEditor = vi.fn(async () => undefined);
+    toggleEditor = vi.fn(async () => undefined);
     clear = vi.fn(async () => undefined);
     dispose = vi.fn();
 }
