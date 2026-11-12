@@ -1,4 +1,5 @@
 const WEBVIEW_CONFIGS = [
+    { entry: "react/todo/TodoApp", out: "webview-todo" },
     { entry: "react/json-preview/JsonPreviewApp", out: "webview-jsonpreview" },
     { entry: "react/selection-history/SelectionHistoryApp", out: "webview-selectionhistory" },
     { entry: "react/CommitGraphApp", out: "webview-commitgraph" },

@@ -44,6 +44,8 @@ import {
     getDiffOriginalFilePathFromUri,
 } from "./services/diffService";
 import { EditorBlameController } from "./services/EditorBlameController";
+import { SymbolInsightsProvider } from "./services/SymbolInsightsProvider";
+import { TodoViewProvider } from "./views/TodoViewProvider";
 import { openCommitChanges } from "./services/multiDiffService";
 import { GoImplementationHints } from "./services/GoImplementationHints";
 import { DiffOverlayController } from "./services/DiffOverlayController";
@@ -85,6 +87,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(new DiffOverlayController());
     context.subscriptions.push(new CopilotStatusBarController(context));
     registerProjectSwitcher(context);
+    context.subscriptions.push(vscode.commands.registerCommand('intelligit.showTodo',
+        () => vscode.commands.executeCommand('intelligit.todo.focus')));
     context.subscriptions.push(new GoImplementationHints());
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
     const DIFF_NAVIGATION_ACTIVE_CONTEXT = "intelligit.diffNavigation.active";
@@ -126,6 +130,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 new NoWorkspaceViewProvider("IntelliGit unavailable", noWorkspaceMessage),
             ),
         );
+        context.subscriptions.push(vscode.window.registerWebviewViewProvider(
+            TodoViewProvider.viewType, new NoWorkspaceViewProvider("TODO unavailable", noWorkspaceMessage),
+        ));
         return;
     }
     const workspaceFilePath =
@@ -135,6 +142,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const repositoryService = new RepositoryContextService(workspaceFolder.uri);
     await repositoryService.initialize();
+    const symbolInsights = new SymbolInsightsProvider(
+        (uri) => repositoryService.getRepositoryForUri(uri),
+        async (document, range) => {
+            const repository = repositoryService.getRepositoryForUri(document.uri);
+            if (!repository) return;
+            await showSelectionHistory(context.extensionUri, repository, {
+                document, selection: new vscode.Selection(range.start, range.end),
+            }, range);
+        },
+    );
+    context.subscriptions.push(symbolInsights);
+    const todoView = new TodoViewProvider(context.extensionUri, () => repositoryService.getCurrentRepository());
+    context.subscriptions.push(todoView);
     const executor = createRepositoryScopedExecutor(repositoryService);
     const gitOps = createRepositoryScopedGitOps(repositoryService);
     registerDiffContentProvider(context.subscriptions);
@@ -417,6 +437,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const applyCurrentRepositoryContext = async (
         options: { resetGraph?: boolean; deferPanelRefresh?: boolean } = {},
     ): Promise<void> => {
+        symbolInsights.invalidate();
+        todoView.refresh();
         const repository = getCurrentRepository();
         const repositoryInfo = repository?.info ?? null;
         commitGraph.setRepositoryContext(repositoryInfo);
@@ -497,6 +519,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             mergeConflicts,
             mergeConflictsView,
             onBranchesUpdated: async (branches) => {
+                symbolInsights.invalidate();
+                todoView.refresh();
                 currentBranches = branches;
                 branchStatusBar.update(getCurrentRepository(), currentBranches, {
                     mergeInProgress: await gitOps.isMergeInProgress(),

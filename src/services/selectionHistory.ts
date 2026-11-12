@@ -12,14 +12,15 @@ export function selectedLineRange(range: vscode.Range): HistoryRange {
 }
 
 export async function showSelectionHistory(
-    extensionUri: vscode.Uri, repository: RepositoryEntry, editor: vscode.TextEditor,
+    extensionUri: vscode.Uri, repository: RepositoryEntry,
+    editor: Pick<vscode.TextEditor, "document" | "selection">, explicitRange?: vscode.Range,
 ): Promise<void> {
     const document = editor.document;
     const content = document.getText();
     const version = document.version;
-    let range: vscode.Range = editor.selection;
+    let range: vscode.Range = explicitRange ?? editor.selection;
     try {
-        if (editor.selection.isEmpty) {
+        if (!explicitRange && editor.selection.isEmpty) {
             // Prefer the smallest enclosing function; languages without symbols fall back to the caret line.
             const symbols = await vscode.commands.executeCommand<Array<vscode.DocumentSymbol | vscode.SymbolInformation>>(
                 "vscode.executeDocumentSymbolProvider", document.uri,

@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { execFile, spawn } from "child_process";
 import simpleGit, { SimpleGit } from "simple-git";
 
 export class GitExecutor {
@@ -42,6 +42,19 @@ export class GitExecutor {
                 }
                 reject(new Error(output.trim() || `git ${args[0]} failed with exit code ${code}`));
             });
+        });
+    }
+
+    /** Read against an editor snapshot without saving it or changing the index. */
+    runWithInput(args: string[], input: string, signal?: AbortSignal): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const child = execFile("git", ["-c", "core.quotepath=false", ...args], {
+                cwd: this.repoRoot, encoding: "utf8", timeout: 5000,
+                maxBuffer: 32 * 1024 * 1024, signal,
+            }, (error, stdout) => error ? reject(error) : resolve(stdout));
+            // Git can reject an untracked path before consuming stdin.
+            child.stdin?.on("error", () => {});
+            child.stdin?.end(input);
         });
     }
 }

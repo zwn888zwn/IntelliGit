@@ -734,14 +734,18 @@ export class GitOps {
         return Array.from(files.values()).sort((a, b) => a.path.localeCompare(b.path));
     }
 
-    async getBlame(filePath: string): Promise<GitBlameLine[]> {
-        const output = await this.executor.run([
+    async getBlame(filePath: string, snapshot?: { contents: string; signal?: AbortSignal }): Promise<GitBlameLine[]> {
+        const args = [
             "blame",
             "--line-porcelain",
             "--date=short",
+            ...(snapshot ? ["--contents", "-"] : []),
             "--",
             filePath,
-        ]);
+        ];
+        const output = snapshot
+            ? await this.executor.runWithInput(args, snapshot.contents, snapshot.signal)
+            : await this.executor.run(args);
         const blameLines: GitBlameLine[] = [];
         const lines = output.split("\n");
 
@@ -761,6 +765,7 @@ export class GitOps {
             const commitHash = headerMatch[1];
             const finalLine = Number.parseInt(headerMatch[2] ?? "0", 10);
             let author = "";
+            let authorEmail = "";
             let authorTime = 0;
             let authorTz = "+0000";
             let summary = "";
@@ -770,6 +775,8 @@ export class GitOps {
                 const line = lines[i];
                 if (line.startsWith("author ")) {
                     author = line.slice("author ".length).trim();
+                } else if (line.startsWith("author-mail ")) {
+                    authorEmail = line.slice("author-mail ".length).trim().replace(/^<|>$/g, "");
                 } else if (line.startsWith("author-time ")) {
                     authorTime = Number.parseInt(line.slice("author-time ".length).trim(), 10) || 0;
                 } else if (line.startsWith("author-tz ")) {
@@ -790,6 +797,7 @@ export class GitOps {
                 commitHash,
                 shortHash: commitHash.slice(0, 8),
                 author: author || (isUncommitted ? "Not Committed Yet" : "Unknown"),
+                ...(authorEmail ? { authorEmail } : {}),
                 date: formatBlameDate(authorTime, authorTz),
                 summary,
                 isUncommitted,

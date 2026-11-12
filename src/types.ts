@@ -149,6 +149,7 @@ export interface GitBlameLine {
     commitHash: string;
     shortHash: string;
     author: string;
+    authorEmail?: string;
     date: string;
     summary: string;
     isUncommitted: boolean;

@@ -13,6 +13,12 @@ IntelliGit brings a JetBrains-style Git workflow into VS Code, so you can stage,
 
 ## Core Workflows
 
+### Declaration Insights and TODO
+
+- Function, method, type, constant and package-variable declarations show inline reference counts and Git authors. Go follows GoLand's package-level scope: fields and local variables are excluded; `main`, `init` and test entry points omit usage counts. Cmd/Ctrl-click a count to peek references, or an author to inspect the declaration's code history. The first author owns the most currently attributed lines; `+N` counts other authors. Unsaved text is used without saving or staging it. This requires a language extension that provides document symbols and references, such as Go/gopls. Disable with `intelligit.symbolInsights.enabled`.
+- **IntelliGit: Show TODO** opens the bottom TODO panel, grouping TODO/FIXME comments by file. Choose Project, Current File, Scope Based (a project directory), or Changes (all comments in modified files, including unsaved edits). Single-click to preview nearby code; double-click or press Enter to open the source. The editor also highlights these comments (`intelligit.todo.highlight`). Common Go, JS/TS, C-family, Python, shell, configuration, HTML/XML and SQL comment forms are supported; this is a lightweight comment scanner, not a full language parser.
+- Project scans respect Git ignore rules and skip dependency/build directories, binary files and files over 1 MiB. Scans are asynchronous and cancellable, capped at 30,000 candidate files and 5,000 results; the result list is virtualized. Declaration insights skip documents over 20,000 lines or 1 MiB of text and share one bounded blame query per file snapshot.
+
 ### Large JSON Preview
 
 Opening a `.json` file defaults to **IntelliGit JSON 预览**, a readonly custom editor that reads the file directly without creating VS Code's full text model first. You can also right-click a file and select **IntelliGit: JSON 格式化预览**. It works without a Git repository or an open workspace. To edit the original text, use **Reopen Editor With → Text Editor**. An existing explicit editor association takes precedence; set `"workbench.editorAssociations": { "*.json": "intelligit.jsonPreview" }` to select this preview explicitly while preserving your other associations.

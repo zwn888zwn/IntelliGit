@@ -574,6 +574,9 @@ vi.mock("vscode", () => ({
     InlayHintLabelPart: class {
         constructor(public value: string) {}
     },
+    CodeLens: class {
+        constructor(public range: unknown, public command?: unknown) {}
+    },
     SymbolKind: { Interface: 10, Method: 5, Function: 11 },
     languages: {
         registerCodeLensProvider,
@@ -709,6 +712,7 @@ vi.mock("vscode", () => ({
         withProgress,
     },
     workspace: {
+        getConfiguration: vi.fn(() => ({ get: (_key: string, fallback: unknown) => fallback })),
         updateWorkspaceFolders,
         get workspaceFile() {
             return workspaceFile;
@@ -3700,7 +3704,7 @@ describe("extension integration", () => {
 
         activeTextEditor = firstDiffEditor;
         executeCommandFallback.mockClear();
-        await activeEditorListeners[0]?.(activeTextEditor);
+        for (const listener of activeEditorListeners) await listener(activeTextEditor);
         await waitForAsync();
 
         expect(executeCommandFallback).toHaveBeenCalledWith(
@@ -3724,7 +3728,7 @@ describe("extension integration", () => {
 
         activeTextEditor = firstDiffEditor;
         executeCommandFallback.mockClear();
-        await activeEditorListeners[0]?.(activeTextEditor);
+        for (const listener of activeEditorListeners) await listener(activeTextEditor);
         await waitForAsync();
 
         expect(executeCommandFallback).toHaveBeenCalledWith(
@@ -3850,7 +3854,7 @@ describe("extension integration", () => {
         };
 
         executeCommandFallback.mockClear();
-        await activeEditorListeners[0]?.(activeTextEditor);
+        for (const listener of activeEditorListeners) await listener(activeTextEditor);
         await waitForAsync();
 
         expect(executeCommandFallback).toHaveBeenCalledWith(
@@ -3991,10 +3995,10 @@ describe("extension integration", () => {
 
         workspaceFolders = undefined;
         await activate(context);
-        expect([...registeredCommands.keys()]).toEqual(["intelligit.previewJson", "intelligit.openRecentProject"]);
+        expect([...registeredCommands.keys()]).toEqual(["intelligit.previewJson", "intelligit.openRecentProject", "intelligit.showTodo"]);
         await registeredCommands.get("intelligit.openRecentProject")!();
         expect(executeCommandFallback).toHaveBeenCalledWith("workbench.action.openRecent");
-        expect(registerWebviewViewProvider).toHaveBeenCalledTimes(2);
+        expect(registerWebviewViewProvider).toHaveBeenCalledTimes(3);
         expect(registerWebviewViewProvider).toHaveBeenNthCalledWith(
             1,
             "intelligit.commitGraph",
@@ -4137,7 +4141,7 @@ describe("extension integration", () => {
         try {
             await activate(context);
             const watcher = fileSystemWatchers.find((item) =>
-                item.pattern.baseUri.fsPath === "/common/.git" &&
+                item.pattern.baseUri?.fsPath === "/common/.git" &&
                 item.pattern.pattern === "worktrees{,/**}",
             );
             expect(watcher).toBeDefined();

@@ -62,6 +62,7 @@
                 }
             ],
             "panel": [
+                { "id": "intelligitTodo", "title": "TODO", "icon": "media/intelligit.svg" },
                 {
                     "id": "intelligitPanel",
                     "title": "IntelliGit",
@@ -70,6 +71,7 @@
             ]
         },
         "views": {
+            "intelligitTodo": [{ "id": "intelligit.todo", "name": "", "type": "webview" }],
             "intelligit": [
                 {
                     "id": "intelligit.commitPanel",
@@ -96,6 +98,7 @@
             ]
         },
         "commands": [
+            { "command": "intelligit.showTodo", "title": "Show TODO", "category": "IntelliGit", "icon": "$(checklist)" },
             {
                 "command": "intelligit.previewJson",
                 "title": "JSON 格式化预览",
@@ -627,6 +630,13 @@
         "configuration": {
             "title": "IntelliGit",
             "properties": {
+                "intelligit.todo.highlight": { "type": "boolean", "default": true, "description": "Highlight TODO and FIXME comments in source files." },
+                "intelligit.symbolInsights.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "resource",
+                    "description": "Show reference counts and Git authors at the end of function, method, type, constant and package variable declarations. Cmd/Ctrl-click to peek references or view code history. Uses document symbols from the language extension; skips files over 20,000 lines or 1 MiB of text."
+                },
                 "intelligit.diff.openInOverlay": {
                     "type": "boolean",
                     "default": true,
