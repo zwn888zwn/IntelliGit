@@ -62,6 +62,28 @@ describe('symbol insights', () => {
         expect(mocks.symbols.mock.calls.filter(call=>call[0]==='vscode.executeReferenceProvider')).toHaveLength(1);
         expect(blame).toHaveBeenCalledTimes(1);
     });
+    it('orders relationship icons, usages and author in one CodeLens row', async () => {
+        provider.dispose();
+        const relation = { range: range(2, 2), command: { title: '$(intelligit-overridden)', command: 'editor.action.peekLocations' } };
+        provider = new SymbolInsightsProvider(() => ({ root: '/repo', gitOps: { getBlame: blame } } as any), vi.fn(), {
+            provideCodeLenses: async () => [relation],
+        });
+        setupSymbols();
+        const resolved = await resolve((await provide()).filter(lens => lens.range.start.line === 2));
+        expect(resolved.map(lens => lens.command?.title)).toEqual(['$(intelligit-overridden)', '1 usage', '$(intelligit-author) Alice +1']);
+    });
+    it('hides zero usages while keeping the author clickable', async () => {
+        setupSymbols();
+        const normal = mocks.symbols.getMockImplementation()!;
+        mocks.symbols.mockImplementation(async (command: string, ...args: any[]) => command === 'vscode.executeReferenceProvider'
+            ? [{ uri: document.uri, range: range(2, 2) }] : normal(command, ...args));
+        const resolved = await resolve((await provide()).slice(0, 2));
+        expect(resolved[0].command).toEqual({ title: '', command: '' });
+        expect(resolved[1].command?.command).toBe('intelligit.toggleSymbolBlame');
+        const refreshed = await resolve((await provide()).filter(lens => lens.range.start.line === 2));
+        expect(refreshed).toHaveLength(1);
+        expect(refreshed[0].command?.command).toBe('intelligit.toggleSymbolBlame');
+    });
     it('uses email identities, ignores uncommitted lines and respects range boundaries', () => {
         expect(summarizeAuthors([line(0,'Other'),line(1,'Alice','a'),line(2,'Alias','a'),line(3,'Alice','b'),line(4,'You','you',true)],1,4))
             .toEqual([{name:'Alice',lines:2},{name:'Alice',lines:1}]);

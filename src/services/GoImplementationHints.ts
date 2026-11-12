@@ -25,6 +25,9 @@ export class GoImplementationHints implements vscode.InlayHintsProvider, vscode.
             vscode.workspace.onDidSaveTextDocument((document) => {
                 if (document.languageId === "go") this.invalidate();
             }),
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration("intelligit.goRelationships")) this.invalidate(true);
+            }),
             vscode.workspace.onDidCloseTextDocument((document) => {
                 this.results.delete(document.uri.toString());
                 this.pending.delete(document.uri.toString());
@@ -61,6 +64,7 @@ export class GoImplementationHints implements vscode.InlayHintsProvider, vscode.
     ): Promise<vscode.InlayHint[]> {
         if (this.disposed || token.isCancellationRequested || document.isClosed ||
             document.languageId !== "go" || document.uri.scheme !== "file") return [];
+        if (vscode.workspace.getConfiguration("intelligit", document.uri).get<boolean>("goRelationships.enabled", true)) return [];
         const cached = this.results.get(document.uri.toString());
         const hints = cached?.version === document.version ? cached.hints : await this.loadInlayHints(document);
         return token.isCancellationRequested ? [] : (hints ?? []).filter((hint) => range.contains(hint.position));
@@ -92,6 +96,7 @@ export class GoImplementationHints implements vscode.InlayHintsProvider, vscode.
         document: vscode.TextDocument,
         revision: number,
     ): Promise<vscode.InlayHint[] | undefined> {
+        if (vscode.workspace.getConfiguration("intelligit", document.uri).get<boolean>("goRelationships.enabled", true)) return [];
         const version = document.version;
         const stale = () => this.disposed || document.isClosed ||
             document.version !== version || this.revision !== revision;

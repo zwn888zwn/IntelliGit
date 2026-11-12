@@ -38,7 +38,7 @@ export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.D
     private readonly cache = new Map<string, {
         version: number; root: string; abort: AbortController; promise: Promise<GitBlameLine[]>;
     }>();
-    private readonly references = new Map<string, { version: number; values: Map<string, Promise<vscode.Location[] | undefined>> }>();
+    private readonly references = new Map<string, { version: number; values: Map<string, Promise<vscode.Location[] | undefined>>; empty: Set<string> }>();
     private activeReferenceRequests = 0;
     private readonly referenceQueue: Array<() => void> = [];
     private readonly symbolRetries = new Map<string, { version: number; attempts: number }>();
@@ -49,9 +49,11 @@ export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.D
     constructor(
         private readonly repositoryForUri: (uri: vscode.Uri) => RepositoryEntry | null,
         toggleBlame: (document: vscode.TextDocument) => Promise<void>,
+        private readonly relationships?: vscode.CodeLensProvider,
     ) {
         this.subscriptions = [
             vscode.languages.registerCodeLensProvider({ scheme: "file" }, this),
+            ...(relationships?.onDidChangeCodeLenses ? [relationships.onDidChangeCodeLenses(() => this.changed.fire())] : []),
             vscode.commands.registerCommand(BLAME_COMMAND, async (uri: vscode.Uri, version: number) => {
                 const document = await vscode.workspace.openTextDocument(uri);
                 if (document.version !== version) {
@@ -89,6 +91,20 @@ export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.D
     }
 
     async provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
+        const version = document.version;
+        const [insights, relations] = await Promise.all([
+            this.provideInsights(document, token),
+            document.languageId === "go" ? this.relationships?.provideCodeLenses(document, token) : [],
+        ]);
+        if (this.disposed || token.isCancellationRequested || document.version !== version) return [];
+        const order = (lens: vscode.CodeLens) => lens instanceof SymbolInsightLens
+            ? lens.metric === "references" ? 1 : 2 : 0;
+        // Keep one provider for deterministic order: relationships | usages | author.
+        return [...insights, ...(relations ?? [])].sort((left, right) =>
+            left.range.start.line - right.range.start.line || order(left) - order(right));
+    }
+
+    private async provideInsights(document: vscode.TextDocument, token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
         if (token.isCancellationRequested || !this.enabled(document)) return [];
         const repository = this.repositoryForUri(document.uri);
         if (!repository) return [];
@@ -144,7 +160,9 @@ export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.D
             visit(symbols ?? []);
             const lenses: vscode.CodeLens[] = [];
             for (const target of targets) {
-                if (target.references) lenses.push(new SymbolInsightLens(document, version,
+                const cached = this.references.get(document.uri.toString());
+                const knownEmpty = cached?.version === version && cached.empty.has(`${target.anchor.line}:${target.anchor.character}`);
+                if (target.references && !knownEmpty) lenses.push(new SymbolInsightLens(document, version,
                     target.range, target.anchor, "references"));
                 lenses.push(new SymbolInsightLens(document, version,
                     target.range, target.anchor, "authors"));
@@ -165,7 +183,16 @@ export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.D
             if (stale()) return lens;
             if (generation !== this.generation) return attempt < 1
                 ? this.resolveCodeLens(lens, token, attempt + 1) : lens;
-            lens.command = references ? {
+            if (references?.length === 0) {
+                const entry = this.references.get(document.uri.toString());
+                const key = `${anchor.line}:${anchor.character}`;
+                if (entry?.version === version && !entry.empty.has(key)) {
+                    entry.empty.add(key);
+                    // Remove the empty lens itself so native CodeLens does not leave a separator.
+                    this.scheduleRefresh();
+                }
+            }
+            lens.command = references?.length ? {
                 title: `${references.length} ${references.length === 1 ? "usage" : "usages"}`,
                 tooltip: "单击查看引用",
                 command: "editor.action.peekLocations",
@@ -218,7 +245,7 @@ export class SymbolInsightsProvider implements vscode.CodeLensProvider, vscode.D
         const key = document.uri.toString();
         let entry = this.references.get(key);
         if (!entry || entry.version !== document.version) {
-            entry = { version: document.version, values: new Map() };
+            entry = { version: document.version, values: new Map(), empty: new Set() };
             this.references.set(key, entry);
         }
         const position = `${anchor.line}:${anchor.character}`;

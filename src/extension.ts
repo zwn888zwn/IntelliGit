@@ -48,6 +48,7 @@ import { SymbolInsightsProvider } from "./services/SymbolInsightsProvider";
 import { TodoViewProvider } from "./views/TodoViewProvider";
 import { openCommitChanges } from "./services/multiDiffService";
 import { GoImplementationHints } from "./services/GoImplementationHints";
+import { GoRelationshipDecorations } from "./services/GoRelationshipDecorations";
 import { DiffOverlayController } from "./services/DiffOverlayController";
 import { CopilotStatusBarController } from "./services/CopilotStatusBarController";
 import { runWithNotificationProgress } from "./utils/notifications";
@@ -90,6 +91,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(vscode.commands.registerCommand('intelligit.showTodo',
         () => vscode.commands.executeCommand('intelligit.todo.focus')));
     context.subscriptions.push(new GoImplementationHints());
+    const goRelationships = new GoRelationshipDecorations(!vscode.workspace.workspaceFolders?.length);
+    context.subscriptions.push(goRelationships);
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";
     const DIFF_NAVIGATION_ACTIVE_CONTEXT = "intelligit.diffNavigation.active";
     const DIFF_NAVIGATION_HAS_PREVIOUS_CONTEXT = "intelligit.diffNavigation.hasPrevious";
@@ -150,6 +153,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 : vscode.window.visibleTextEditors.find(candidate => candidate.document.uri.toString() === document.uri.toString());
             if (editor) await blameController.toggleEditor(editor);
         },
+        goRelationships,
     );
     context.subscriptions.push(symbolInsights);
     const todoView = new TodoViewProvider(context.extensionUri, () => repositoryService.getCurrentRepository());

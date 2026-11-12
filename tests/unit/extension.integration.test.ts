@@ -615,6 +615,7 @@ vi.mock("vscode", () => ({
         visibleTextEditors: implementationEditors,
         createTextEditorDecorationType,
         onDidChangeVisibleTextEditors: vi.fn(() => ({ dispose: vi.fn() })),
+        onDidChangeTextEditorVisibleRanges: vi.fn(() => ({ dispose: vi.fn() })),
         get activeTextEditor() {
             return activeTextEditor;
         },
@@ -713,7 +714,7 @@ vi.mock("vscode", () => ({
         withProgress,
     },
     workspace: {
-        getConfiguration: vi.fn(() => ({ get: (_key: string, fallback: unknown) => fallback })),
+        getConfiguration: vi.fn(() => ({ get: (key: string, fallback: unknown) => key === "goRelationships.enabled" ? false : fallback })),
         updateWorkspaceFolders,
         get workspaceFile() {
             return workspaceFile;

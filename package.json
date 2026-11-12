@@ -46,6 +46,41 @@
     "main": "./dist/extension.js",
     "contributes": {
         "icons": {
+            "intelligit-implementing": {
+                "description": "JetBrains-style implementing navigation",
+                "default": {
+                    "fontPath": "./media/navigation/navigation.woff",
+                    "fontCharacter": "\\E001"
+                }
+            },
+            "intelligit-implemented": {
+                "description": "JetBrains-style implemented navigation",
+                "default": {
+                    "fontPath": "./media/navigation/navigation.woff",
+                    "fontCharacter": "\\E002"
+                }
+            },
+            "intelligit-overriding": {
+                "description": "JetBrains-style overriding navigation",
+                "default": {
+                    "fontPath": "./media/navigation/navigation.woff",
+                    "fontCharacter": "\\E003"
+                }
+            },
+            "intelligit-overridden": {
+                "description": "JetBrains-style overridden navigation",
+                "default": {
+                    "fontPath": "./media/navigation/navigation.woff",
+                    "fontCharacter": "\\E004"
+                }
+            },
+            "intelligit-recursive": {
+                "description": "JetBrains-style recursive navigation",
+                "default": {
+                    "fontPath": "./media/navigation/navigation.woff",
+                    "fontCharacter": "\\E005"
+                }
+            },
             "intelligit-author": {
                 "description": "Code author outline",
                 "default": {
@@ -638,7 +673,9 @@
         ],
         "configurationDefaults": {
             "[go]": {
-                "editor.codeLensFontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+                "editor.codeLensFontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                "editor.inlayHints.fontSize": 11,
+                "editor.inlayHints.fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
             }
         },
         "configuration": {
@@ -695,6 +732,11 @@
                     "default": false,
                     "markdownDescription": "Opt in to opening merge conflicts with the external JetBrains merge tool by default. When disabled, IntelliGit opens its built-in IDEA-style merge editor; the external tool remains available from the conflict file context menu."
                 },
+                "intelligit.goRelationships.enabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "markdownDescription": "Show clickable Go interface, embedded-method and recursive-call icons above visible declarations. Hover an icon for its meaning and target count. Requires the Go language server and editor.codeLens."
+                },
                 "intelligit.clearLastCommit": {
                     "type": "boolean",
                     "default": true,
@@ -716,6 +758,7 @@
         "typecheck:webview": "tsc -p tsconfig.webview.json --noEmit",
         "typecheck": "bun run typecheck:ext && bun run typecheck:webview",
         "test": "bun vitest run",
+        "test:go-relationships": "node scripts/test-go-relationships.cjs",
         "test:diff-overlay": "node scripts/test-diff-overlay.cjs",
         "test:coverage": "bun vitest run --coverage",
         "test:watch": "bun vitest",
