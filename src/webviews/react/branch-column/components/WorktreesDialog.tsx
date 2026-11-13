@@ -1,3 +1,4 @@
+import { TooltipSurface, useTooltipDelay } from "../../shared/TooltipSurface";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { GitWorktree, RepositoryContextInfo } from "../../../../types";
@@ -73,6 +74,8 @@ export function WorktreesDialog({
     const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
     const [requestedCreateRepoRoot, setRequestedCreateRepoRoot] = useState("");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const tooltipDelay = useTooltipDelay();
+    const hideHoverTooltip = () => { tooltipDelay.cancel(); setHoverTooltip(null); };
     const [hoverTooltip, setHoverTooltip] = useState<HoverTooltipState | null>(null);
     const [query, setQuery] = useState("");
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -201,18 +204,18 @@ export function WorktreesDialog({
     ): void => {
         const target = event.currentTarget;
         if (target.scrollWidth <= target.clientWidth) {
-            setHoverTooltip(null);
+            hideHoverTooltip();
             return;
         }
         const rect = target.getBoundingClientRect();
         const maxWidth = Math.min(520, window.innerWidth - 16);
         const placement = rect.top >= 72 ? "above" : "below";
-        setHoverTooltip({
+        tooltipDelay.show(() => setHoverTooltip({
             text,
             left: Math.max(8, Math.min(rect.left, window.innerWidth - maxWidth - 8)),
             top: placement === "above" ? rect.top - 6 : rect.bottom + 6,
             placement,
-        });
+        }));
     };
 
     return createPortal(
@@ -338,7 +341,9 @@ export function WorktreesDialog({
                                                 onPointerEnter={(event) =>
                                                     showOverflowTooltip(event, item.repositoryName)
                                                 }
-                                                onPointerLeave={() => setHoverTooltip(null)}
+                                                onPointerLeave={hideHoverTooltip}
+                                        onPointerDown={hideHoverTooltip}
+                                        onContextMenu={hideHoverTooltip}
                                                 style={REPOSITORY_NAME_STYLE}
                                             >
                                                 {item.repositoryName}
@@ -350,7 +355,9 @@ export function WorktreesDialog({
                                         onPointerEnter={(event) =>
                                             showOverflowTooltip(event, worktreeName)
                                         }
-                                        onPointerLeave={() => setHoverTooltip(null)}
+                                        onPointerLeave={hideHoverTooltip}
+                                        onPointerDown={hideHoverTooltip}
+                                        onContextMenu={hideHoverTooltip}
                                         style={NAME_STYLE}
                                     >
                                         {worktreeName}
@@ -360,7 +367,9 @@ export function WorktreesDialog({
                                         onPointerEnter={(event) =>
                                             showOverflowTooltip(event, branchName)
                                         }
-                                        onPointerLeave={() => setHoverTooltip(null)}
+                                        onPointerLeave={hideHoverTooltip}
+                                        onPointerDown={hideHoverTooltip}
+                                        onContextMenu={hideHoverTooltip}
                                         style={BRANCH_STYLE}
                                     >
                                         {branchName}
@@ -370,7 +379,9 @@ export function WorktreesDialog({
                                         onPointerEnter={(event) =>
                                             showOverflowTooltip(event, worktree.path)
                                         }
-                                        onPointerLeave={() => setHoverTooltip(null)}
+                                        onPointerLeave={hideHoverTooltip}
+                                        onPointerDown={hideHoverTooltip}
+                                        onContextMenu={hideHoverTooltip}
                                         style={PATH_STYLE}
                                     >
                                         {worktree.path}
@@ -418,8 +429,8 @@ export function WorktreesDialog({
 
                 {hoverTooltip &&
                     createPortal(
-                        <div
-                            role="tooltip"
+                        <TooltipSurface
+
                             style={{
                                 ...HOVER_TOOLTIP_STYLE,
                                 left: hoverTooltip.left,
@@ -431,7 +442,7 @@ export function WorktreesDialog({
                             }}
                         >
                             {hoverTooltip.text}
-                        </div>,
+                        </TooltipSurface>,
                         document.body,
                     )}
 

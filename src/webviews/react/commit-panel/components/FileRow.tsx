@@ -67,7 +67,6 @@ function FileRowInner({
                 if ((e.target as HTMLElement).tagName === "INPUT") return;
                 onClick(file);
             }}
-            title={file.path}
         >
             <IndentGuides treeDepth={depth} />
             <Box as="span" w="14px" flexShrink={0} />
@@ -75,6 +74,8 @@ function FileRowInner({
             <FileTypeIcon status={file.status} icon={file.icon} />
             <Box
                 as="span"
+                title={file.path}
+                data-tooltip-overflow-only
                 flex={1}
                 overflow="hidden"
                 textOverflow="ellipsis"

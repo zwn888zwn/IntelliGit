@@ -1,3 +1,4 @@
+import "../shared/initTooltips";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { JsonTreeView } from "./JsonTreeView";
 import { createRoot } from "react-dom/client";

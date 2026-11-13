@@ -15,11 +15,11 @@ export const MENU_SURFACE_CSS = `
     }
     @supports (backdrop-filter: blur(1px)) {
         .intelligit-menu-surface {
-            --intelligit-menu-tint: color-mix(in srgb, var(--vscode-menu-background, #303033) 68%, transparent);
-            backdrop-filter: blur(16px) saturate(135%);
+            --intelligit-menu-tint: color-mix(in srgb, var(--vscode-menu-background, #303033) 52%, transparent);
+            backdrop-filter: blur(10px) saturate(135%);
         }
         .intelligit-menu-search-header {
-            backdrop-filter: blur(20px);
+            backdrop-filter: blur(10px) saturate(135%);
         }
     }
     @media (prefers-reduced-transparency: reduce) {

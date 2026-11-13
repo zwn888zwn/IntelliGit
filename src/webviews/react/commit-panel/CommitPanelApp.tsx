@@ -1,3 +1,4 @@
+import "../shared/initTooltips";
 // Entry point for the commit panel React webview. Wraps the app in
 // ChakraProvider with the VS Code theme and composes all panels.
 

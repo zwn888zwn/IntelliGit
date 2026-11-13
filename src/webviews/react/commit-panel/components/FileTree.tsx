@@ -231,6 +231,8 @@ function RepositorySection({
                         {repository.name}
                     </Box>
                     <Box
+                        title={repository.root}
+                        data-tooltip-overflow-only
                         fontSize="11px"
                         color="var(--vscode-descriptionForeground)"
                         whiteSpace="nowrap"

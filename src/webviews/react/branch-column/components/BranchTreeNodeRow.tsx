@@ -1,4 +1,6 @@
+import { TooltipSurface, useTooltipDelay } from "../../shared/TooltipSurface";
 import React from "react";
+import { BranchName } from "./BranchName";
 import { LuCloudUpload, LuFolderGit2, LuTag } from "react-icons/lu";
 import type { Branch, GitWorktree, ThemeFolderIconMap, ThemeTreeIcon } from "../../../../types";
 import { renderHighlightedLabel } from "../highlight";
@@ -8,7 +10,6 @@ import { resolveFolderIcon } from "../../shared/utils";
 import {
     BASE_ICON_STYLE,
     NODE_ICON_SIZE,
-    NODE_LABEL_STYLE,
     ROW_STYLE,
     TRACKING_BADGE_STYLE,
     TRACKING_PULL_STYLE,
@@ -46,6 +47,7 @@ export function TrackingBadge({
     remoteBranchNames?: ReadonlySet<string>;
 }): React.ReactElement | null {
     const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
+    const delay = useTooltipDelay();
     const hasNoRemoteBranch = !branch.isRemote && !remoteBranchNames?.has(branch.name);
     if (!hasNoRemoteBranch && branch.ahead <= 0 && branch.behind <= 0) return null;
 
@@ -66,21 +68,20 @@ export function TrackingBadge({
 
     const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
         const rect = event.currentTarget.getBoundingClientRect();
-        setTooltipPos({
-            x: event.clientX > 0 ? event.clientX : rect.left + rect.width / 2,
-            y: rect.top - 6,
-        });
+        const x = event.clientX > 0 ? event.clientX : rect.left + rect.width / 2;
+        delay.show(() => setTooltipPos({ x, y: rect.top - 6 }));
     };
 
-    const hideTooltip = (): void => setTooltipPos(null);
+    const hideTooltip = (): void => { delay.cancel(); setTooltipPos(null); };
 
     return (
         <span
             style={TRACKING_BADGE_STYLE}
             data-branch-tooltip={tooltipText}
             onPointerEnter={showTooltip}
-            onPointerMove={showTooltip}
             onPointerLeave={hideTooltip}
+            onPointerDown={hideTooltip}
+            onContextMenu={hideTooltip}
         >
             {hasNoRemoteBranch && (
                 <span
@@ -109,27 +110,21 @@ export function TrackingBadge({
                 </span>
             )}
             {tooltipPos && (
-                <span
+                <TooltipSurface
                     style={{
                         position: "fixed",
                         left: tooltipPos.x,
                         top: tooltipPos.y,
                         transform: "translate(-50%, -100%)",
-                        background: "var(--vscode-editorHoverWidget-background, #2f3646)",
-                        color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
-                        border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.12))",
-                        borderRadius: 4,
-                        fontSize: 11,
-                        lineHeight: "14px",
-                        padding: "3px 6px",
+
                         whiteSpace: "nowrap",
                         zIndex: 9999,
                         pointerEvents: "none",
-                        boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+
                     }}
                 >
                     {tooltipText}
-                </span>
+                </TooltipSurface>
             )}
         </span>
     );
@@ -269,7 +264,7 @@ export function BranchTreeNodeRow({
             ) : (
                 <GitBranchIcon color={BRANCH_TREE_ICON_BLUE} />
             )}
-            <span style={NODE_LABEL_STYLE}>{renderHighlightedLabel(node.label, filterNeedle)}</span>
+            <BranchName name={node.fullName ?? node.branch?.name ?? node.label}>{renderHighlightedLabel(node.label, filterNeedle)}</BranchName>
             {node.branch && (
                 <TrackingBadge branch={node.branch} remoteBranchNames={remoteBranchNames} />
             )}

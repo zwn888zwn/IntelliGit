@@ -118,6 +118,7 @@ describe("low coverage components", () => {
             worktreeName.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
         });
         await flush();
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, 420)); });
         expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
             "xnmdwaterWeb-feature",
         );
@@ -1012,7 +1013,7 @@ describe("low coverage components", () => {
 
     it.each([false, true])(
         "CommitRow shows multiple tags only in the tooltip (branches: %s)",
-        (hasBranches) => {
+        async (hasBranches) => {
             const tags = ["release/v1.0.0", "web-game/color-cards/v1.0.0", "production"];
             const { root, container } = mount(
                 <CommitRow
@@ -1046,6 +1047,7 @@ describe("low coverage components", () => {
             const indicator = container.querySelector('[aria-label^="Branches ("]') as HTMLElement;
             expect(indicator.textContent).toBe(hasBranches ? "main & origin/main" : "");
             act(() => indicator.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+            await act(async () => { await new Promise(resolve => setTimeout(resolve, 420)); });
             const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
             expect(tooltip.querySelector('[data-ref-kind="tag"]')?.textContent).toBe(tags.join("\n"));
             expect(tooltip.querySelectorAll('[data-ref-kind="tag"] svg')).toHaveLength(tags.length);
@@ -1116,6 +1118,7 @@ describe("low coverage components", () => {
                     "13px",
                 );
                 act(() => indicator.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+                act(() => vi.advanceTimersByTime(400));
 
                 const tooltip = document.querySelector('[role="tooltip"]') as HTMLElement;
                 expect(tooltip).toBeTruthy();

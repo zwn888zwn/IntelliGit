@@ -1,3 +1,4 @@
+import "./shared/initTooltips";
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ChakraProvider } from "@chakra-ui/react";

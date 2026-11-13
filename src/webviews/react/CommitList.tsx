@@ -1,3 +1,4 @@
+import { TooltipSurface, useTooltipDelay } from "./shared/TooltipSurface";
 // Renders the commit graph canvas alongside a scrollable commit list.
 // Layout: [Graph lanes] [Commit message + inline ref badges] [Author] [Date] [Hash].
 // Includes text search and a branch-filter picker in the toolbar.
@@ -103,6 +104,8 @@ export function CommitList({
     const [contextMenu, setContextMenu] = useState<{ x: number; y: number; commit: Commit } | null>(
         null,
     );
+    const jumpDelay = useTooltipDelay();
+    const hideJumpTooltip = () => { jumpDelay.cancel(); setJumpTooltip(null); };
     const [jumpTooltip, setJumpTooltip] = useState<{
         targetHash: string;
         left: number;
@@ -752,21 +755,23 @@ export function CommitList({
                                         <button
                                             key={`arrow:${arrow.direction}:${arrow.rowIndex}:${arrow.edgeId}`}
                                             type="button"
-                                            title={
+                                            aria-label={
                                                 targetCommit
                                                     ? `Jump to '${targetCommit.shortHash} ${targetCommit.message}'`
                                                     : `Load and jump to '${arrow.targetHash.slice(0, 8)}'`
                                             }
                                             onMouseEnter={() =>
                                                 targetCommit
-                                                    ? setJumpTooltip({
+                                                    ? jumpDelay.show(() => setJumpTooltip({
                                                           targetHash: arrow.targetHash,
                                                           left: repoRailWidth + left + buttonSize + 6,
                                                           top: top - 4,
-                                                      })
+                                                      }))
                                                     : undefined
                                             }
-                                            onMouseLeave={() => setJumpTooltip(null)}
+                                            onMouseLeave={hideJumpTooltip}
+                                            onPointerDown={hideJumpTooltip}
+                                            onContextMenu={hideJumpTooltip}
                                             onClick={(event) => {
                                                 event.preventDefault();
                                                 event.stopPropagation();
@@ -840,7 +845,7 @@ export function CommitList({
                         )}
 
                         {jumpTooltip && jumpTargetCommit && (
-                            <div
+                            <TooltipSurface
                                 style={{
                                     position: "absolute",
                                     left: jumpTooltip.left,
@@ -848,14 +853,7 @@ export function CommitList({
                                     zIndex: 8,
                                     pointerEvents: "none",
                                     maxWidth: 320,
-                                    padding: "4px 8px",
-                                    borderRadius: 4,
-                                    background: "var(--vscode-editorHoverWidget-background)",
-                                    color: "var(--vscode-editorHoverWidget-foreground)",
-                                    border: "1px solid var(--vscode-editorHoverWidget-border)",
-                                    boxShadow: "0 4px 16px rgba(0,0,0,0.24)",
-                                    fontSize: "11px",
-                                    lineHeight: 1.4,
+
                                     whiteSpace: "normal",
                                     wordBreak: "break-word",
                                 }}
@@ -870,7 +868,7 @@ export function CommitList({
                                     {jumpTargetCommit.shortHash}
                                 </div>
                                 <div>{jumpTargetCommit.message}</div>
-                            </div>
+                            </TooltipSurface>
                         )}
                     </div>
                 </div>

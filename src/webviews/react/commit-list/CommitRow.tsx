@@ -1,3 +1,4 @@
+import { TooltipSurface, useTooltipDelay } from "../shared/TooltipSurface";
 import React from "react";
 import { createPortal } from "react-dom";
 import { LuTag, LuCircleCheck, LuCircleX, LuLoaderCircle, LuClock, LuCircleSlash, LuCircleHelp, LuCircleMinus } from "react-icons/lu";
@@ -88,6 +89,7 @@ function BranchRefsIndicator({
     } | null>(null);
     const [tooltipLayout, setTooltipLayout] = React.useState({ left: 8, top: 8, maxHeight: 0 });
     const tooltipRef = React.useRef<HTMLDivElement>(null);
+    const delay = useTooltipDelay();
     const closeTimerRef = React.useRef<ReturnType<typeof setTimeout>>();
     const tooltipText = `Branches (${displayRefs.length}):\n${displayRefs.join("\n")}\n${groups
         .map((group) => `${group.label}: ${group.names.join(", ")}`)
@@ -118,10 +120,13 @@ function BranchRefsIndicator({
     const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
         keepTooltip();
         const rect = event.currentTarget.getBoundingClientRect();
-        setTooltipLayout({ left: 8, top: 8, maxHeight: 0 });
-        setTooltipPos({ x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom });
+        delay.show(() => {
+            setTooltipLayout({ left: 8, top: 8, maxHeight: 0 });
+            setTooltipPos({ x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom });
+        });
     };
     const hideTooltip = (): void => {
+        delay.cancel();
         keepTooltip();
         closeTimerRef.current = setTimeout(() => setTooltipPos(null), 100);
     };
@@ -146,6 +151,8 @@ function BranchRefsIndicator({
                 color: "var(--vscode-descriptionForeground)",
             }}
             aria-label={tooltipText}
+            onPointerDown={() => { delay.cancel(); keepTooltip(); setTooltipPos(null); }}
+            onContextMenu={() => { delay.cancel(); keepTooltip(); setTooltipPos(null); }}
             onPointerEnter={showTooltip}
             onPointerLeave={hideTooltip}
         >
@@ -195,9 +202,9 @@ function BranchRefsIndicator({
             </span>
             {tooltipPos &&
                 createPortal(
-                    <div
+                    <TooltipSurface
                         ref={tooltipRef}
-                        role="tooltip"
+
                         onPointerEnter={keepTooltip}
                         onPointerLeave={hideTooltip}
                         onClick={(event) => event.stopPropagation()}
@@ -211,16 +218,10 @@ function BranchRefsIndicator({
                             width: "max-content",
                             maxWidth: "min(360px, calc(100vw - 16px))",
                             overflowY: "auto",
-                            background: "var(--vscode-editorHoverWidget-background, #2f3646)",
-                            color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
-                            border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.12))",
-                            borderRadius: 4,
-                            fontSize: 12,
-                            lineHeight: "18px",
-                            padding: "6px 8px",
+
                             overflowWrap: "anywhere",
                             zIndex: 9999,
-                            boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+
                         }}
                     >
                         {groups.map((group) => (
@@ -265,7 +266,7 @@ function BranchRefsIndicator({
                                 </span>
                             </div>
                         ))}
-                    </div>,
+                    </TooltipSurface>,
                     document.body,
                 )}
         </span>

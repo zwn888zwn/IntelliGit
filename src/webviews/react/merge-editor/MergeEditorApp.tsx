@@ -1,3 +1,4 @@
+import "../shared/initTooltips";
 // Hosts the full-document merge editor and its extension-host confirmation protocol.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";

@@ -1,3 +1,4 @@
+import "./shared/initTooltips";
 // React app for the bottom-panel commit graph webview.
 // Layout: [BranchColumn (resizable)] | [drag-handle] | [CommitList + search bar] | [drag-handle] | [CommitInfoPane].
 // Branch filtering from the inline branch tree posts back to the extension host.

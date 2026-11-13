@@ -1,7 +1,9 @@
+import { TooltipSurface, useTooltipDelay } from "./shared/TooltipSurface";
 // Renders a branch tree inside the commit graph webview panel, to the left of the graph.
 // Shows HEAD, local branches grouped by prefix, and remote branches grouped by remote.
 // Clicking a branch filters the graph. Right-click shows context menu with git actions.
 
+import { BranchName } from "./branch-column/components/BranchName";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -60,7 +62,6 @@ import {
     HEAD_WRAPPER_STYLE,
     MULTI_REPOSITORY_PANEL_STYLE,
     NODE_ICON_SIZE,
-    NODE_LABEL_STYLE,
     NO_MATCH_STYLE,
     PANEL_STYLE,
     REPOSITORY_COLOR_STYLE,
@@ -714,9 +715,7 @@ export function BranchColumn({
                                     focusable="false"
                                 />
                                 <span style={HEAD_LABEL_STYLE}>HEAD</span>
-                                <span title={current.name} style={{ ...NODE_LABEL_STYLE, marginLeft: 6, fontWeight: 400 }}>
-                                    {current.name}
-                                </span>
+                                <BranchName name={current.name} style={{ marginLeft: 6, fontWeight: 400 }} />
                                 <TrackingBadge
                                     branch={current}
                                     remoteBranchNames={remoteBranchNames}
@@ -964,9 +963,11 @@ function BranchToolButton({
     onClick: () => void;
 }): React.ReactElement {
     const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
+    const delay = useTooltipDelay();
+    const hideTooltip = () => { delay.cancel(); setTooltipPosition(null); };
     const showTooltip = (element: HTMLElement): void => {
         const rect = element.getBoundingClientRect();
-        setTooltipPosition({ x: rect.right + 7, y: rect.top + rect.height / 2 });
+        delay.show(() => setTooltipPosition({ x: rect.right + 7, y: rect.top + rect.height / 2 }));
     };
 
     return (
@@ -977,9 +978,11 @@ function BranchToolButton({
                 aria-label={label}
                 onClick={onClick}
                 onPointerEnter={(event) => showTooltip(event.currentTarget)}
-                onPointerLeave={() => setTooltipPosition(null)}
+                onPointerLeave={hideTooltip}
+                onPointerDown={hideTooltip}
+                onContextMenu={hideTooltip}
                 onFocus={(event) => showTooltip(event.currentTarget)}
-                onBlur={() => setTooltipPosition(null)}
+                onBlur={hideTooltip}
                 style={{
                     width: 24,
                     height: 24,
@@ -998,28 +1001,21 @@ function BranchToolButton({
             </button>
             {tooltipPosition &&
                 createPortal(
-                    <span
-                        role="tooltip"
+                    <TooltipSurface
+
                         style={{
                             position: "fixed",
                             left: tooltipPosition.x,
                             top: tooltipPosition.y,
                             transform: "translateY(-50%)",
-                            padding: "4px 7px",
-                            border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.14))",
-                            borderRadius: 4,
-                            background: "var(--vscode-editorHoverWidget-background, #2f3646)",
-                            color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
-                            boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
-                            fontSize: 11,
-                            lineHeight: "15px",
+
                             whiteSpace: "nowrap",
                             pointerEvents: "none",
                             zIndex: 9999,
                         }}
                     >
                         {label}
-                    </span>,
+                    </TooltipSurface>,
                     document.body,
                 )}
         </>
