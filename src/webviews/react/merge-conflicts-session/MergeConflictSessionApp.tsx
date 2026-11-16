@@ -1,3 +1,4 @@
+import { LuGitMerge, LuGitBranch, LuArrowRight, LuFileCode2, LuCheck, LuRefreshCw, LuWandSparkles, LuChevronDown } from "react-icons/lu";
 import "../shared/initTooltips";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -124,7 +125,7 @@ function App() {
             >
                 <td className="name-cell" title={file.path}>
                     <span className="file-icon" aria-hidden="true">
-                        {file.resolved ? "✓" : "◆"}
+                        {file.resolved ? <LuCheck size={15} /> : <LuFileCode2 size={15} />}
                     </span>
                     <span className="file-name">{fileName(file.path)}</span>
                     {showCount ? (
@@ -142,10 +143,11 @@ function App() {
 
     return (
         <div className="session-root">
-            <div className="session-header">Conflicts</div>
+            <div className="session-header"><LuGitMerge size={20} aria-hidden="true" />Merge conflicts</div>
             <div className="session-subtitle">
-                Merging branch <strong>{sourceBranch}</strong> into branch{" "}
-                <strong>{targetBranch}</strong>
+                <span title={sourceBranch}><LuGitBranch size={14} aria-hidden="true" />{sourceBranch}</span>
+                <LuArrowRight size={16} aria-label="into" />
+                <span title={targetBranch}><LuGitBranch size={14} aria-hidden="true" />{targetBranch}</span>
             </div>
 
             <div className="session-toolbar">
@@ -154,7 +156,7 @@ function App() {
                     disabled={simpleConflictsResolved || unresolvedFiles.length === 0}
                     onClick={resolveAllSimple}
                 >
-                    ✣ Resolve All Simple Conflicts
+                    <LuWandSparkles size={15} aria-hidden="true" />Resolve All Simple Conflicts
                 </button>
                 {simpleConflictsResolved ? (
                     <div className="resolution-summary">
@@ -166,10 +168,11 @@ function App() {
                 ) : null}
                 <button
                     className="view-btn"
+                    aria-label="Refresh"
                     title="Refresh"
                     onClick={() => getVsCodeApi().postMessage({ type: "refresh" })}
                 >
-                    ◉
+                    <LuRefreshCw size={16} aria-hidden="true" />
                 </button>
             </div>
 
@@ -178,7 +181,7 @@ function App() {
                 <table className="conflict-table">
                     <thead>
                         <tr>
-                            <th />
+                            <th>File</th>
                             <th>Yours ({targetBranch})</th>
                             <th>Theirs ({sourceBranch})</th>
                         </tr>
@@ -186,7 +189,7 @@ function App() {
                     <tbody>
                         <tr className="group-row unresolved-group">
                             <td colSpan={3}>
-                                ⌄ ✕ Unresolved {unresolvedFiles.length} file
+                                <LuChevronDown size={13} aria-hidden="true" /> Unresolved {unresolvedFiles.length} file
                                 {unresolvedFiles.length === 1 ? "" : "s"}
                             </td>
                         </tr>
@@ -194,7 +197,7 @@ function App() {
                         {resolvedFiles.length > 0 ? (
                             <tr className="group-row resolved-group">
                                 <td colSpan={3}>
-                                    ⌄ ✓ Resolved {resolvedFiles.length} file
+                                    <LuCheck size={13} aria-hidden="true" /> Resolved {resolvedFiles.length} file
                                     {resolvedFiles.length === 1 ? "" : "s"}
                                 </td>
                             </tr>

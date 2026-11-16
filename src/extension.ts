@@ -12,7 +12,6 @@ import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
 import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
 import { MergeConflictSessionPanel } from "./views/MergeConflictSessionPanel";
 import { MergeConflictsTreeProvider } from "./views/MergeConflictsTreeProvider";
-import { MergeEditorPanel } from "./views/MergeEditorPanel";
 import { NoWorkspaceViewProvider } from "./views/NoWorkspaceViewProvider";
 import { ProjectBranchComparisonPanel } from "./views/ProjectBranchComparisonPanel";
 import type { Branch, CommitDetail, GitWorktree, ProjectComparisonTarget } from "./types";
@@ -530,6 +529,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     mergeInProgress: await gitOps.isMergeInProgress(),
                 });
             },
+            onMergeConflictsRefreshed: async () => {
+                const repository = getCurrentRepository();
+                if (repository) await MergeConflictSessionPanel.refreshIfOpen({ repoRoot: repository.root });
+            },
             onMergeConflictsDetected: async (count) => {
                 const repository = getCurrentRepository();
                 if (repository && MergeConflictSessionPanel.isOpen(repository.root)) return;
@@ -641,13 +644,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const openMergeConflictForFile = async (
         filePath: string,
-        labels?: {
-            sourceBranch?: string;
-            targetBranch?: string;
-        },
         repository: RepositoryEntry = requireCurrentRepository(),
-        deferFinish: boolean = false,
-        applyNonConflicting: boolean = false,
     ): Promise<void> => {
         const safePath = assertRepoRelativePath(filePath);
         await ensureRepositoryContextActive(repository);
@@ -667,22 +664,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (opened) return;
         }
 
-        const targetBranch =
-            labels?.targetBranch || currentBranches.find((branch) => branch.isCurrent)?.name;
-        MergeEditorPanel.open(
-            context.extensionUri,
-            repository.gitOps,
-            repository.uri,
-            safePath,
-            {
-                oursSourceLabel: targetBranch,
-                theirsSourceLabel: labels?.sourceBranch,
-                applyNonConflicting,
-            },
-            async () => {
-                await handleConflictStateChanged(repository, safePath, true, !deferFinish);
-            },
-        );
+        await openBuiltInMergeEditorForFile(repository, safePath);
     };
 
     openConflictSession = async (options: MergeConflictSessionOptions = {}): Promise<void> => {
@@ -698,14 +680,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             repository.gitOps,
             labels,
             {
-                onOpenMergeConflict: async (filePath, applyNonConflicting) => {
-                    await openMergeConflictForFile(
-                        filePath,
-                        labels,
-                        repository,
-                        true,
-                        applyNonConflicting,
-                    );
+                onOpenMergeConflict: async (filePath) => {
+                    await openMergeConflictForFile(filePath, repository);
                 },
                 onConflictStateChanged: async (resolvedPath) => {
                     await handleConflictStateChanged(repository, resolvedPath, false, false);
@@ -1769,7 +1745,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (!filePath) return;
             const repository = resolveConflictRepository(ctx);
             if (!repository) return;
-            await openMergeConflictForFile(filePath, undefined, repository);
+            await openMergeConflictForFile(filePath, repository);
         }),
         vscode.commands.registerCommand("intelligit.showSelectionHistory", async () => {
             const editor = vscode.window.activeTextEditor;

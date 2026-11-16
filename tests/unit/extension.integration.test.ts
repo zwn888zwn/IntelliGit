@@ -2372,96 +2372,32 @@ describe("extension integration", () => {
         );
     });
 
-    it("opens the built-in merge editor by default for conflict files", async () => {
+    it("opens the native merge editor without writing or staging the file", async () => {
         const { activate } = await import("../../src/extension");
-        const context = {
-            extensionUri: { fsPath: "/ext", path: "/ext" },
-            subscriptions: [],
-        } as unknown as MockExtensionContext;
-        await activate(context);
-
-        await registeredCommands.get("intelligit.openMergeConflict")?.({
-            filePath: "src/default-conflicted.ts",
-        });
-
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: [] } as unknown as MockExtensionContext);
+        await registeredCommands.get("intelligit.openMergeConflict")?.({ filePath: "src/conflicted.ts" });
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "git.openMergeEditor", expect.objectContaining({ fsPath: "/repo-a/src/conflicted.ts" }),
+        );
         const vscode = await import("vscode");
-        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
-        expect(createWebviewPanelMock).toHaveBeenCalledWith(
-            "intelligit.mergeEditor",
-            "Merge: src/default-conflicted.ts",
-            expect.any(Number),
-            expect.objectContaining({ enableScripts: true }),
+        expect(vscode.window.createWebviewPanel).not.toHaveBeenCalledWith(
+            "intelligit.mergeEditor", expect.anything(), expect.anything(), expect.anything(),
         );
-        expect(executeCommandFallback).not.toHaveBeenCalledWith(
-            "git.openMergeEditor",
-            expect.anything(),
-        );
-        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
-    });
-
-    it("uses a native modal confirmation for destructive merge-editor actions", async () => {
-        const { activate } = await import("../../src/extension");
-        const context = {
-            extensionUri: { fsPath: "/ext", path: "/ext" },
-            subscriptions: [],
-        } as unknown as MockExtensionContext;
-        await activate(context);
-        showWarningMessage.mockResolvedValueOnce("Discard and Close");
-
-        await registeredCommands.get("intelligit.openMergeConflict")?.({
-            filePath: "src/confirm-conflicted.ts",
-        });
-        await latestWebviewPanel?.emitMessage({
-            type: "confirm",
-            requestId: 7,
-            message: "Discard local merge edits?",
-            confirmLabel: "Discard and Close",
-        });
-
-        expect(showWarningMessage).toHaveBeenCalledWith(
-            "Discard local merge edits?",
-            { modal: true },
-            "Discard and Close",
-        );
-        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith({
-            type: "confirmResult",
-            requestId: 7,
-            confirmed: true,
-        });
-        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
-    });
-
-    it("does not overwrite a conflicted file that changed after the editor loaded", async () => {
-        const { activate } = await import("../../src/extension");
-        const context = {
-            extensionUri: { fsPath: "/ext", path: "/ext" },
-            subscriptions: [],
-        } as unknown as MockExtensionContext;
-        await activate(context);
-        gitOpsState.getConflictFileVersions.mockResolvedValue({
-            base: "base\n",
-            ours: "ours\n",
-            theirs: "theirs\n",
-        });
-        readFile
-            .mockResolvedValueOnce(Buffer.from("original\n"))
-            .mockResolvedValueOnce(Buffer.from("changed externally\n"));
-
-        await registeredCommands.get("intelligit.openMergeConflict")?.({
-            filePath: "src/stale-conflicted.ts",
-        });
-        await latestWebviewPanel?.emitMessage({ type: "ready" });
-        await latestWebviewPanel?.emitMessage({
-            type: "applyResolution",
-            content: "resolved\n",
-        });
-
         expect(writeFile).not.toHaveBeenCalled();
         expect(gitOpsState.stageFile).not.toHaveBeenCalled();
-        expect(showWarningMessage).toHaveBeenCalledWith(
-            expect.stringContaining("changed on disk"),
+        expect(gitOpsState.commit).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the source file if the native merge editor fails", async () => {
+        const { activate } = await import("../../src/extension");
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: [] } as unknown as MockExtensionContext);
+        executeCommandFallback.mockRejectedValueOnce(new Error("merge editor unavailable"));
+        await registeredCommands.get("intelligit.openMergeConflict")?.({ filePath: "src/conflicted.ts" });
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "vscode.open", expect.objectContaining({ fsPath: "/repo-a/src/conflicted.ts" }),
         );
-        (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
+        expect(showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("Opening the file instead"));
+        expect(writeFile).not.toHaveBeenCalled();
     });
 
     it("opens conflict files in the repository from the command context uri", async () => {
@@ -2481,14 +2417,9 @@ describe("extension integration", () => {
             },
         });
 
-        const vscode = await import("vscode");
-        const createWebviewPanelMock = vi.mocked(vscode.window.createWebviewPanel);
         expect(currentRepositoryRoot).toBe("/repo-b");
-        expect(createWebviewPanelMock).toHaveBeenCalledWith(
-            "intelligit.mergeEditor",
-            "Merge: src/repo-b-conflicted.ts",
-            expect.any(Number),
-            expect.objectContaining({ enableScripts: true }),
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "git.openMergeEditor", expect.objectContaining({ fsPath: "/repo-b/src/repo-b-conflicted.ts" }),
         );
         expect(latestCommitGraphProvider!.setRepositoryContext).toHaveBeenCalledWith(
             expect.objectContaining({ root: "/repo-b" }),
@@ -2558,71 +2489,41 @@ describe("extension integration", () => {
         expect(gitOpsState.continueRebase).toHaveBeenCalled();
     });
 
-    it("auto commits the merge after the final conflict is resolved", async () => {
+    it.each(["merge", "rebase"])("refreshes native resolutions and finishes %s only on request", async (operation) => {
         const { activate } = await import("../../src/extension");
-        const context = {
-            extensionUri: { fsPath: "/ext", path: "/ext" },
-            subscriptions: [],
-        } as unknown as MockExtensionContext;
-        await activate(context);
-
-        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
-        gitOpsState.isMergeInProgress.mockResolvedValue(true);
-        gitOpsState.getPendingCommitMessage.mockResolvedValue(
-            "Merge branch 'master' into alpha",
-        );
-        gitOpsState.getConflictFileVersions.mockResolvedValue({
-            base: "",
-            ours: "",
-            theirs: "",
-        });
-
-        await registeredCommands.get("intelligit.openMergeConflict")?.({
-            filePath: "src/final-conflict.ts",
-        });
-        await latestWebviewPanel?.emitMessage({ type: "ready" });
-        await latestWebviewPanel?.emitMessage({
-            type: "applyResolution",
-            content: "resolved\n",
-        });
-
-        expect(gitOpsState.stageFile).toHaveBeenCalledWith("src/final-conflict.ts");
-        expect(gitOpsState.commit).toHaveBeenCalledWith(
-            "Merge branch 'master' into alpha",
-            false,
-        );
-        expect(showInformationMessage).toHaveBeenCalledWith("Merge committed successfully.");
-    });
-
-    it("continues the rebase after the final conflict is resolved", async () => {
-        const { activate } = await import("../../src/extension");
-        const context = {
-            extensionUri: { fsPath: "/ext", path: "/ext" },
-            subscriptions: [],
-        } as unknown as MockExtensionContext;
-        await activate(context);
-
-        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
-        gitOpsState.isRebaseInProgress.mockResolvedValue(true);
-        gitOpsState.getConflictFileVersions.mockResolvedValue({
-            base: "",
-            ours: "",
-            theirs: "",
-        });
-
-        await registeredCommands.get("intelligit.openMergeConflict")?.({
-            filePath: "src/final-rebase-conflict.ts",
-        });
-        await latestWebviewPanel?.emitMessage({ type: "ready" });
-        await latestWebviewPanel?.emitMessage({
-            type: "applyResolution",
-            content: "resolved\n",
-        });
-
-        expect(gitOpsState.stageFile).toHaveBeenCalledWith("src/final-rebase-conflict.ts");
-        expect(gitOpsState.continueRebase).toHaveBeenCalled();
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: [] } as unknown as MockExtensionContext);
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([
+            { path: "src/conflicted.ts", code: "UU", ours: "Modified", theirs: "Modified" },
+        ]);
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        const session = latestWebviewPanel!;
+        await session.emitMessage({ type: "openMerge", filePath: "src/conflicted.ts" });
+        expect(executeCommandFallback).toHaveBeenCalledWith("git.openMergeEditor", expect.anything());
+        await session.emitMessage({ type: "acceptAndFinish" });
         expect(gitOpsState.commit).not.toHaveBeenCalled();
-        expect(showInformationMessage).toHaveBeenCalledWith("Rebase continued successfully.");
+        expect(gitOpsState.continueRebase).not.toHaveBeenCalled();
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
+        gitOpsState.isMergeInProgress.mockResolvedValue(operation === "merge");
+        gitOpsState.isRebaseInProgress.mockResolvedValue(operation === "rebase");
+        gitOpsState.getPendingCommitMessage.mockResolvedValue("Merge branch 'master' into alpha");
+        if (operation === "merge") {
+            await session.emitViewState(true);
+        } else {
+            const watcher = fsWatchPaths.indexOf("/repo-a/.git");
+            expect(watcher).toBeGreaterThanOrEqual(0);
+            fsWatchCallbacks[watcher]!("change", "index");
+            await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+        await waitForAsync();
+        expect(session.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: "setSessionData", data: expect.objectContaining({ files: [expect.objectContaining({ path: "src/conflicted.ts", resolved: true })] }),
+        }));
+        expect(gitOpsState.commit).not.toHaveBeenCalled();
+        expect(gitOpsState.continueRebase).not.toHaveBeenCalled();
+        await session.emitMessage({ type: "acceptAndFinish" });
+        if (operation === "merge") expect(gitOpsState.commit).toHaveBeenCalledWith("Merge branch 'master' into alpha", false);
+        else expect(gitOpsState.continueRebase).toHaveBeenCalled();
+        expect(gitOpsState.stageFile).not.toHaveBeenCalled();
     });
 
     it("opens existing merge conflicts instead of starting another merge", async () => {
@@ -2821,7 +2722,7 @@ describe("extension integration", () => {
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
-    it("opens only the remaining manual hunks after resolving simple conflicts", async () => {
+    it("hands remaining conflicts to the native editor after resolving simple files", async () => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -2849,17 +2750,10 @@ describe("extension integration", () => {
         await latestWebviewPanel?.emitMessage({ type: "openMerge", filePath: file.path });
         await latestWebviewPanel?.emitMessage({ type: "ready" });
 
-        const conflictDataMessage = latestWebviewPanel?.webview.postMessage.mock.calls
-            .map(([message]) => message)
-            .find((message) => message?.type === "setConflictData");
-        const segments = conflictDataMessage?.data?.segments ?? [];
-        expect(segments.filter((segment: { type: string }) => segment.type === "conflict"))
-            .toHaveLength(1);
-        expect(
-            segments
-                .filter((segment: { type: string }) => segment.type === "common")
-                .flatMap((segment: { lines: string[] }) => segment.lines),
-        ).toContain("ours-only");
+        expect(executeCommandFallback).toHaveBeenCalledWith(
+            "git.openMergeEditor", expect.objectContaining({ fsPath: "/repo-a/src/mixed.ts" }),
+        );
+        expect(writeFile).not.toHaveBeenCalled();
         expect(gitOpsState.stageFile).not.toHaveBeenCalled();
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
         (sessionPanel as { dispose?: () => void } | undefined)?.dispose?.();

@@ -19,10 +19,12 @@ export interface RefreshServiceDeps {
     mergeConflicts: MergeConflictsTreeProvider;
     mergeConflictsView: vscode.TreeView<unknown>;
     onBranchesUpdated: (branches: Branch[]) => Promise<void> | void;
+    onMergeConflictsRefreshed?: () => Promise<void>;
     onMergeConflictsDetected?: (count: number) => Promise<void>;
 }
 
 export class RefreshService implements vscode.Disposable {
+    private conflictRefreshPending = false;
     private lightTimer: ReturnType<typeof setTimeout> | undefined;
     private fullTimer: ReturnType<typeof setTimeout> | undefined;
     private readonly fsWatchers: fs.FSWatcher[] = [];
@@ -72,10 +74,19 @@ export class RefreshService implements vscode.Disposable {
         await vscode.commands.executeCommand("intelligit.refresh");
     }
 
-    debouncedLightRefresh(): void {
+    debouncedLightRefresh(refreshConflicts = false): void {
+        this.conflictRefreshPending ||= refreshConflicts;
         if (this.lightTimer) clearTimeout(this.lightTimer);
         this.lightTimer = setTimeout(() => {
-            void this.deps.commitPanel.refresh().catch((err) => {
+            const refreshConflicts = this.conflictRefreshPending;
+            this.conflictRefreshPending = false;
+            void (async () => {
+                await this.deps.commitPanel.refresh();
+                if (refreshConflicts) {
+                    await this.refreshMergeConflicts();
+                    await this.deps.onMergeConflictsRefreshed?.();
+                }
+            })().catch((err) => {
                 console.error("[IntelliGit] Light refresh failed:", err);
             });
         }, 300);
@@ -91,6 +102,7 @@ export class RefreshService implements vscode.Disposable {
                 await this.deps.commitGraph.refresh();
                 await this.deps.commitPanel.refresh();
                 await this.refreshMergeConflicts();
+                await this.deps.onMergeConflictsRefreshed?.();
             })().catch((err) => {
                 console.error("[IntelliGit] Full refresh failed:", err);
             });
@@ -192,7 +204,7 @@ export class RefreshService implements vscode.Disposable {
                     }
                     if (gitStateFiles.has(filename)) {
                         if (filename === "index") {
-                            this.debouncedLightRefresh();
+                            this.debouncedLightRefresh(true);
                         } else {
                             this.debouncedFullRefresh();
                         }

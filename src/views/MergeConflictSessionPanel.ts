@@ -22,10 +22,7 @@ interface MergeConflictSessionLabels {
 }
 
 interface MergeConflictSessionCallbacks {
-    onOpenMergeConflict: (
-        filePath: string,
-        applyNonConflicting: boolean,
-    ) => Promise<void>;
+    onOpenMergeConflict: (filePath: string) => Promise<void>;
     onConflictStateChanged: (resolvedPath?: string) => Promise<void>;
     onFinish: () => Promise<boolean>;
     onMergeAborted: () => Promise<void>;
@@ -77,6 +74,14 @@ export class MergeConflictSessionPanel {
                 } catch {
                     // Panel may have been disposed between the active check and postMessage.
                 }
+            }
+        });
+
+        panel.onDidChangeViewState(({ webviewPanel }) => {
+            if (webviewPanel.active) {
+                void this.postSessionData().catch((error) => {
+                    if (this.isAlive()) vscode.window.showErrorMessage(getErrorMessage(error));
+                });
             }
         });
 
@@ -182,10 +187,7 @@ export class MergeConflictSessionPanel {
             case "openMerge": {
                 const filePath = this.getFilePath(msg.filePath);
                 if (!filePath) return;
-                await this.callbacks.onOpenMergeConflict(
-                    filePath,
-                    this.simpleConflictsResolved,
-                );
+                await this.callbacks.onOpenMergeConflict(filePath);
                 await this.postSessionData({ selectedPath: filePath });
                 return;
             }
