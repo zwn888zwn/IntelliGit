@@ -1,5 +1,6 @@
 import "../shared/initTooltips";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { JsonPreviewToolbar } from "./JsonPreviewToolbar";
 import { JsonTreeView } from "./JsonTreeView";
 import { createRoot } from "react-dom/client";
 import { getVsCodeApi } from "../shared/vscodeApi";
@@ -117,16 +118,11 @@ function JsonPreviewApp({ onTreeView }: { onTreeView: () => void }): React.React
     return <main className="json-preview">
         <style>{`
             .json-preview { height:100%; display:flex; flex-direction:column; color:var(--vscode-editor-foreground); background:var(--vscode-editor-background); }
-            .json-toolbar { display:flex; align-items:center; gap:10px; min-height:38px; padding:5px 12px; border-bottom:1px solid var(--vscode-panel-border); background:var(--vscode-editorWidget-background,var(--vscode-editor-background)); }
-            .json-icon { color:var(--vscode-symbolIcon-propertyForeground,#9cdcfe); font:600 15px var(--vscode-editor-font-family,monospace); }
-            .json-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:500; }
-            .json-readonly { color:var(--vscode-descriptionForeground); font-size:11px; white-space:nowrap; }
             .json-preview button,.json-preview select { font:inherit; color:var(--vscode-foreground); background:transparent; border:1px solid transparent; border-radius:4px; padding:3px 6px; cursor:pointer; }
             .json-preview select { font-size:11px; background:var(--vscode-editorWidget-background,var(--vscode-editor-background)); }
             .json-preview button:hover { background:var(--vscode-toolbar-hoverBackground); }
             .json-preview button:disabled { opacity:.4; cursor:default; }
             .json-preview button:focus-visible,.json-preview select:focus-visible,.json-viewport:focus-visible { outline:1px solid var(--vscode-focusBorder); outline-offset:-1px; }
-            .json-icon-button { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; flex-shrink:0; }
             .json-hint { padding:8px 12px; font-size:11px; line-height:18px; color:var(--vscode-descriptionForeground); border-bottom:1px solid var(--vscode-panel-border); }
             .json-error { padding:8px 12px; color:var(--vscode-errorForeground); background:var(--vscode-inputValidation-errorBackground); white-space:pre-wrap; }
             .json-viewport { flex:1; min-height:0; overflow:auto; position:relative; overflow-anchor:none; scrollbar-color:auto; }
@@ -150,22 +146,12 @@ function JsonPreviewApp({ onTreeView }: { onTreeView: () => void }): React.React
             .json-status { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
             .json-footer button { white-space:nowrap; font-size:11px; }
             .json-empty { padding:24px; color:var(--vscode-descriptionForeground); }
-            @media (max-width:480px) { .json-toolbar { gap:5px; padding-inline:8px; } .json-readonly { display:none; } .json-footer { padding-inline:8px; } }
+            @media (max-width:480px) { .json-footer { padding-inline:8px; } }
         `}</style>
-        <header className="json-toolbar">
-            <span className="json-icon" aria-hidden="true">{`{ }`}</span>
-            <span className="json-name" title={info.name}>{info.name.split(/[\\/]/).pop() || "JSON 预览"}</span>
-            <span className="json-readonly">只读预览</span>
-            <button onClick={onTreeView}>结构</button>
-            <select aria-label="缩进" value={indent} onChange={event => setIndent(Number(event.target.value))}>
-                <option value={2}>2 空格</option><option value={4}>4 空格</option></select>
-            <button className="json-icon-button" aria-label="刷新" title="重新读取文件" onClick={() => { pending.current = true; setLoading(true); vscode.postMessage({ type: "refresh" }); }}>
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true"><path d="M13.2 6A5.4 5.4 0 1 0 13 10M13.2 2.4V6H9.6" /></svg>
-            </button>
-            <button className="json-icon-button" aria-label="预览说明" title="预览说明" aria-expanded={showHelp} onClick={() => setShowHelp(value => !value)}>
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true"><circle cx="8" cy="8" r="6" /><path d="M8 7v4M8 4.5v1" /></svg>
-            </button>
-        </header>
+        <JsonPreviewToolbar name={info.name} mode="code" onModeChange={onTreeView}
+            indent={indent} onIndentChange={setIndent}
+            onRefresh={() => { pending.current = true; setLoading(true); vscode.postMessage({ type: "refresh" }); }}
+            help={showHelp} onToggleHelp={() => setShowHelp(value => !value)} />
         {showHelp && <div className="json-hint">上下滚动按需加载，不修改原文件。行号为格式化后的显示行号；↪ 表示超长内容的续行。</div>}
         {error && <div className="json-error" role="alert">{error}</div>}
         <div className="json-viewport" ref={viewport} tabIndex={0} aria-label="格式化 JSON 内容" onScroll={event => {

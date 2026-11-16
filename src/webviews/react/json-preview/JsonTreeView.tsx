@@ -1,3 +1,4 @@
+import { JsonPreviewToolbar } from "./JsonPreviewToolbar";
 import React, { useEffect, useRef, useState } from "react";
 import { getVsCodeApi } from "../shared/vscodeApi";
 import type { JsonTreeCursor, JsonTreeMessage, JsonTreeNode } from "../../../services/jsonPreview/types";
@@ -179,14 +180,11 @@ export function JsonTreeView({ onCodeView }: { onCodeView: () => void }): React.
     return <main className="json-tree">
         <style>{`
             .json-tree { height:100%; display:flex; flex-direction:column; color:var(--vscode-editor-foreground); background:var(--vscode-editor-background); }
-            .jt-toolbar { min-height:38px; display:flex; gap:10px; align-items:center; padding:5px 12px; border-bottom:1px solid var(--vscode-panel-border); }
-            .jt-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
-            .jt-icon,.jt-key { color:var(--vscode-symbolIcon-propertyForeground,#9cdcfe); }
+            .jt-key { color:var(--vscode-symbolIcon-propertyForeground,#9cdcfe); }
             .json-tree button { font:inherit; color:inherit; background:transparent; border:1px solid transparent; border-radius:4px; cursor:pointer; padding:3px 6px; }
             .json-tree button:hover { background:var(--vscode-toolbar-hoverBackground,var(--vscode-list-hoverBackground)); }
             .json-tree button:disabled { opacity:.5; cursor:default; }
             .json-tree button:focus-visible,.jt-row:focus-visible,.jt-value:focus-visible { outline:1px solid var(--vscode-focusBorder); outline-offset:-1px; }
-            .jt-mode { color:var(--vscode-textLink-foreground)!important; background:var(--vscode-toolbar-hoverBackground)!important; }
             .jt-hint,.jt-error { padding:8px 12px; font-size:12px; line-height:18px; border-bottom:1px solid var(--vscode-panel-border); }
             .jt-error { color:var(--vscode-errorForeground,#f88); }
             .jt-scroll { flex:1; min-height:0; overflow:auto; position:relative; overflow-anchor:none; }
@@ -208,15 +206,12 @@ export function JsonTreeView({ onCodeView }: { onCodeView: () => void }): React.
             .jt-detail-title span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
             .jt-value { display:block; width:100%; height:95px; resize:none; box-sizing:border-box; border:1px solid var(--vscode-input-border,var(--vscode-panel-border)); border-radius:4px; padding:7px; background:var(--vscode-input-background,var(--vscode-editor-background)); color:var(--vscode-input-foreground,var(--vscode-editor-foreground)); font:12px/18px var(--vscode-editor-font-family,monospace); }
             .jt-empty { padding:20px; color:var(--vscode-descriptionForeground); }
-            @media(max-width:550px) { .jt-toolbar { gap:4px; padding-inline:6px; } .jt-label { max-width:200px; } .jt-toolbar button { font-size:11px; } }
+            @media(max-width:550px) { .jt-label { max-width:200px; } }
         `}</style>
-        <header className="jt-toolbar"><span className="jt-icon">{`{ }`}</span>
-            <span className="jt-name" title={info.name}>{info.name.split(/[\\/]/).pop() || "JSON 预览"}</span>
-            <button className="jt-mode" aria-pressed="true">结构</button><button onClick={onCodeView}>代码</button>
-            <button onClick={() => { if (root) { forget(root.offset); expanded.current.clear(); setError(""); update(); if (viewport.current) viewport.current.scrollTop = 0; } }}>全部收起</button>
-            <button onClick={() => api.postMessage({ type: "refresh", mode: "tree" })}>刷新</button>
-            <button aria-label="结构预览说明" aria-expanded={help} onClick={() => setHelp(value => !value)}>ⓘ</button>
-        </header>
+        <JsonPreviewToolbar name={info.name} mode="tree" onModeChange={onCodeView}
+            onCollapse={() => { if (root) { forget(root.offset); expanded.current.clear(); setError(""); update(); if (viewport.current) viewport.current.scrollTop = 0; } }}
+            onRefresh={() => api.postMessage({ type: "refresh", mode: "tree" })}
+            help={help} onToggleHelp={() => setHelp(value => !value)} />
         {help && <div className="jt-hint">点击箭头展开或收起，点击节点可选中并复制值。只读取展开节点的直接子项，每批最多 100 项；下一批按需扫描，未读取的内容不统计数量。此视图只读。</div>}
         {error && <div className="jt-error" role="alert">{error}</div>}
         <div className="jt-scroll" ref={viewport} onScroll={event => setScrollTop(event.currentTarget.scrollTop)} role="tree" aria-label="JSON 结构">
