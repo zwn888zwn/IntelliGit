@@ -471,6 +471,9 @@ const BACKDROP_STYLE: React.CSSProperties = {
 
 const DIALOG_STYLE: React.CSSProperties = {
     width: "min(560px, calc(100vw - 32px))",
+    maxHeight: "calc(100vh - 32px)",
+    boxSizing: "border-box",
+    overflowY: "auto",
     background: "var(--vscode-editorWidget-background, #2b2d30)",
     color: "var(--vscode-foreground, #d7d7d7)",
     border: "1px solid var(--vscode-editorWidget-border, rgba(255,255,255,0.14))",
