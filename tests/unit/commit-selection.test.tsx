@@ -60,7 +60,7 @@ function setup() {
             item.textContent?.includes("Squash"),
         );
     };
-    return { action, rows, click, menu };
+    return { action, rows, click, menu, container };
 }
 
 describe("commit multi-selection", () => {
@@ -100,5 +100,23 @@ describe("commit multi-selection", () => {
         list.click(1);
         list.click(2, { shiftKey: true });
         expect(list.menu(1)?.getAttribute("data-disabled")).toBe("true");
+    });
+});
+
+
+describe("commit column visibility", () => {
+    it("retains author, date and hash when the viewport shrinks", () => {
+        const list = setup();
+        const viewport = list.container.querySelector('[data-testid="commit-list-viewport"]')!;
+        for (const width of [900, 600, 450, 400, 900]) {
+            Object.defineProperty(viewport, "clientWidth", { value: width, configurable: true });
+            act(() => window.dispatchEvent(new Event("resize")));
+            if (width === 400) expect(list.container.querySelectorAll('.intelligit-commit-message')).toHaveLength(0);
+            if (width >= 450) expect(list.container.querySelectorAll('.intelligit-commit-message').length).toBeGreaterThan(0);
+            for (const row of list.rows()) {
+                expect(Array.from(row.querySelectorAll('[data-column]')).map(item => item.getAttribute('data-column')))
+                    .toEqual(["author", "date", "hash"]);
+            }
+        }
     });
 });

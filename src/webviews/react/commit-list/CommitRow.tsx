@@ -24,6 +24,7 @@ interface Props {
     isSelected: boolean;
     isUnpushed: boolean;
     laneColor?: string;
+    showMessage?: boolean;
     showAuthor?: boolean;
     showDate?: boolean;
     showHash?: boolean;
@@ -134,19 +135,21 @@ function BranchRefsIndicator({
 
     return (
         <span
+            className="intelligit-commit-refs"
             style={{
                 marginLeft: 6,
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 4,
-                minWidth: branchRefs.length > 0 ? 34 : 13,
-                maxWidth: 260,
+                minWidth: 0,
+                overflow: "hidden",
+                maxWidth: "min(260px, 45%)",
                 padding: "0 5px",
                 borderRadius: 4,
                 border: "1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 20%, transparent)",
                 background: "color-mix(in srgb, var(--vscode-descriptionForeground) 8%, transparent)",
                 flex: "0 1 auto",
-                fontSize: "11px",
+                fontSize: "12px",
                 lineHeight: "16px",
                 color: "var(--vscode-descriptionForeground)",
             }}
@@ -291,12 +294,14 @@ function CommitMessageCell({
 
     return (
         <span
+            className="intelligit-commit-message"
             style={{
                 flex: 1,
                 minWidth: 0,
                 display: "flex",
                 alignItems: "center",
                 overflow: "hidden",
+                containerType: "inline-size",
             }}
         >
             <span
@@ -304,7 +309,7 @@ function CommitMessageCell({
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     minWidth: 0,
-                    flex: "0 1 auto",
+                    flex: "1 1 0",
                 }}
                 title={messageTooltipText}
             >
@@ -322,6 +327,7 @@ function CommitRowInner({
     isSelected,
     isUnpushed,
     laneColor,
+    showMessage = true,
     showAuthor = true,
     showDate = true,
     showHash = true,
@@ -337,6 +343,7 @@ function CommitRowInner({
             onClick={(event) => onSelect(commit.hash, event)}
             aria-selected={isSelected}
             className="intelligit-commit-row"
+            title={showMessage ? undefined : `${commit.message}${commit.refs.length ? `\n\n${commit.refs.join(" • ")}` : ""}`}
             onContextMenu={(event) => onContextMenu(event, commit)}
             style={{
                 "--commit-ref-background": isSelected
@@ -351,7 +358,7 @@ function CommitRowInner({
                 marginLeft: rowLeftOffset,
                 paddingRight: ROW_SIDE_PADDING,
                 cursor: "pointer",
-                fontSize: "12px",
+                fontSize: "13px",
                 whiteSpace: "nowrap",
                 borderLeft: isUnpushed
                     ? `2px solid ${laneColor ?? "#4CAF50"}`
@@ -378,24 +385,26 @@ function CommitRowInner({
                     boxSizing: "border-box",
                 }}
             >
-                <CommitMessageCell
+                {showMessage && <CommitMessageCell
                     message={commit.message}
                     refs={commit.refs}
                     graphRefs={commit.graphRefs}
-                />
+                />}
             </span>
 
             {showAuthor && (
                 <span
                     style={{
                         width: AUTHOR_COL_WIDTH,
-                        textAlign: "right",
+                        textAlign: "left",
                         color: isSelected ? "inherit" : "var(--vscode-descriptionForeground)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         flexShrink: 0,
                         marginLeft: META_COL_GAP,
                     }}
+                    data-column="author"
+                    title={commit.author}
                 >
                     {commit.author}
                 </span>
@@ -405,14 +414,16 @@ function CommitRowInner({
                 <span
                     style={{
                         width: DATE_COL_WIDTH,
-                        textAlign: "right",
+                        textAlign: "left",
                         color: isSelected ? "inherit" : "var(--vscode-descriptionForeground)",
                         flexShrink: 0,
                         marginLeft: META_COL_GAP,
-                        fontSize: "11px",
+                        fontSize: "inherit",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                     }}
+                    data-column="date"
+                    title={new Date(commit.date).toLocaleString()}
                 >
                     {formatDateTime(commit.date)}
                 </span>
@@ -422,15 +433,16 @@ function CommitRowInner({
                 <span
                     style={{
                         width: HASH_COL_WIDTH,
-                        textAlign: "right",
+                        textAlign: "left",
                         color: isSelected ? "inherit" : "var(--vscode-descriptionForeground)",
                         flexShrink: 0,
                         marginLeft: META_COL_GAP,
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         fontFamily: "var(--vscode-editor-font-family, monospace)",
-                        fontSize: "11px",
+                        fontSize: "inherit",
                     }}
+                    data-column="hash"
                     title={commit.hash}
                 >
                     {commit.shortHash || commit.hash.slice(0, 8)}
@@ -488,6 +500,7 @@ function areEqual(prev: Props, next: Props): boolean {
         prev.isSelected === next.isSelected &&
         prev.isUnpushed === next.isUnpushed &&
         prev.laneColor === next.laneColor &&
+        prev.showMessage === next.showMessage &&
         prev.showAuthor === next.showAuthor &&
         prev.showDate === next.showDate &&
         prev.showHash === next.showHash &&

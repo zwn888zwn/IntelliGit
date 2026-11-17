@@ -36,13 +36,11 @@ import {
 const MIN_PREFIX_LENGTH = 7;
 const MAX_GRAPH_WIDTH = 240;
 const PRELOAD_ROWS = 80;
+const MIN_MESSAGE_WIDTH = 48;
 const IDEA_GRAPH_TEXT_LANE_LIMIT = 6;
 const IDEA_GRAPH_TEXT_GAP = 2;
-const DATE_COLUMN_MIN_WIDTH = 480;
 const REPOSITORY_SCOPE_MIN_WIDTH = 520;
-const AUTHOR_COLUMN_MIN_WIDTH = 620;
 const BRANCH_SCOPE_MIN_WIDTH = 680;
-const HASH_COLUMN_MIN_WIDTH = 760;
 const CURRENT_BRANCH_ROW_BACKGROUND =
     "color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 30%, transparent)";
 
@@ -140,15 +138,19 @@ export function CommitList({
             .map((hash) => lookup.get(hash))
             .filter((commit): commit is Commit => Boolean(commit));
     }, [commits, graph.orderedHashes]);
-    const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH);
-    const graphScale = graphWidth / Math.max(graph.recommendedWidth, 1);
+    const showPipelineColumn = commits.some((commit) => Boolean(pipelineStatuses?.[commitGraphKey(commit.repoRoot, commit.hash)]));
+    const metadataWidth = AUTHOR_COL_WIDTH + DATE_COL_WIDTH + HASH_COL_WIDTH + 3 * META_COL_GAP + ROW_SIDE_PADDING + 2 + (showPipelineColumn ? 24 : 0);
+    const railExpanded = repoRailExpanded && (viewportWidth === 0 || viewportWidth >= 700);
+    const graphBudget = viewportWidth > 0 ? Math.max(24, viewportWidth - (repositories.length > 1 ? (railExpanded ? 168 : 10) : 0) - metadataWidth - 8) : MAX_GRAPH_WIDTH;
+    const graphWidth = Math.min(graph.recommendedWidth, MAX_GRAPH_WIDTH, graphBudget);
     const hasRepositoryRail = repositories.length > 1;
-    const repoRailWidth = hasRepositoryRail ? (repoRailExpanded ? 168 : 10) : 0;
+    const repoRailWidth = hasRepositoryRail ? (railExpanded ? 168 : 10) : 0;
     const graphTextFloor = Math.min(
         graphWidth,
-        IDEA_GRAPH_TEXT_LANE_LIMIT * LANE_WIDTH * graphScale + IDEA_GRAPH_TEXT_GAP,
+        IDEA_GRAPH_TEXT_LANE_LIMIT * LANE_WIDTH + IDEA_GRAPH_TEXT_GAP,
     );
     const headerGraphWidth = repoRailWidth + graphTextFloor;
+    const showMessageHeader = viewportWidth === 0 || viewportWidth - repoRailWidth - graphTextFloor - metadataWidth - 6 >= MIN_MESSAGE_WIDTH;
     const repositoryLookup = useMemo(
         () => new Map(repositories.map((item) => [item.root, item])),
         [repositories],
@@ -189,12 +191,8 @@ export function CommitList({
     const jumpTargetCommit = jumpTooltip ? commitByHash.get(jumpTooltip.targetHash) ?? null : null;
     const visibleArrowMarkers = graph.arrowMarkers;
     const hasMeasuredWidth = viewportWidth > 0;
-    const showPipelineColumn = commits.some((commit) => Boolean(pipelineStatuses?.[commitGraphKey(commit.repoRoot, commit.hash)]));
-    const showDateColumn = !hasMeasuredWidth || viewportWidth >= DATE_COLUMN_MIN_WIDTH;
     const showRepositoryScope = !hasMeasuredWidth || viewportWidth >= REPOSITORY_SCOPE_MIN_WIDTH;
-    const showAuthorColumn = !hasMeasuredWidth || viewportWidth >= AUTHOR_COLUMN_MIN_WIDTH;
     const showBranchScope = !hasMeasuredWidth || viewportWidth >= BRANCH_SCOPE_MIN_WIDTH;
-    const showHashColumn = !hasMeasuredWidth || viewportWidth >= HASH_COLUMN_MIN_WIDTH;
 
     const handleJumpNavigate = useCallback(
         (targetHash: string, targetRowIndex: number) => {
@@ -218,7 +216,6 @@ export function CommitList({
         rows: graphRows,
         currentCommitRefs,
         graphWidth,
-        graphScale,
         graphOffset: repoRailWidth,
     });
 
@@ -557,33 +554,10 @@ export function CommitList({
             </div>
 
             <div style={{ ...headerRowStyle(headerGraphWidth), paddingRight: ROW_SIDE_PADDING + scrollbarWidth }}>
-                <span style={{ flex: 1 }}>Commit</span>
-                {showAuthorColumn && (
-                    <span style={{ width: AUTHOR_COL_WIDTH, textAlign: "right" }}>Author</span>
-                )}
-                {showDateColumn && (
-                    <span
-                        style={{
-                            width: DATE_COL_WIDTH,
-                            textAlign: "right",
-                            marginLeft: META_COL_GAP,
-                        }}
-                    >
-                        Date
-                    </span>
-                )}
-                {showHashColumn && (
-                    <span
-                        style={{
-                            width: HASH_COL_WIDTH,
-                            textAlign: "right",
-                            marginLeft: META_COL_GAP,
-                            fontFamily: "var(--vscode-editor-font-family, monospace)",
-                        }}
-                    >
-                        Hash
-                    </span>
-                )}
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>{showMessageHeader ? "Commit" : null}</span>
+                <span data-column-header="author" style={{ width: AUTHOR_COL_WIDTH, marginLeft: META_COL_GAP, flexShrink: 0 }}>Author</span>
+                <span data-column-header="date" style={{ width: DATE_COL_WIDTH, marginLeft: META_COL_GAP, flexShrink: 0 }}>Date</span>
+                <span data-column-header="hash" style={{ width: HASH_COL_WIDTH, marginLeft: META_COL_GAP, flexShrink: 0 }}>Hash</span>
                 {showPipelineColumn && (
                     <span style={{ width: 22, marginLeft: 2, textAlign: "center", flexShrink: 0 }} title="Pipeline / checks">CI</span>
                 )}
@@ -627,18 +601,18 @@ export function CommitList({
                                                 height: ROW_HEIGHT,
                                                 border: "none",
                                                 borderRight: "1px solid rgba(255,255,255,0.08)",
-                                                borderLeft: `${repoRailExpanded ? 2 : 4}px solid ${repo?.color ?? "#666"}`,
-                                                background: repoRailExpanded
+                                                borderLeft: `${railExpanded ? 2 : 4}px solid ${repo?.color ?? "#666"}`,
+                                                background: railExpanded
                                                     ? PANEL_SURFACE
                                                     : "transparent",
                                                 color: "var(--vscode-foreground)",
-                                                padding: repoRailExpanded ? "0 8px" : 0,
+                                                padding: railExpanded ? "0 8px" : 0,
                                                 textAlign: "left",
                                                 overflow: "hidden",
                                                 cursor: "pointer",
                                             }}
                                         >
-                                            {repoRailExpanded && (
+                                            {railExpanded && (
                                                 <span
                                                     style={{
                                                         display: "block",
@@ -684,6 +658,11 @@ export function CommitList({
                         >
                             {visibleCommits.map((commit, offset) => {
                                 const idx = visibleRange.start + offset;
+                                const messageIndent = Math.min(graphWidth, Math.max(
+                                    graphTextFloor, graphRows[idx]?.occupiedWidth ?? 40,
+                                ));
+                                // Use this row's occupied lanes, not the widest graph elsewhere in history.
+                                const showMessage = viewportWidth === 0 || viewportWidth - repoRailWidth - messageIndent - metadataWidth - 6 >= MIN_MESSAGE_WIDTH;
                                 const isCurrentBranchCommit = currentBranchCommitKeys.has(
                                     commitGraphKey(commit.repoRoot, commit.hash),
                                 );
@@ -700,10 +679,8 @@ export function CommitList({
                                         <CommitRow
                                             commit={commit}
                                             rowLeftOffset={repoRailWidth}
-                                            messageIndent={Math.max(
-                                                graphTextFloor,
-                                                (graphRows[idx]?.occupiedWidth ?? 40) * graphScale,
-                                            )}
+                                            showMessage={showMessage}
+                                            messageIndent={messageIndent}
                                             isSelected={
                                                 selection
                                                     ? selection.includes(commit.hash)
@@ -711,9 +688,6 @@ export function CommitList({
                                             }
                                             isUnpushed={isUnpushedCommit(commit.hash)}
                                             laneColor={graphRows[idx]?.nodeColor}
-                                            showAuthor={showAuthorColumn}
-                                            showDate={showDateColumn}
-                                            showHash={showHashColumn}
                                             showPipeline={showPipelineColumn}
                                             pipeline={pipelineStatuses?.[commitGraphKey(commit.repoRoot, commit.hash)]}
                                             onSelect={handleRowSelect}
@@ -730,6 +704,7 @@ export function CommitList({
                                 left: repoRailWidth,
                                 top: 0,
                                 width: graphWidth,
+                                overflow: "hidden",
                                 height: orderedCommits.length * ROW_HEIGHT,
                                 zIndex: 5,
                                 pointerEvents: "none",
@@ -745,7 +720,7 @@ export function CommitList({
                                     const targetCommit = commitByHash.get(arrow.targetHash);
                                     const buttonSize = 18;
                                     const left =
-                                        (arrow.position * LANE_WIDTH + LANE_WIDTH / 2) * graphScale -
+                                        (arrow.position * LANE_WIDTH + LANE_WIDTH / 2) -
                                         buttonSize / 2;
                                     const top =
                                         arrow.rowIndex * ROW_HEIGHT +

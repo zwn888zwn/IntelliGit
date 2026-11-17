@@ -1262,7 +1262,7 @@ describe("core utilities", () => {
         expect(getChevronIconStyle(true).transform).toContain("90deg");
         expect(getChevronIconStyle(false).transform).toContain("0deg");
         expect(headerRowStyle(120).paddingLeft).toBe(120);
-        expect(contentContainerStyle(5).height).toBe(120);
+        expect(contentContainerStyle(5).height).toBe(130);
         expect(FILE_TYPE_BADGES.json.label).toBe("JN");
         expect(GIT_STATUS_COLORS.M).toContain("--vscode-gitDecoration");
         expect(GIT_STATUS_LABELS["?"]).toBe("Unversioned");

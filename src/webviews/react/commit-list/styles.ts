@@ -2,10 +2,10 @@ import type { CSSProperties } from "react";
 import { ROW_HEIGHT } from "../graph";
 import { PANEL_BORDER, PANEL_SEARCH_FIELD_STYLE, PANEL_SEARCH_INPUT_STYLE, PANEL_TOOLBAR_STYLE } from "../shared/panelStyles";
 
-export const AUTHOR_COL_WIDTH = 96;
-export const DATE_COL_WIDTH = 102;
-export const HASH_COL_WIDTH = 74;
-export const META_COL_GAP = 2;
+export const AUTHOR_COL_WIDTH = 104;
+export const DATE_COL_WIDTH = 120;
+export const HASH_COL_WIDTH = 68;
+export const META_COL_GAP = 6;
 export const ROW_SIDE_PADDING = 8;
 
 export const ROOT_STYLE: CSSProperties = {
@@ -18,6 +18,9 @@ export const ROOT_STYLE: CSSProperties = {
 
 export const FILTER_BAR_STYLE: CSSProperties = {
     ...PANEL_TOOLBAR_STYLE,
+    height: 32,
+    minHeight: 32,
+    padding: "3px 8px",
 };
 
 export const FILTER_ICON_STYLE: CSSProperties = {
@@ -57,7 +60,7 @@ export const BRANCH_SCOPE_STYLE: CSSProperties = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     color: "var(--vscode-descriptionForeground)",
-    fontSize: "11px",
+    fontSize: "13px",
     flexShrink: 1,
 };
 
@@ -65,7 +68,7 @@ export function headerRowStyle(graphWidth: number): CSSProperties {
     return {
         display: "flex",
         alignItems: "center",
-        height: 24,
+        height: 20,
         fontSize: "10px",
         fontWeight: 600,
         letterSpacing: "0.04em",

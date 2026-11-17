@@ -18,6 +18,11 @@ async function flush(): Promise<void> {
 }
 
 beforeAll(() => {
+    vi.stubGlobal("ResizeObserver", class {
+        observe() {}
+        disconnect() {}
+        unobserve() {}
+    });
     Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
         value: true,
         configurable: true,

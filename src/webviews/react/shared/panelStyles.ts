@@ -81,6 +81,12 @@ export const COMPACT_SCROLLBAR_CSS = `
 `;
 
 export const GRAPH_PANEL_CSS = `${COMPACT_SCROLLBAR_CSS}
+    @container (max-width: 240px) {
+        .intelligit-change-totals { display: none; }
+    }
+    @container (max-width: 90px) {
+        .intelligit-commit-refs { display: none !important; }
+    }
     .intelligit-search-field:focus-within {
         border-color: var(--vscode-focusBorder) !important;
     }

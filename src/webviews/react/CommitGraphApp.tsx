@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { ChakraProvider } from "@chakra-ui/react";
 import { BranchColumn } from "./BranchColumn";
 import { CommitList } from "./CommitList";
+import { fitGraphPaneWidths } from "./commit-list/panelLayout";
 import type {
     Branch,
     Commit,
@@ -40,7 +41,7 @@ const vscode = getVsCodeApi<CommitGraphOutbound, unknown>();
 const MIN_BRANCH_WIDTH = 80;
 const MAX_BRANCH_WIDTH = 500;
 const DEFAULT_BRANCH_WIDTH = 260;
-const MIN_INFO_WIDTH = 250;
+const MIN_INFO_WIDTH = 120;
 const MAX_INFO_WIDTH = 760;
 const DEFAULT_INFO_WIDTH = 330;
 
@@ -104,6 +105,17 @@ function useColumnDrag(
 }
 
 function App(): React.ReactElement {
+    const panelRef = useRef<HTMLDivElement>(null);
+    const [panelWidth, setPanelWidth] = useState(0);
+    useEffect(() => {
+        const panel = panelRef.current;
+        if (!panel) return;
+        const measure = () => setPanelWidth(panel.clientWidth);
+        measure();
+        const observer = new ResizeObserver(measure);
+        observer.observe(panel);
+        return () => observer.disconnect();
+    }, []);
     const [commits, setCommits] = useState<Commit[]>([]);
     const [pipelineStatuses, setPipelineStatuses] = useState<Record<string, PipelineStatus | undefined>>({});
     const handlePipelineCommitsChange = useCallback((commits: Array<{ repoRoot: string; hash: string }>) => {
@@ -186,15 +198,16 @@ function App(): React.ReactElement {
     const pendingRevealHash = useRef<string | null>(null);
     const pendingScrollToTop = useRef(false);
     const preserveSelectedBranchOnReveal = useRef(false);
+    const fittedWidths = fitGraphPaneWidths(panelWidth, branchWidth, infoWidth);
     const onDividerMouseDown = useColumnDrag(
-        branchWidth,
+        fittedWidths.branch,
         setBranchWidth,
         MIN_BRANCH_WIDTH,
         MAX_BRANCH_WIDTH,
         false,
     );
     const onInfoDividerMouseDown = useColumnDrag(
-        infoWidth,
+        fittedWidths.info,
         setInfoWidth,
         MIN_INFO_WIDTH,
         MAX_INFO_WIDTH,
@@ -553,9 +566,9 @@ function App(): React.ReactElement {
         <>
             <ThemeIconFontFaces fonts={iconFonts} />
             <style>{GRAPH_PANEL_CSS}</style>
-            <div className="intelligit-graph-panel" style={{ display: "flex", height: "100%", overflow: "hidden", minHeight: 0 }}>
+            <div ref={panelRef} className="intelligit-graph-panel" style={{ display: "flex", height: "100%", overflow: "hidden", minHeight: 0 }}>
                 {/* Branch column */}
-                <div style={{ width: branchWidth, flexShrink: 0, overflow: "hidden", background: PANEL_SURFACE }}>
+                <div data-testid="graph-branches-pane" style={{ width: fittedWidths.branch, flexShrink: 0, overflow: "hidden", background: PANEL_SURFACE }}>
                     <BranchColumn
                         branches={branches}
                         repositoryBranches={repositoryBranches}
@@ -646,8 +659,9 @@ function App(): React.ReactElement {
                         }}
                     />
                     <div
+                        data-testid="graph-details-pane"
                         style={{
-                            width: infoWidth,
+                            width: fittedWidths.info,
                             flexShrink: 0,
                             overflow: "hidden",
                             minHeight: 0,

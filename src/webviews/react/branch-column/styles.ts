@@ -46,7 +46,7 @@ export const PANEL_STYLE: CSSProperties = {
     display: "flex",
     flexDirection: "column",
     overflow: "hidden",
-    fontSize: "12px",
+    fontSize: "13px",
     fontFamily: SYSTEM_FONT_STACK,
     borderRight: "1px solid var(--vscode-panel-border)",
     userSelect: "none",

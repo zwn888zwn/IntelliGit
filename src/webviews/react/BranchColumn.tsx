@@ -580,7 +580,7 @@ export function BranchColumn({
                     </button>
                 ) : (
                 <div style={{ ...PANEL_TOOLBAR_STYLE, justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>Branches</span>
+                    <span title="Branches" style={{ fontSize: 12, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Branches</span>
                     <span style={PANEL_COUNT_STYLE} title={`${branches.length} branches`}>
                         {branches.length}
                     </span>

@@ -8,7 +8,7 @@ import type { GraphRefInfo } from "../../types";
 
 export const LANE_WIDTH = 16;
 export const DOT_RADIUS = 3.25;
-export const ROW_HEIGHT = 24;
+export const ROW_HEIGHT = 26;
 
 export type {
     ArrowMarker,

@@ -21,7 +21,6 @@ interface Args {
     rows: RenderRowModel[];
     currentCommitRefs: Array<{ repoRoot: string; hash: string }>;
     graphWidth: number;
-    graphScale: number;
     graphOffset: number;
 }
 
@@ -36,7 +35,6 @@ export function useCommitGraphCanvas({
     rows,
     currentCommitRefs,
     graphWidth,
-    graphScale,
     graphOffset,
 }: Args): void {
     useEffect(() => {
@@ -57,7 +55,7 @@ export function useCommitGraphCanvas({
 
         let raf = 0;
         const positionX = (position: number): number =>
-            (position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD) * graphScale;
+            (position * LANE_WIDTH + LANE_WIDTH / 2 + GRAPH_LEFT_PAD);
         const anchorY = (rowTop: number, anchor: EdgeAnchor): number => {
             switch (anchor) {
                 case "top":
@@ -84,7 +82,7 @@ export function useCommitGraphCanvas({
             color: string,
             separate: boolean,
         ): void => {
-            const lineWidth = Math.max(1, EDGE_LINE_WIDTH * graphScale);
+            const lineWidth = Math.max(1, EDGE_LINE_WIDTH);
             const stroke = (): void => {
                 ctx2d.beginPath();
                 ctx2d.moveTo(fromX, fromY);
@@ -213,14 +211,14 @@ export function useCommitGraphCanvas({
                 if (node) {
                     const cx = positionX(node.position);
                     const cy = y + ROW_HEIGHT / 2;
-                    const nodeRadius = Math.max(2.25, NODE_RADIUS * graphScale);
+                    const nodeRadius = Math.max(2.25, NODE_RADIUS);
                     if (isCurrentCommit(row)) {
                         ctx.beginPath();
                         ctx.fillStyle = node.color;
                         ctx.arc(
                             cx,
                             cy,
-                            Math.max(6, HEAD_OUTER_RADIUS * graphScale),
+                            Math.max(6, HEAD_OUTER_RADIUS),
                             0,
                             Math.PI * 2,
                         );
@@ -238,7 +236,7 @@ export function useCommitGraphCanvas({
                         ctx.arc(
                             cx,
                             cy,
-                            Math.max(2, HEAD_INNER_RADIUS * graphScale),
+                            Math.max(2, HEAD_INNER_RADIUS),
                             0,
                             Math.PI * 2,
                         );
@@ -283,5 +281,5 @@ export function useCommitGraphCanvas({
             viewport.removeEventListener("scroll", scheduleDraw);
             window.removeEventListener("resize", scheduleDraw);
         };
-    }, [canvasRef, viewportRef, currentCommitRefs, graphOffset, graphScale, graphWidth, rows]);
+    }, [canvasRef, viewportRef, currentCommitRefs, graphOffset, graphWidth, rows]);
 }

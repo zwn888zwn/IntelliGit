@@ -139,7 +139,7 @@ export function CommitInfoPane({
     }
 
     return (
-        <Flex ref={containerRef} direction="column" h="100%" overflow="hidden">
+        <Flex ref={containerRef} direction="column" h="100%" overflow="hidden" className="intelligit-commit-info" style={{ containerType: "inline-size" }}>
             <Box
                 px="10px"
                 h="36px"
@@ -164,10 +164,10 @@ export function CommitInfoPane({
                     }
                 }}
             >
-                {filesCollapsed ? <LuChevronRight size={13} /> : <LuChevronDown size={13} />}
-                <Box as="span">Changed Files</Box>
+                {filesCollapsed ? <LuChevronRight size={13} style={{ flexShrink: 0 }} /> : <LuChevronDown size={13} style={{ flexShrink: 0 }} />}
+                <Box as="span" minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title="Changed Files">Changed Files</Box>
                 <span style={PANEL_COUNT_STYLE}>{detail.files.length}</span>
-                <Flex ml="auto" gap="5px" fontSize="10px" fontWeight={500} whiteSpace="nowrap">
+                <Flex className="intelligit-change-totals" ml="auto" gap="5px" fontSize="10px" fontWeight={500} whiteSpace="nowrap">
                     <Box as="span" color="var(--vscode-gitDecoration-addedResourceForeground, #73c991)">+{changeTotals.additions}</Box>
                     <Box as="span" color="var(--vscode-gitDecoration-deletedResourceForeground, #c74e39)">−{changeTotals.deletions}</Box>
                 </Flex>
@@ -254,8 +254,8 @@ export function CommitInfoPane({
                         }
                     }}
                 >
-                    {detailCollapsed ? <LuChevronRight size={13} /> : <LuChevronDown size={13} />}
-                    Commit Details
+                    {detailCollapsed ? <LuChevronRight size={13} style={{ flexShrink: 0 }} /> : <LuChevronDown size={13} style={{ flexShrink: 0 }} />}
+                    <Box as="span" minW={0} overflow="hidden" textOverflow="ellipsis" whiteSpace="nowrap" title="Commit Details">Commit Details</Box>
                     <Box
                         as="span"
                         ml="auto"
