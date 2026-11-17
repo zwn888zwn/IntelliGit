@@ -47,6 +47,7 @@ import { SymbolInsightsProvider } from "./services/SymbolInsightsProvider";
 import { TodoViewProvider } from "./views/TodoViewProvider";
 import { openCommitChanges } from "./services/multiDiffService";
 import { GoImplementationHints } from "./services/GoImplementationHints";
+import { GoSwaggerDefinitionProvider } from "./services/GoSwaggerDefinitionProvider";
 import { GoRelationshipDecorations } from "./services/GoRelationshipDecorations";
 import { DiffOverlayController } from "./services/DiffOverlayController";
 import { CopilotStatusBarController } from "./services/CopilotStatusBarController";
@@ -90,6 +91,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(vscode.commands.registerCommand('intelligit.showTodo',
         () => vscode.commands.executeCommand('intelligit.todo.focus')));
     context.subscriptions.push(new GoImplementationHints());
+    context.subscriptions.push(vscode.languages.registerDefinitionProvider(
+        { language: "go", scheme: "file" }, new GoSwaggerDefinitionProvider(),
+    ));
     const goRelationships = new GoRelationshipDecorations(!vscode.workspace.workspaceFolders?.length);
     context.subscriptions.push(goRelationships);
     const COMMIT_DIFF_SOURCE_EXISTS_CONTEXT = "intelligit.commitDiffSourceExists";

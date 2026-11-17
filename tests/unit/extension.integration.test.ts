@@ -587,7 +587,9 @@ vi.mock("vscode", () => ({
             return { dispose: () => implementationDiagnostics.delete(listener) };
         }),
         registerDefinitionProvider: vi.fn((_selector, provider) => {
-            registeredDefinitionProvider = provider as typeof registeredDefinitionProvider;
+            if (Array.isArray(_selector) && _selector.some((filter) => filter.scheme === "git")) {
+                registeredDefinitionProvider = provider as typeof registeredDefinitionProvider;
+            }
             return { dispose: vi.fn() };
         }),
     },
