@@ -103,7 +103,7 @@ describe("DiffOverlayController", () => {
         controller = new DiffOverlayController();
         await flush();
         expect(state.execute).toHaveBeenCalledWith("_workbench.diff", input.original, input.modified, "source", [
-            -4, { pinned: true, modal: { size: { width: 1400, height: 900 } } },
+            -4, { pinned: true },
         ]);
         expect(state.close).toHaveBeenCalledWith(source, true);
         emit();

@@ -110,7 +110,7 @@ export class DiffOverlayController implements vscode.Disposable {
             // anchor inside that later DOM subtree (VS Code 1.144). Build the modal
             // first, then recreate the webview so its overlay follows its anchor.
             await vscode.commands.executeCommand("_workbench.open", placeholderUri, [MODAL_GROUP, {
-                preserveFocus: true, inactive: true, modal: { size: { width: 1800, height: 1000 } },
+                preserveFocus: true, inactive: true,
             }]);
             const left = groups.all.find((group) => !before.has(group));
             const placeholder = left?.tabs.find((tab) => tab.input instanceof vscode.TabInputText &&
@@ -251,11 +251,11 @@ export class DiffOverlayController implements vscode.Disposable {
         this.mainGroup = source.group;
         this.moving = true;
         try {
-            // Use the native editor and the original URIs, including dirty working
-            // documents. Only the presentation changes; no file snapshots/copies.
+            // Leave size, position and maximization to the native modal defaults.
+            // Keep the original URIs and shared dirty documents/undo history.
             await vscode.commands.executeCommand(OPEN_DIFF, input.original, input.modified, source.label, [
                 MODAL_GROUP,
-                { pinned: true, modal: { size: { width: 1400, height: 900 } } },
+                { pinned: true },
             ]);
             if (this.disposed) return;
             const target = groups.activeTabGroup.activeTab;
