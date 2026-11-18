@@ -64,6 +64,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private readonly pipelines = new PipelineService();
     private pipelineTimer?: ReturnType<typeof setTimeout>;
     private pipelineSequence = 0;
+    private forcePipelineRefresh = false;
     private pipelineCommitKeys = new Set<string>();
     private pipelineLinks = new Map<string, string>();
 
@@ -988,6 +989,12 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this.pipelines.stop();
     }
 
+    refreshVisiblePipelineStatuses(): void {
+        // A graph reload clears the visible range until the webview reports it again.
+        this.forcePipelineRefresh = true;
+        this.refreshPipelines();
+    }
+
     private refreshPipelines(): void {
         this.stopPipelines();
         if (!this.webviewReady || !this.view?.visible || !this.pipelines.enabled) return;
@@ -1002,10 +1009,11 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                 else this.pipelineLinks.delete(key);
             }
             this.postToWebview({ type: "setPipelineStatuses", statuses });
-        }).catch(() => {
+        }, this.forcePipelineRefresh).catch(() => {
             // CI failures must not interrupt the local Git log.
         }).finally(() => {
             if (sequence === this.pipelineSequence) {
+                this.forcePipelineRefresh = false;
                 this.pipelineTimer = setTimeout(() => this.refreshPipelines(), 30_000);
             }
         });

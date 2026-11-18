@@ -1613,6 +1613,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // --- Commands ---
 
     context.subscriptions.push(
+        vscode.commands.registerCommand("intelligit.refreshCommitGraph", async () => {
+            await vscode.commands.executeCommand("intelligit.refresh");
+            commitGraph.refreshVisiblePipelineStatuses();
+        }),
+
         vscode.commands.registerCommand("intelligit.refresh", async () => {
             const previousRoot = repositoryService.getCurrentRepository()?.root ?? null;
             await repositoryService.refreshRepositories();

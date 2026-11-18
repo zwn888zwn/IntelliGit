@@ -594,6 +594,25 @@ describe("view providers integration", () => {
             await vi.advanceTimersByTimeAsync(60_000);
             expect(fetcher).toHaveBeenCalledTimes(3);
             expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setPipelineStatuses" }));
+            // GitLab initially has no pipeline. Refresh the graph before the
+            // empty result expires, with the viewport report arriving afterwards.
+            fetcher.mockResolvedValueOnce(new Response("[]"));
+            await report(["def2"]);
+            await vi.advanceTimersByTimeAsync(250);
+            expect(fetcher).toHaveBeenCalledTimes(4);
+            await provider.refresh();
+            provider.refreshVisiblePipelineStatuses();
+            await report(["def2"]);
+            await vi.advanceTimersByTimeAsync(250);
+            expect(fetcher).toHaveBeenCalledTimes(5);
+            expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
+                type: "setPipelineStatuses", statuses: [expect.objectContaining({
+                    hash: "def2", pipeline: expect.objectContaining({ state: "running" }),
+                })],
+            }));
+            await report(["def2"]);
+            await vi.advanceTimersByTimeAsync(250);
+            expect(fetcher).toHaveBeenCalledTimes(5);
             webview.dispose();
         } finally {
             provider.dispose();

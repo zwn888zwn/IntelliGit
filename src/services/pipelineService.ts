@@ -72,7 +72,7 @@ export class PipelineService {
         this.controller?.abort();
     }
 
-    async scan(commits: Commit[], repositories: RepositoryEntry[], onUpdate: (updates: Update[]) => void): Promise<void> {
+    async scan(commits: Commit[], repositories: RepositoryEntry[], onUpdate: (updates: Update[]) => void, forceRefresh = false): Promise<void> {
         this.stop();
         const controller = new AbortController();
         this.controller = controller;
@@ -120,7 +120,7 @@ export class PipelineService {
                     const commit = matches[0];
                     const cached = this.cache.get(key);
                     let pipeline = cached?.pipeline;
-                    if (!cached || cached.expires <= Date.now()) {
+                    if (forceRefresh || !cached || cached.expires <= Date.now()) {
                         try {
                             pipeline = await this.readStatus(target, commit.hash, signal);
                         } catch {

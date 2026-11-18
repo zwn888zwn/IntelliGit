@@ -191,6 +191,12 @@
                 "icon": "$(refresh)"
             },
             {
+                "command": "intelligit.refreshCommitGraph",
+                "title": "Refresh Commit Graph and CI",
+                "category": "IntelliGit",
+                "icon": "$(refresh)"
+            },
+            {
                 "command": "intelligit.filterByBranch",
                 "title": "Filter by Branch",
                 "category": "IntelliGit"
@@ -515,7 +521,7 @@
                     "group": "navigation@0"
                 },
                 {
-                    "command": "intelligit.refresh",
+                    "command": "intelligit.refreshCommitGraph",
                     "when": "view == intelligit.commitGraph",
                     "group": "navigation"
                 },
