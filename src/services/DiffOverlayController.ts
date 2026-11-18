@@ -24,6 +24,13 @@ interface ComparisonSession {
     dockedDiff?: vscode.Tab;
 }
 
+/** Open directly in the modal, including custom diff editors with opaque tab inputs. */
+export async function openCommitPanelDiff(original: vscode.Uri, modified: vscode.Uri, title: string,
+    source: vscode.Uri, useNativeViewer = false): Promise<void> {
+    if (await activeController?.openPanelDiff(original, modified, title, source, useNativeViewer)) return;
+    await vscode.commands.executeCommand("vscode.diff", original, modified, title);
+}
+
 /** Creates the comparison webview after its modal anchor exists. */
 export async function showComparisonInOverlay(
     panel: vscode.WebviewPanel,
@@ -36,6 +43,9 @@ export async function showComparisonInOverlay(
 export class DiffOverlayController implements vscode.Disposable {
     private readonly subscriptions: vscode.Disposable[];
     private readonly handled = new WeakSet<vscode.Tab>();
+    private readonly panelSources = new WeakMap<vscode.Tab, vscode.Uri>();
+    private panelSourceVisible = false;
+    private panelQueue: Promise<unknown> = Promise.resolve();
     private modalGroup: vscode.TabGroup | undefined;
     private modalInputs: Array<vscode.TabInputTextDiff | vscode.TabInputNotebookDiff> = [];
     private mainGroup: vscode.TabGroup | undefined;
@@ -90,6 +100,7 @@ export class DiffOverlayController implements vscode.Disposable {
     }
 
     private schedule(): void {
+        this.updatePanelSourceContext();
         if (this.disposed || this.moving || this.timer) return;
         this.timer = setTimeout(() => {
             this.timer = undefined;
@@ -227,6 +238,56 @@ export class DiffOverlayController implements vscode.Disposable {
         }
     }
 
+    private updatePanelSourceContext(): void {
+        const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+        const visible = !!tab && tab.group === this.modalGroup && this.panelSources.has(tab);
+        if (visible !== this.panelSourceVisible) {
+            this.panelSourceVisible = visible;
+            void vscode.commands.executeCommand("setContext", "intelligit.panelDiffHasSource", visible);
+        }
+    }
+
+    openPanelDiff(original: vscode.Uri, modified: vscode.Uri, title: string,
+        source: vscode.Uri, useNativeViewer: boolean): Promise<boolean> {
+        const pending = this.panelQueue.then(() => this.openPanelTab(original, modified, title, source, useNativeViewer));
+        this.panelQueue = pending.catch(() => {});
+        return pending;
+    }
+
+    private async openPanelTab(original: vscode.Uri, modified: vscode.Uri, title: string,
+        source: vscode.Uri, useNativeViewer: boolean): Promise<boolean> {
+        await this.ready;
+        if (!this.enabled()) return false;
+        const groups = vscode.window.tabGroups;
+        const main = groups.activeTabGroup;
+        const previousGroups = new Set(groups.all);
+        const expected = new vscode.TabInputTextDiff(original, modified);
+        this.moving = true;
+        try {
+            await vscode.commands.executeCommand(OPEN_DIFF, original, modified, title, [
+                MODAL_GROUP, useNativeViewer ? { pinned: true } : { pinned: true, override: "default" },
+            ]);
+        } catch (error) {
+            this.moving = false;
+            console.warn("IntelliGit: could not open diff in overlay", error);
+            return false;
+        }
+        try {
+            const tab = await waitForNewTab(new Set(), candidate =>
+                (candidate.group === this.modalGroup || !previousGroups.has(candidate.group)) &&
+                (sameDiff(candidate.input, expected) || (useNativeViewer && candidate.label === title)));
+            if (main !== this.modalGroup) this.mainGroup = main;
+            this.modalGroup = tab.group;
+            this.modalInputs = [expected];
+            this.handled.add(tab);
+            this.panelSources.set(tab, source);
+            return true;
+        } finally {
+            this.moving = false;
+            this.schedule();
+        }
+    }
+
     private enabled(): boolean {
         return !this.disposed && this.supported &&
             vscode.workspace.getConfiguration("intelligit").get("diff.openInOverlay", true) &&
@@ -247,6 +308,7 @@ export class DiffOverlayController implements vscode.Disposable {
         if (!(input instanceof vscode.TabInputTextDiff) &&
             !(input instanceof vscode.TabInputNotebookDiff)) return;
 
+        const existingGroups = new Set(groups.all);
         this.handled.add(source);
         this.mainGroup = source.group;
         this.moving = true;
@@ -258,8 +320,12 @@ export class DiffOverlayController implements vscode.Disposable {
                 { pinned: true },
             ]);
             if (this.disposed) return;
-            const target = groups.activeTabGroup.activeTab;
-            if (!target || target.group === source.group || !sameDiff(target.input, input)) return;
+            // The open command can resolve before the extension host sees the new
+            // tab group. Wait for the actual diff before removing the original.
+            const target = await waitForNewTab(new Set(), candidate =>
+                (candidate.group === this.modalGroup || !existingGroups.has(candidate.group)) &&
+                sameDiff(candidate.input, input));
+            if (this.disposed) return;
             this.modalGroup = target.group;
             this.modalInputs = [input];
             this.handled.add(target);
@@ -280,21 +346,23 @@ export class DiffOverlayController implements vscode.Disposable {
     private async openSource(): Promise<void> {
         const groups = vscode.window.tabGroups;
         const tab = groups.activeTabGroup.activeTab;
-        if (!(tab?.input instanceof vscode.TabInputTextDiff)) return;
-        const input = tab.input;
-        const source = workingFileUri(input.modified) ?? workingFileUri(input.original);
+        if (!tab) return;
+        const panelSource = this.panelSources.get(tab);
+        const input = tab.input instanceof vscode.TabInputTextDiff ? tab.input : undefined;
+        if (!input && !panelSource) return;
+        const source = panelSource ?? (input && (workingFileUri(input.modified) ?? workingFileUri(input.original)));
         if (!source) {
             void vscode.window.showWarningMessage("无法定位这个 Diff 对应的工作区文件。");
             return;
         }
-        const editor = findModifiedEditor(input.modified, tab.group);
-        const historyLine = input.modified.scheme === "intelligit-diff"
+        const editor = input && findModifiedEditor(input.modified, tab.group);
+        const historyLine = input?.modified.scheme === "intelligit-diff"
             ? Number(new URLSearchParams(input.modified.query).get("sourceLine")) : 0;
         const selection = Number.isInteger(historyLine) && historyLine > 0
             ? new vscode.Selection(historyLine - 1, 0, historyLine - 1, 0) : editor?.selection;
         try {
             await vscode.workspace.fs.stat(source);
-            const document = await vscode.workspace.openTextDocument(source);
+            const document = panelSource ? undefined : await vscode.workspace.openTextDocument(source);
             if (this.disposed || groups.activeTabGroup.activeTab !== tab) return;
             const session = [...this.comparisons.values()].find((value) => value.right === tab.group);
             const destination = this.mainGroup && groups.all.includes(this.mainGroup)
@@ -304,11 +372,25 @@ export class DiffOverlayController implements vscode.Disposable {
             const options: vscode.TextDocumentShowOptions = {
                 viewColumn: destination?.viewColumn ?? vscode.ViewColumn.One,
                 preview: false,
-                selection: selection ? document.validateRange(selection) : undefined,
+                selection: document && selection ? document.validateRange(selection) : selection,
             };
-            await vscode.window.showTextDocument(document, { ...options, preserveFocus: true });
+            const openFile = async (preserveFocus: boolean) => {
+                const target = { ...options, preserveFocus };
+                if (document?.languageId === "markdown" || /\.(md|markdown|mdown|mkd|mkdn|mdwn|markdn|mdtxt|mdtext|copilotmd)$/i.test(source.path)) {
+                    await vscode.commands.executeCommand("vscode.openWith", source, "vscode.markdown.preview.editor", target);
+                } else if (document) {
+                    const opened = await vscode.window.showTextDocument(document, target);
+                    if (!preserveFocus && target.selection) {
+                        opened.selection = new vscode.Selection(target.selection.start, target.selection.end);
+                        opened.revealRange(target.selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
+                    }
+                } else {
+                    await vscode.commands.executeCommand("vscode.open", source, target);
+                }
+            };
+            await openFile(true);
             if (groups.all.includes(tab.group) && tab.group === this.modalGroup) {
-                if (session) {
+                if (session && input) {
                     session.selection = selection;
                     session.visibleRange = editor?.visibleRanges[0];
                     // Dock the live webview and diff without disposing either.
@@ -322,11 +404,7 @@ export class DiffOverlayController implements vscode.Disposable {
                     await vscode.commands.executeCommand("workbench.action.closeModalEditor");
                 }
             }
-            const opened = await vscode.window.showTextDocument(document, options);
-            if (options.selection) {
-                opened.selection = new vscode.Selection(options.selection.start, options.selection.end);
-                opened.revealRange(options.selection, vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-            }
+            await openFile(false);
         } catch {
             void vscode.window.showWarningMessage(`无法打开工作区文件：${source.fsPath}`);
         }

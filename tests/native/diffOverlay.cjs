@@ -2,8 +2,8 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
-const { DiffOverlayController, showComparisonInOverlay } = require("./controller");
-const { registerDiffContentProvider, openBranchComparisonFileDiff } = require("./diffService");
+const { DiffOverlayController, showComparisonInOverlay } = require("../../src/services/DiffOverlayController");
+const { registerDiffContentProvider, openBranchComparisonFileDiff, openWorkingTreeFileDiff, openStageFileDiff } = require("../../src/services/diffService");
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, label) {
@@ -30,6 +30,31 @@ exports.run = async () => {
     try {
         await vscode.window.showTextDocument(anchor, { preview: false });
         const main = vscode.window.tabGroups.activeTabGroup;
+        const markdown = vscode.Uri.file(path.join(workspace, "notes.md"));
+        await fs.writeFile(markdown.fsPath, "# Review notes\n");
+        await openWorkingTreeFileDiff({ path: "notes.md", status: "?" }, workspace, {});
+        await until(() => vscode.window.tabGroups.activeTabGroup !== main &&
+            vscode.window.tabGroups.activeTabGroup.activeTab?.input instanceof vscode.TabInputTextDiff,
+        "Markdown opens directly as a modal text diff");
+        assert.equal(main.tabs.length, 1, "no intermediate Markdown comparison in the main group");
+        await vscode.commands.executeCommand("intelligit.openOverlaySource");
+        await until(() => vscode.window.tabGroups.all.length === 1 &&
+            main.activeTab?.input instanceof vscode.TabInputCustom &&
+            main.activeTab.input.viewType === "vscode.markdown.preview.editor" &&
+            main.activeTab.input.uri.toString() === markdown.toString(), "single-file Markdown preview");
+        console.log("PASS: untracked Markdown opens in a diff overlay and exits to the rendered file");
+        await vscode.window.tabGroups.close(main.activeTab);
+        // The right side of a staged diff is an index snapshot. Source navigation
+        // must still open the working copy in its configured, single-file editor.
+        await openStageFileDiff({ path: "games.go", staged: true, status: "M" }, workspace, {
+            getFileContentAtRef: async (_, ref) => ref === ":0" ? "// staged" : "// committed",
+        });
+        assert.equal(main.tabs.length, 1);
+        assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.input.modified.scheme, "intelligit-diff");
+        await vscode.commands.executeCommand("intelligit.openOverlaySource");
+        await until(() => vscode.window.tabGroups.all.length === 1 &&
+            main.activeTab?.input.uri?.toString() === modified.toString(), "staged diff opens working copy");
+        await vscode.window.tabGroups.close(main.activeTab);
         const document = await vscode.workspace.openTextDocument(modified);
         const edit = new vscode.WorkspaceEdit();
         edit.insert(modified, new vscode.Position(0, 0), "// unsaved work\n");

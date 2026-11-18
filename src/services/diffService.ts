@@ -14,6 +14,7 @@ import { runWithNotificationProgress } from "../utils/notifications";
 import { getCommitParentHashes, pickMainlineParent, buildCommitFilePatch } from "./gitHelpers";
 import { assertRepoRelativePath } from "../utils/fileOps";
 import { EMPTY_TREE_HASH } from "../utils/constants";
+import { openCommitPanelDiff } from "./DiffOverlayController";
 
 const DIFF_DOCUMENT_SCHEME = "intelligit-diff";
 const DIFF_EDITABLE_SCHEME = "intelligit-diff-editable";
@@ -1066,11 +1067,10 @@ export async function openWorkingTreeFileDiff(
         (await fileExists(workingTreeUri))
     ) {
         const title = `${safePath} (HEAD ↔ Working Tree)`;
-        await vscode.commands.executeCommand(
-            "vscode.diff",
+        await openCommitPanelDiff(
             await createTransparentImagePlaceholderUri(safePath, "left"),
             workingTreeUri,
-            title,
+            title, workingTreeUri, true,
         );
         return;
     }
@@ -1082,11 +1082,10 @@ export async function openWorkingTreeFileDiff(
         (await fileExists(workingTreeUri))
     ) {
         const title = `${safePath} (HEAD ↔ Working Tree)`;
-        await vscode.commands.executeCommand(
-            "vscode.diff",
+        await openCommitPanelDiff(
             createGitResourceUri(workingTreeUri, "HEAD"),
             workingTreeUri,
-            title,
+            title, workingTreeUri, true,
         );
         return;
     }
@@ -1146,7 +1145,7 @@ export async function openWorkingTreeFileDiff(
         }
     }
     const title = `${safePath} (HEAD ↔ Working Tree)`;
-    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
+    await openCommitPanelDiff(leftDoc.uri, rightUri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
 }
 
 export async function openStageFileDiff(
@@ -1210,7 +1209,7 @@ export async function openStageFileDiff(
     }
 
     const title = `${safePath} (${file.staged ? "HEAD ↔ Index" : "Index ↔ Working Tree"})`;
-    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightUri, title);
+    await openCommitPanelDiff(leftDoc.uri, rightUri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
 }
 
 async function fileExists(uri: vscode.Uri): Promise<boolean> {

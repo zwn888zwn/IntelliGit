@@ -543,7 +543,7 @@
             "modalEditor/editorTitle": [
                 {
                     "command": "intelligit.openOverlaySource",
-                    "when": "textCompareEditorActive",
+                    "when": "textCompareEditorActive || intelligit.panelDiffHasSource",
                     "group": "navigation@8"
                 }
             ],

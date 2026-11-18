@@ -18,6 +18,8 @@ async function main() {
         await fs.mkdir(path.join(root, "data/User"), { recursive: true });
         await fs.writeFile(path.join(root, "data/User/settings.json"), JSON.stringify({
             "workbench.editor.useModal": "some",
+            "workbench.editorAssociations": { "*.md": "vscode.markdown.preview.editor" },
+            "workbench.diffEditorAssociations": { "*.md": "vscode.markdown.preview.editor" },
             "workbench.startupEditor": "none",
             "telemetry.telemetryLevel": "off",
         }));
@@ -37,12 +39,13 @@ async function main() {
             outfile: path.join(extension, "controller.js"),
             bundle: true, platform: "node", external: ["vscode"],
         });
+        // Bundle the test and both services together so the panel entry point and
+        // event listeners share the same overlay controller, as in the extension.
         await build({
-            entryPoints: [path.join(__dirname, "../src/services/diffService.ts")],
-            outfile: path.join(extension, "diffService.js"),
+            entryPoints: [path.join(__dirname, "../tests/native/diffOverlay.cjs")],
+            outfile: path.join(extension, "test.js"),
             bundle: true, platform: "node", external: ["vscode"],
         });
-        await fs.copyFile(path.join(__dirname, "../tests/native/diffOverlay.cjs"), path.join(extension, "test.js"));
         // Test Electron must start as a desktop app, not the parent CLI's Node mode.
         delete process.env.ELECTRON_RUN_AS_NODE;
         await runTests({
