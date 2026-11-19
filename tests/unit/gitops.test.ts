@@ -1093,62 +1093,25 @@ describe("GitOps", () => {
     });
 
     describe("rollbackFiles", () => {
-        it("restores tracked paths with git restore", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.rollbackFiles(["src/a.ts"]);
-
-            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
-            expect(calls[0][0]).toEqual(["ls-files", "--error-unmatch", "--", "src/a.ts"]);
-            expect(calls[1][0]).toEqual([
-                "restore",
-                "--source=HEAD",
-                "--staged",
-                "--worktree",
-                "--",
-                "src/a.ts",
-            ]);
-        });
-
-        it("cleans untracked paths instead of pretending restore worked", async () => {
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    if (args[0] === "ls-files") {
-                        throw new Error("error: pathspec 'src/new.ts' did not match any file(s) known to git");
-                    }
-                    return "";
-                }),
-            } as unknown as GitExecutor;
-            const ops = new GitOps(executor);
-            await ops.rollbackFiles(["src/new.ts"]);
-
-            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
-            expect(calls[0][0]).toEqual(["ls-files", "--error-unmatch", "--", "src/new.ts"]);
-            expect(calls[1][0]).toEqual(["clean", "-fd", "--", "src/new.ts"]);
-        });
-
-        it("splits tracked and untracked paths in one rollback", async () => {
-            const executor = {
-                run: vi.fn(async (args: string[]) => {
-                    if (args[0] === "ls-files" && args[args.length - 1] === "src/new.ts") {
-                        throw new Error("error: pathspec 'src/new.ts' did not match any file(s) known to git");
-                    }
-                    return "";
-                }),
-            } as unknown as GitExecutor;
-            const ops = new GitOps(executor);
-            await ops.rollbackFiles(["src/a.ts", "src/new.ts"]);
-
-            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
-            expect(calls[2][0]).toEqual([
-                "restore",
-                "--source=HEAD",
-                "--staged",
-                "--worktree",
-                "--",
-                "src/a.ts",
-            ]);
-            expect(calls[3][0]).toEqual(["clean", "-fd", "--", "src/new.ts"]);
+        it("restores staged deletions and cleans only the selected untracked files", async () => {
+            const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-rollback-"));
+            try {
+                const git = new GitExecutor(root);
+                await git.run(["init", "-q"]);
+                for (const name of ["file[1]", "file1", "modified"]) await fs.promises.writeFile(path.join(root, name), "base");
+                await git.run(["add", "."]);
+                await git.run(["config", "core.hooksPath", path.join(root, ".git", "no-hooks")]);
+                await git.run(["-c", "user.name=Test", "-c", "user.email=test@example.org", "-c", "commit.gpgSign=false", "commit", "-qm", "base"]);
+                await git.run(["--literal-pathspecs", "rm", "--", "file[1]", "file1"]);
+                await fs.promises.writeFile(path.join(root, "modified"), "edits");
+                await fs.promises.writeFile(path.join(root, "new"), "untracked");
+                await new GitOps(git).rollbackFiles(["file[1]", "new", "modified"]);
+                expect(await fs.promises.readFile(path.join(root, "file[1]"), "utf8")).toBe("base");
+                expect(await fs.promises.readFile(path.join(root, "modified"), "utf8")).toBe("base");
+                expect((await git.run(["status", "--short"])).trim()).toBe("D  file1");
+            } finally {
+                await fs.promises.rm(root, { recursive: true, force: true });
+            }
         });
 
         it("skips empty paths array", async () => {
@@ -1269,26 +1232,42 @@ describe("GitOps", () => {
         });
     });
 
-    describe("shelvePop", () => {
-        it("calls git stash pop with index", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.shelvePop(2);
-
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "pop", "--index", "stash@{2}"]);
-        });
-    });
-
-    describe("shelveApply", () => {
-        it("calls git stash apply with index", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.shelveApply(1);
-
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "apply", "--index", "stash@{1}"]);
-        });
+    it("applies, pops and deletes the selected stash after another stash takes its old index", async () => {
+        const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-stash-"));
+        try {
+            const git = new GitExecutor(root);
+            await git.run(["init", "-q"]);
+            await git.run(["config", "user.name", "Test"]);
+            await git.run(["config", "user.email", "test@example.org"]);
+            await git.run(["config", "commit.gpgSign", "false"]);
+            await git.run(["config", "core.hooksPath", path.join(root, ".git", "no-hooks")]);
+            const file = path.join(root, "file");
+            await fs.promises.writeFile(file, "base");
+            await git.run(["add", "file"]);
+            await git.run(["commit", "-qm", "base"]);
+            const ops = new GitOps(git);
+            const save = async (value: string) => {
+                await fs.promises.writeFile(file, value);
+                await ops.shelveSave(undefined, value);
+                return (await ops.listShelved())[0].hash;
+            };
+            const first = await save("first");
+            const second = await save("second");
+            const third = await save("third");
+            await ops.shelveApply(first);
+            expect(await fs.promises.readFile(file, "utf8")).toBe("first");
+            await git.run(["restore", "file"]);
+            await ops.shelvePop(first);
+            expect(await fs.promises.readFile(file, "utf8")).toBe("first");
+            await ops.shelveDelete(second);
+            await expect(ops.shelveDelete(first)).rejects.toThrow("no longer available");
+            expect((await ops.listShelved()).map(entry => entry.hash)).toEqual([third]);
+            await fs.promises.writeFile(file, "conflicting edits");
+            await expect(ops.shelvePop(third)).rejects.toThrow();
+            expect((await ops.listShelved())[0].hash).toBe(third);
+        } finally {
+            await fs.promises.rm(root, { recursive: true, force: true });
+        }
     });
 
     describe("listShelved", () => {
@@ -1319,17 +1298,6 @@ describe("GitOps", () => {
             const ops = new GitOps(executor);
             const stashes = await ops.listShelved();
             expect(stashes).toEqual([]);
-        });
-    });
-
-    describe("shelveDelete", () => {
-        it("calls git stash drop with index", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.shelveDelete(0);
-
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["stash", "drop", "stash@{0}"]);
         });
     });
 
@@ -1487,20 +1455,6 @@ describe("GitOps", () => {
             ]);
         });
 
-        it("runs shelve pop/apply/delete commands for valid indexes", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-
-            await expect(ops.shelvePop(0)).resolves.toBe("");
-            await expect(ops.shelveApply(0)).resolves.toBe("");
-            await expect(ops.shelveDelete(0)).resolves.toBe("");
-
-            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-            expect(calls).toContainEqual(["stash", "pop", "--index", "stash@{0}"]);
-            expect(calls).toContainEqual(["stash", "apply", "--index", "stash@{0}"]);
-            expect(calls).toContainEqual(["stash", "drop", "stash@{0}"]);
-        });
-
         it("honors force flag when deleting files", async () => {
             const executor = createMockExecutor({});
             const ops = new GitOps(executor);
@@ -1517,9 +1471,6 @@ describe("GitOps", () => {
             const executor = createMockExecutor({});
             const ops = new GitOps(executor);
 
-            await expect(ops.shelvePop(-1)).rejects.toThrow("Invalid stash index");
-            await expect(ops.shelveApply(-1)).rejects.toThrow("Invalid stash index");
-            await expect(ops.shelveDelete(-1)).rejects.toThrow("Invalid stash index");
             await expect(ops.getShelvedFiles(-1)).rejects.toThrow("Invalid stash index");
             await expect(ops.getShelvedFilePatch(-1, "x")).rejects.toThrow("Invalid stash index");
         });

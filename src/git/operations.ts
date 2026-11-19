@@ -16,7 +16,7 @@ import type {
     MergeConflictFile,
     GitTag,
 } from "../types";
-import { getErrorMessage, isUntrackedPathspecError, sanitizeErrorMessage } from "../utils/errors";
+import { getErrorMessage, sanitizeErrorMessage } from "../utils/errors";
 
 declare const require: (id: string) => unknown;
 
@@ -980,21 +980,26 @@ export class GitOps {
         const safePaths = Array.from(new Set(paths.map((filePath) => assertGitRelativePath(filePath))));
         if (safePaths.length === 0) return;
 
-        const trackedPaths: string[] = [];
-        const untrackedPaths: string[] = [];
-        for (const filePath of safePaths) {
-            if (await this.isTrackedPath(filePath)) {
-                trackedPaths.push(filePath);
-            } else {
-                untrackedPaths.push(filePath);
+        // A staged deletion is absent from the index but still tracked in HEAD.
+        const [indexPaths, deletedPaths] = await Promise.all([
+            this.executor.run(["--literal-pathspecs", "ls-files", "--cached", "-z", "--", ...safePaths]),
+            this.executor.run(["--literal-pathspecs", "diff", "--cached", "--no-renames", "--diff-filter=D", "--name-only", "-z", "--", ...safePaths]),
+        ]);
+        const tracked = new Set<string>();
+        for (const entry of [...indexPaths.split("\0"), ...deletedPaths.split("\0")]) {
+            let name = entry;
+            while (name && !tracked.has(name)) {
+                tracked.add(name);
+                name = name.slice(0, Math.max(0, name.lastIndexOf("/")));
             }
         }
-
-        if (trackedPaths.length > 0) {
-            await this.executor.run(["restore", "--source=HEAD", "--staged", "--worktree", "--", ...trackedPaths]);
+        const trackedPaths = safePaths.filter(file => tracked.has(file));
+        const untrackedPaths = safePaths.filter(file => !tracked.has(file));
+        if (trackedPaths.length) {
+            await this.executor.run(["--literal-pathspecs", "restore", "--source=HEAD", "--staged", "--worktree", "--", ...trackedPaths]);
         }
-        if (untrackedPaths.length > 0) {
-            await this.executor.run(["clean", "-fd", "--", ...untrackedPaths]);
+        if (untrackedPaths.length) {
+            await this.executor.run(["--literal-pathspecs", "clean", "-fd", "--", ...untrackedPaths]);
         }
     }
 
@@ -1002,16 +1007,6 @@ export class GitOps {
         await this.executor.run(["reset", "--hard", "HEAD"]);
         // Also clean untracked files
         await this.executor.run(["clean", "-fd"]);
-    }
-
-    private async isTrackedPath(filePath: string): Promise<boolean> {
-        try {
-            await this.executor.run(["ls-files", "--error-unmatch", "--", filePath]);
-            return true;
-        } catch (error) {
-            if (isUntrackedPathspecError(error)) return false;
-            throw error;
-        }
     }
 
     // --- Shelf operations (implemented via git stash) ---
@@ -1031,14 +1026,25 @@ export class GitOps {
         return this.executor.run(args);
     }
 
-    async shelvePop(index: number = 0): Promise<string> {
-        assertStashIndex(index);
-        return this.executor.run(["stash", "pop", "--index", `stash@{${index}}`]);
+    private async findStash(hash: string): Promise<StashEntry> {
+        const matches = (await this.listShelved()).filter(entry => entry.hash === hash);
+        if (matches.length !== 1) throw new Error("Stash changed or is no longer available. Refresh the stash list.");
+        return matches[0];
     }
 
-    async shelveApply(index: number = 0): Promise<string> {
-        assertStashIndex(index);
-        return this.executor.run(["stash", "apply", "--index", `stash@{${index}}`]);
+    async shelvePop(hash: string): Promise<void> {
+        await this.shelveApply(hash);
+        // Applying can take time. Resolve the reflog position again before removal.
+        try {
+            await this.shelveDelete(hash);
+        } catch (error) {
+            throw new Error(`Stash applied, but removal failed: ${getErrorMessage(error)}`);
+        }
+    }
+
+    async shelveApply(hash: string): Promise<string> {
+        const entry = await this.findStash(hash);
+        return this.executor.run(["stash", "apply", "--index", entry.hash]);
     }
 
     async listShelved(): Promise<StashEntry[]> {
@@ -1062,14 +1068,14 @@ export class GitOps {
         }
     }
 
-    async shelveDelete(index: number): Promise<string> {
-        assertStashIndex(index);
+    async shelveDelete(hash: string): Promise<string> {
+        const { index } = await this.findStash(hash);
         return this.executor.run(["stash", "drop", `stash@{${index}}`]);
     }
 
-    async getShelvedFiles(index: number): Promise<WorkingFile[]> {
+    async getShelvedFiles(index: number, hash?: string): Promise<WorkingFile[]> {
         assertStashIndex(index);
-        const ref = `stash@{${index}}`;
+        const ref = hash ?? `stash@{${index}}`;
         const files = new Map<string, WorkingFile>();
 
         const upsert = (path: string, status: WorkingFile["status"] = "M"): WorkingFile => {

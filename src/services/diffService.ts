@@ -73,6 +73,7 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
             originalPath?: string;
             sourceFsPath?: string;
             sourceLine?: number;
+            stageScope?: "staged" | "unstaged";
             projectComparisonId?: string;
         } = {},
     ): vscode.Uri {
@@ -94,6 +95,7 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
         if (options.sourceFsPath) {
             query.set("sourceFsPath", options.sourceFsPath);
         }
+        if (options.stageScope) query.set("stageScope", options.stageScope);
         if (options.sourceLine) query.set("sourceLine", String(options.sourceLine));
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
@@ -882,14 +884,15 @@ export async function openShelvedFileDiff(
     filePath: string,
     repoRoot: string,
     gitOps: GitOps,
+    hash?: string,
 ): Promise<{ baseRef: string; stashRef: string; leftUri: vscode.Uri; rightUri: vscode.Uri }> {
     if (!Number.isInteger(index) || index < 0) {
         throw new Error(`Invalid stash index: ${index}`);
     }
 
     const safePath = assertRepoRelativePath(filePath);
-    const baseRef = `stash@{${index}}^`;
-    const stashRef = `stash@{${index}}`;
+    const stashRef = hash ?? `stash@{${index}}`;
+    const baseRef = `${stashRef}^`;
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
 
     let baseExists = true;
@@ -1162,6 +1165,7 @@ export async function openStageFileDiff(
         return gitOps.getFileContentAtRef(safePath, ref).catch(() => "");
     };
 
+    const stageScope = file.staged ? "staged" : "unstaged";
     const leftLabel = file.staged ? "HEAD" : "index";
     const rightLabel = file.staged ? "index" : "working tree";
     const leftContent = file.staged
@@ -1175,6 +1179,7 @@ export async function openStageFileDiff(
             markAsCommitDiff: true,
             originalPath: safePath,
             sourceFsPath: workingTreeUri.fsPath,
+            stageScope,
         }),
     );
 
@@ -1188,6 +1193,7 @@ export async function openStageFileDiff(
                 markAsCommitDiff: true,
                 originalPath: safePath,
                 sourceFsPath: workingTreeUri.fsPath,
+                stageScope,
             }),
         );
         rightUri = rightDoc.uri;
@@ -1203,6 +1209,7 @@ export async function openStageFileDiff(
                 markAsCommitDiff: true,
                 originalPath: safePath,
                 sourceFsPath: workingTreeUri.fsPath,
+                stageScope,
             }),
         );
         rightUri = rightDoc.uri;

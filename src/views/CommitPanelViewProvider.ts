@@ -34,6 +34,8 @@ import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
+type WorkingDiffTarget = RepoPathRef & { staged?: boolean };
+
 export interface DiffNavigationState {
     active: boolean;
     hasPrevious: boolean;
@@ -53,7 +55,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private folderIconsByName: ThemeFolderIconMap = {};
     private lastFileCount = 0;
     private committing = false;
-    private activeFile: RepoPathRef | null = null;
+    private shelfActionInProgress = false;
+    private activeFile: WorkingDiffTarget | null = null;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
     private repository: RepositoryContextInfo | null = null;
@@ -98,12 +101,17 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         });
 
         webviewView.webview.onDidReceiveMessage(async (msg) => {
+            const writesShelf = ["shelveSave", "shelfApply", "shelfPop", "shelfDelete"].includes(msg.type);
+            if (writesShelf && this.shelfActionInProgress) return;
+            if (writesShelf) this.shelfActionInProgress = true;
             try {
                 await this.handleMessage(msg);
             } catch (err) {
                 const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(message);
                 this.postToWebview({ type: "error", message });
+            } finally {
+                if (writesShelf) this.shelfActionInProgress = false;
             }
         });
 
@@ -165,20 +173,13 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             const stashes = await this.gitOps.listShelved();
             const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
 
-            const hasSelected =
-                this.selectedShelfIndex !== null &&
-                stashes.some((entry) => entry.index === this.selectedShelfIndex);
-            let selectedShelfIndex: number | null;
-            if (hasSelected) {
-                selectedShelfIndex = this.selectedShelfIndex;
-            } else {
-                selectedShelfIndex = stashes.length > 0 ? stashes[0].index : null;
-            }
-
+            const previous = this.stashes.find(entry => entry.index === this.selectedShelfIndex);
+            const selectedStash = stashes.find(entry => entry.hash === previous?.hash) ?? stashes[0];
+            const selectedShelfIndex = selectedStash?.index ?? null;
             const shelfFiles =
                 selectedShelfIndex !== null
                     ? await this.iconTheme.decorateWorkingFiles(
-                          await this.gitOps.getShelvedFiles(selectedShelfIndex),
+                          await this.gitOps.getShelvedFiles(selectedShelfIndex, selectedStash.hash),
                       )
                     : [];
             const suggestedCommitMessage = await this.gitOps.getPendingCommitMessage();
@@ -300,10 +301,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         );
     }
 
-    private setActiveFile(target: RepoPathRef | null): void {
+    private setActiveFile(target: WorkingDiffTarget | null): void {
         if (
             this.activeFile?.repoRoot === target?.repoRoot &&
-            this.activeFile?.path === target?.path
+            this.activeFile?.path === target?.path &&
+            this.activeFile?.staged === target?.staged
         ) {
             this.updateNavigationContexts();
             return;
@@ -329,15 +331,15 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 totalFiles: 0,
             };
         }
-        const activeFile = editor ? this.getTargetForUri(editor.document.uri) : this.activeFile;
-        const files = this.getVisibleWorkingFileTargets();
+        const activeFile = editor ? this.getEditorTarget(editor) : this.activeFile;
+        const files = this.getVisibleWorkingFileTargets(activeFile);
         let currentIndex = activeFile
             ? files.findIndex(
                   (file) =>
                       file.repoRoot === activeFile.repoRoot && file.path === activeFile.path,
               )
             : -1;
-        if (!activeFile) {
+        if (!activeFile || (activeFile.staged !== undefined && currentIndex < 0)) {
             return {
                 active: false,
                 hasPrevious: false,
@@ -359,7 +361,22 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         };
     }
 
-    private getTargetForUri(uri: vscode.Uri | undefined): RepoPathRef | null {
+    private getEditorTarget(editor: vscode.TextEditor): WorkingDiffTarget | null {
+        const uri = editor.document.uri;
+        // The editable side of an unstaged diff shares its URI with the ordinary file editor.
+        // Read the scope from the original snapshot belonging to this specific tab.
+        const groups = vscode.window.tabGroups;
+        const group = groups?.all.find(candidate => candidate.viewColumn === editor.viewColumn) ?? groups?.activeTabGroup;
+        const input = group?.activeTab?.input;
+        if (uri.scheme === "file" && vscode.TabInputTextDiff && input instanceof vscode.TabInputTextDiff &&
+            input.modified.toString() === uri.toString()) {
+            const original = this.getCommitDiffTargetForUri(input.original);
+            if (original?.staged !== undefined) return original;
+        }
+        return this.getTargetForUri(uri);
+    }
+
+    private getTargetForUri(uri: vscode.Uri | undefined): WorkingDiffTarget | null {
         if (!uri) return null;
         const diffTarget = this.getCommitDiffTargetForUri(uri);
         if (diffTarget) return diffTarget;
@@ -372,15 +389,24 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         return null;
     }
 
-    private getCommitDiffTargetForUri(uri: vscode.Uri): RepoPathRef | null {
+    private getCommitDiffTargetForUri(uri: vscode.Uri): WorkingDiffTarget | null {
         if (uri.scheme !== "intelligit-diff" && uri.scheme !== "intelligit-diff-editable") {
             return null;
         }
-        const ref = new URLSearchParams(uri.query).get("ref");
-        if (ref !== "HEAD" && ref !== "working-tree") return null;
+        const query = new URLSearchParams(uri.query);
+        const scope = query.get("stageScope");
+        const ref = query.get("ref");
+        if (!scope && ref !== "HEAD" && ref !== "working-tree") return null;
         const filePath = getDiffOriginalFilePathFromUri(uri);
         if (!filePath) return null;
-        if (this.activeFile?.path === filePath) return this.activeFile;
+        if (scope === "staged" || scope === "unstaged") {
+            const source = query.get("sourceFsPath");
+            if (!source) return null;
+            const file = vscode.Uri.file(source);
+            const repository = this.getRepositories().find(repo => getRepoRelativeFilePathFromUri(file, repo.root) === filePath);
+            return repository ? { repoRoot: repository.root, path: filePath, staged: scope === "staged" } : null;
+        }
+        if (this.activeFile?.path === filePath) return { repoRoot: this.activeFile.repoRoot, path: filePath };
         for (const repository of this.getRepositories()) {
             const target = { repoRoot: repository.root, path: filePath };
             if (this.hasWorkingFile(target)) return target;
@@ -389,12 +415,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     syncActiveEditor(editor: vscode.TextEditor | undefined): void {
-        const uri = editor?.document.uri;
-        if (!uri) {
+        if (!editor?.document.uri) {
             this.updateNavigationContexts();
             return;
         }
-        const target = this.getTargetForUri(uri);
+        const uri = editor.document.uri;
+        const target = this.getEditorTarget(editor);
         if (target) {
             this.setActiveFile(target);
             return;
@@ -412,10 +438,10 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
     getAdjacentWorkingFileTarget(
         direction: "next" | "previous",
-        activeFile: RepoPathRef | null = this.activeFile,
+        activeFile: WorkingDiffTarget | null = this.activeFile,
     ): RepoPathRef | null {
         if (!activeFile) return null;
-        const uniqueTargets = this.getVisibleWorkingFileTargets();
+        const uniqueTargets = this.getVisibleWorkingFileTargets(activeFile);
         const index = uniqueTargets.findIndex(
             (target) =>
                 target.repoRoot === activeFile.repoRoot &&
@@ -426,11 +452,17 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         return uniqueTargets[nextIndex] ?? null;
     }
 
-    private getVisibleWorkingFileTargets(): RepoPathRef[] {
+    private getVisibleWorkingFileTargets(scope: WorkingDiffTarget | null): RepoPathRef[] {
         const targets: RepoPathRef[] = [];
         const seen = new Set<string>();
         for (const repository of this.getRepositories()) {
             const repoFiles = this.files.filter((file) => file.repoRoot === repository.root);
+            if (scope?.staged !== undefined) {
+                if (repository.root === scope.repoRoot) {
+                    this.pushVisibleTreeTargets(targets, seen, buildFileTree(repoFiles.filter(file => file.staged === scope.staged)));
+                }
+                continue;
+            }
             const tracked = repoFiles.filter((file) => file.status !== "?");
             const unversioned = repoFiles.filter((file) => file.status === "?");
             this.pushVisibleTreeTargets(targets, seen, buildFileTree(tracked));
@@ -474,7 +506,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     async openStageDiff(target: RepoPathRef, staged: boolean): Promise<void> {
         const repository = this.getRepositoryEntry(target.repoRoot);
         const safePath = assertRepoRelativePath(target.path);
-        this.setActiveFile({ repoRoot: repository.root, path: safePath });
+        this.setActiveFile({ repoRoot: repository.root, path: safePath, staged });
         const file = this.files.find(
             (item) =>
                 item.repoRoot === repository.root &&
@@ -485,9 +517,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         await openStageFileDiff(file, repository.root, repository.gitOps);
     }
 
-    async navigateFile(direction: "next" | "previous"): Promise<void> {
-        const target = this.getAdjacentWorkingFileTarget(direction);
-        if (target) await this.openWorkingFileDiff(target);
+    async navigateFile(direction: "next" | "previous", editor?: vscode.TextEditor): Promise<void> {
+        const active = editor ? this.getEditorTarget(editor) : this.activeFile;
+        const target = this.getAdjacentWorkingFileTarget(direction, active);
+        if (!target) return;
+        if (active?.staged !== undefined) await this.openStageDiff(target, active.staged);
+        else await this.openWorkingFileDiff(target);
     }
 
     private groupTargetsByRepository(targets: RepoPathRef[]): Map<string, string[]> {
@@ -677,6 +712,14 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         throw new Error(`Expected RepoPathRef for '${field}', got undefined`);
     }
 
+    private getShelfSelection(msg: { [key: string]: unknown }) {
+        const hash = this.assertString(msg.hash, "hash");
+        const root = this.assertString(msg.repoRoot, "repoRoot");
+        const entry = this.stashes.find(stash => stash.hash === hash);
+        if (root !== this.repository?.root || !entry) throw new Error("Stash selection changed. Refresh the stash list.");
+        return { entry, repository: this.getRepositoryEntry(root) };
+    }
+
     private async handleMessage(msg: { type: string; [key: string]: unknown }): Promise<void> {
         switch (msg.type) {
             case "ready":
@@ -811,41 +854,38 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 break;
             }
 
-            case "shelfPop": {
-                const index = this.assertNumber(msg.index, "index");
-                await this.gitOps.shelvePop(index);
-                vscode.window.showInformationMessage("Unshelved changes.");
-                await this.refreshData();
-                break;
-            }
-
-            case "shelfApply": {
-                const index = this.assertNumber(msg.index, "index");
-                await this.gitOps.shelveApply(index);
-                vscode.window.showInformationMessage("Applied shelved changes.");
-                await this.refreshData();
-                break;
-            }
-
+            case "shelfPop":
+            case "shelfApply":
             case "shelfDelete": {
-                const index = this.assertNumber(msg.index, "index");
-                const confirm = await vscode.window.showWarningMessage(
-                    "Delete this shelved change?",
-                    { modal: true },
-                    "Delete",
-                );
-                if (confirm !== "Delete") return;
-                await this.gitOps.shelveDelete(index);
-                vscode.window.showInformationMessage("Shelved change deleted.");
-                await this.refreshData();
+                const { entry, repository } = this.getShelfSelection(msg);
+                const { hash } = entry;
+                if (msg.type === "shelfDelete") {
+                    const confirm = await vscode.window.showWarningMessage(
+                        `Delete stash “${entry.message}” (${hash.slice(0, 8)})?`,
+                        { modal: true }, "Delete",
+                    );
+                    if (confirm !== "Delete") return;
+                }
+                try {
+                    if (msg.type === "shelfDelete") await repository.gitOps.shelveDelete(hash);
+                    else if (msg.type === "shelfApply") await repository.gitOps.shelveApply(hash);
+                    else await repository.gitOps.shelvePop(hash);
+                } finally {
+                    await this.refreshData();
+                }
+                void vscode.window.showInformationMessage(msg.type === "shelfDelete" ? "Shelved change deleted." : "Applied shelved changes.");
                 break;
             }
 
             case "shelfSelect": {
-                this.selectedShelfIndex = this.assertNumber(msg.index, "index");
-                this.shelfFiles = await this.iconTheme.decorateWorkingFiles(
-                    await this.gitOps.getShelvedFiles(this.selectedShelfIndex),
+                const { entry, repository } = this.getShelfSelection(msg);
+                this.selectedShelfIndex = entry.index;
+                const files = await this.iconTheme.decorateWorkingFiles(
+                    await repository.gitOps.getShelvedFiles(entry.index, entry.hash),
                 );
+                if (this.repository?.root !== repository.root ||
+                    this.stashes.find(stash => stash.index === this.selectedShelfIndex)?.hash !== entry.hash) break;
+                this.shelfFiles = files;
                 this.folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
                     ...this.files,
                     ...this.shelfFiles,
@@ -867,14 +907,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "showShelfDiff": {
-                const index = this.assertNumber(msg.index, "index");
+                const { entry, repository } = this.getShelfSelection(msg);
                 const filePath = assertRepoRelativePath(this.assertString(msg.path, "path"));
-                await openShelvedFileDiff(
-                    index,
-                    filePath,
-                    this.getRepositoryRoot().fsPath,
-                    this.gitOps,
-                );
+                await openShelvedFileDiff(entry.index, filePath, repository.root, repository.gitOps, entry.hash);
                 break;
             }
 

@@ -63,33 +63,22 @@ export function ShelfTab({
                 setIsLoading(false);
             } else {
                 setExpandedIndex(index);
-                setIsLoading(true);
-                vscode.postMessage({ type: "shelfSelect", index });
+                setIsLoading(index !== selectedIndex);
+                const stash = stashes.find(entry => entry.index === index);
+                if (repoRoot && stash) vscode.postMessage({ type: "shelfSelect", hash: stash.hash, repoRoot });
             }
         },
-        [expandedIndex, vscode],
+        [expandedIndex, selectedIndex, repoRoot, stashes, vscode],
     );
 
     const handleShelfAction = useCallback(
         (index: number | null, kind: ShelfActionKind) => {
-            if (index === null) return;
-            switch (kind) {
-                case "apply":
-                    vscode.postMessage({ type: "shelfApply", index });
-                    return;
-                case "pop":
-                    vscode.postMessage({ type: "shelfPop", index });
-                    return;
-                case "delete":
-                    vscode.postMessage({ type: "shelfDelete", index });
-                    return;
-                default: {
-                    const exhaustive: never = kind;
-                    throw new Error(`Unhandled shelf action: ${String(exhaustive)}`);
-                }
-            }
+            const stash = stashes.find(entry => entry.index === index);
+            if (!stash || !repoRoot || isLoading) return;
+            const type = { apply: "shelfApply", pop: "shelfPop", delete: "shelfDelete" } as const;
+            vscode.postMessage({ type: type[kind], hash: stash.hash, repoRoot });
         },
-        [vscode],
+        [vscode, stashes, repoRoot, isLoading],
     );
 
     const toggleDir = useCallback((path: string) => {
@@ -164,7 +153,7 @@ export function ShelfTab({
                         const isExpanded = expandedIndex === stash.index;
                         const hasFiles = isExpanded && selectedIndex === stash.index;
                         return (
-                            <React.Fragment key={stash.index}>
+                            <React.Fragment key={stash.hash + ":" + stash.index}>
                                 <Flex
                                     align="center"
                                     px="9px"
@@ -276,9 +265,9 @@ export function ShelfTab({
                                                     folderIconsByName={folderIconsByName}
                                                     onToggleDir={toggleDir}
                                                     onFileClick={(path) =>
-                                                        vscode.postMessage({
+                                                        repoRoot && vscode.postMessage({
                                                             type: "showShelfDiff",
-                                                            index: stash.index,
+                                                            repoRoot, hash: stash.hash,
                                                             path,
                                                         })
                                                     }
@@ -336,7 +325,7 @@ export function ShelfTab({
                     variant="secondary"
                     size="sm"
                     onClick={() => handleShelfAction(selectedIndex, "apply")}
-                    isDisabled={selectedIndex === null}
+                    isDisabled={selectedIndex === null || !repoRoot || isLoading}
                     fontSize="12px"
                     h="28px"
                     minW="86px"
@@ -350,7 +339,7 @@ export function ShelfTab({
                     variant="secondary"
                     size="sm"
                     onClick={() => handleShelfAction(selectedIndex, "pop")}
-                    isDisabled={selectedIndex === null}
+                    isDisabled={selectedIndex === null || !repoRoot || isLoading}
                     fontSize="12px"
                     h="28px"
                     minW="68px"
@@ -364,7 +353,7 @@ export function ShelfTab({
                     variant="secondary"
                     size="sm"
                     onClick={() => handleShelfAction(selectedIndex, "delete")}
-                    isDisabled={selectedIndex === null}
+                    isDisabled={selectedIndex === null || !repoRoot || isLoading}
                     fontSize="12px"
                     h="28px"
                     minW="78px"

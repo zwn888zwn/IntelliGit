@@ -436,7 +436,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         } else if (commitDiffState.active) {
             await navigateCommitFileDiff(direction);
         } else {
-            await commitPanel.navigateFile(direction);
+            await commitPanel.navigateFile(direction, editor ?? undefined);
         }
         await updateIntelliGitDiffNavigationContext();
     };

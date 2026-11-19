@@ -44,6 +44,7 @@ async function main() {
         await build({
             entryPoints: [path.join(__dirname, "../tests/native/diffOverlay.cjs")],
             outfile: path.join(extension, "test.js"),
+            mainFields: ["module", "main"],
             bundle: true, platform: "node", external: ["vscode"],
         });
         // Test Electron must start as a desktop app, not the parent CLI's Node mode.

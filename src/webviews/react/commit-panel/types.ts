@@ -37,11 +37,11 @@ export type OutboundMessage =
           targets?: RepoPathRef[];
           keepIndex?: boolean;
       }
-    | { type: "shelfPop"; index: number }
-    | { type: "shelfApply"; index: number }
-    | { type: "shelfDelete"; index: number }
-    | { type: "shelfSelect"; index: number }
-    | { type: "showShelfDiff"; index: number; path: string }
+    | { type: "shelfPop"; hash: string; repoRoot: string }
+    | { type: "shelfApply"; hash: string; repoRoot: string }
+    | { type: "shelfDelete"; hash: string; repoRoot: string }
+    | { type: "shelfSelect"; hash: string; repoRoot: string }
+    | { type: "showShelfDiff"; hash: string; repoRoot: string; path: string }
     | { type: "showAllShelfDiff"; index: number; hash: string; repoRoot: string }
     | { type: "openFile"; target: RepoPathRef }
     | { type: "deleteFile"; target: RepoPathRef }

@@ -364,7 +364,7 @@ describe("CommitPanelApp integration", () => {
         );
         expect(vscode.postMessage).toHaveBeenCalledWith({ type: "getLastCommitMessage", repoRoot: "/repo" });
         expect(vscode.postMessage).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "shelfApply", index: 0 }),
+            expect.objectContaining({ type: "shelfApply", hash: "stashhash", repoRoot: "/repo" }),
         );
         expect(vscode.setState).toHaveBeenCalled();
     });

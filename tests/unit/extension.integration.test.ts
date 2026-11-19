@@ -1586,7 +1586,7 @@ describe("extension integration", () => {
 
         await registeredCommands.get("intelligit.previousDiffFile")?.();
 
-        expect(latestCommitPanelProvider!.navigateFile).toHaveBeenCalledWith("previous");
+        expect(latestCommitPanelProvider!.navigateFile).toHaveBeenCalledWith("previous", activeTextEditor);
         expect(executeCommandFallback).not.toHaveBeenCalledWith(
             "workbench.action.compareEditor.previousChange",
         );

@@ -2181,6 +2181,27 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it.each([true, false])("keeps Stage navigation in its original section (staged=%s)", async staged => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        const row = (path: string, staged: boolean) => ({ repoRoot: "/repo", path, status: "M", staged, additions: 1, deletions: 0 });
+        gitOps.getStatus.mockResolvedValue([row("a.go", true), row("a.go", false), row("b.go", !staged), row("c.go", staged)]);
+        await webview.send({ type: "refresh" });
+        await webview.send({ type: "showStageDiff", target: { repoRoot: "/repo", path: "a.go" }, staged });
+        const firstTab = executeCommand.mock.calls.filter(([command]) => command === "vscode.diff").at(-1)!;
+        const editor = { document: { uri: firstTab[1] } } as never;
+        expect(await provider.getDiffNavigationState(editor)).toMatchObject({ totalFiles: 2, currentFile: 1, hasNext: true });
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "b.go" });
+        // Returning to an older diff must use its own scope, even when the same file appears in both sections.
+        await provider.navigateFile("next", editor);
+        const nextTab = executeCommand.mock.calls.filter(([command]) => command === "vscode.diff").at(-1)!;
+        const label = staged ? "HEAD ↔ Index" : "Index ↔ Working Tree";
+        expect(nextTab[3]).toBe(`c.go (${label})`);
+        expect(await provider.getDiffNavigationState()).toMatchObject({ currentFile: 2, hasNext: false, hasPrevious: true });
+        await provider.navigateFile("previous");
+        expect(executeCommand.mock.calls.filter(([c]) => c === "vscode.diff").at(-1)![3]).toBe(`a.go (${label})`);
+        provider.dispose();
+    });
+
     it("CommitPanelViewProvider handles shelf operations", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         await webview.send({
@@ -2189,10 +2210,10 @@ describe("view providers integration", () => {
             keepIndex: true,
             paths: ["src/a.ts"],
         });
-        await webview.send({ type: "shelfPop", index: 0 });
-        await webview.send({ type: "shelfApply", index: 0 });
+        await webview.send({ type: "shelfPop", hash: "stashhash", repoRoot: "/repo" });
+        await webview.send({ type: "shelfApply", hash: "stashhash", repoRoot: "/repo" });
         showWarningMessage.mockResolvedValueOnce("Delete");
-        await webview.send({ type: "shelfDelete", index: 0 });
+        await webview.send({ type: "shelfDelete", hash: "stashhash", repoRoot: "/repo" });
         expect(gitOps.shelveSave).toHaveBeenCalledWith(["src/a.ts"], "work", {
             keepIndex: true,
         });
@@ -2206,23 +2227,23 @@ describe("view providers integration", () => {
         expect(gitOps.shelveSave).toHaveBeenCalledWith(undefined, "all", {
             keepIndex: false,
         });
-        expect(gitOps.shelvePop).toHaveBeenCalledWith(0);
-        expect(gitOps.shelveApply).toHaveBeenCalledWith(0);
-        expect(gitOps.shelveDelete).toHaveBeenCalledWith(0);
+        expect(gitOps.shelvePop).toHaveBeenCalledWith("stashhash");
+        expect(gitOps.shelveApply).toHaveBeenCalledWith("stashhash");
+        expect(gitOps.shelveDelete).toHaveBeenCalledWith("stashhash");
 
-        await webview.send({ type: "shelfSelect", index: Number.NaN });
+        await webview.send({ type: "shelfSelect", hash: "missing", repoRoot: "/repo" });
         expect(postMessageSpy).toHaveBeenCalledWith(
             expect.objectContaining({
                 type: "error",
-                message: expect.stringContaining("Expected number"),
+                message: expect.stringContaining("Stash selection changed"),
             }),
         );
 
         openTextDocument.mockClear();
         executeCommand.mockClear();
-        await webview.send({ type: "showShelfDiff", index: 0, path: "src/a.ts" });
-        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(1, "src/a.ts", "stash@{0}^");
-        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(2, "src/a.ts", "stash@{0}");
+        await webview.send({ type: "showShelfDiff", hash: "stashhash", repoRoot: "/repo", index: 0, path: "src/a.ts" });
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(1, "src/a.ts", "stashhash^");
+        expect(gitOps.getFileContentAtRef).toHaveBeenNthCalledWith(2, "src/a.ts", "stashhash");
         expect(gitOps.getShelvedFilePatch).not.toHaveBeenCalled();
         expect(openTextDocument).toHaveBeenCalledTimes(2);
         expect(openTextDocument).toHaveBeenCalledWith(
@@ -2235,11 +2256,11 @@ describe("view providers integration", () => {
             "vscode.diff",
             expect.objectContaining({
                 scheme: "intelligit-diff",
-                query: expect.stringContaining("ref=stash%40%7B0%7D%5E"),
+                query: expect.stringContaining("ref=stashhash%5E"),
             }),
             expect.objectContaining({
                 scheme: "intelligit-diff",
-                query: expect.stringContaining("ref=stash%40%7B0%7D"),
+                query: expect.stringContaining("ref=stashhash"),
             }),
             "src/a.ts (Stash 0)",
         );
