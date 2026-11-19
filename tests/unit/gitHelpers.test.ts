@@ -113,43 +113,17 @@ describe("getLocalNameFromRemote", () => {
 describe("resolveTrackedRemoteBranch", () => {
     it("resolves from upstream field", () => {
         const branch = makeBranch({ upstream: "origin/main" });
-        const result = resolveTrackedRemoteBranch(branch, []);
+        const result = resolveTrackedRemoteBranch(branch);
         expect(result).toEqual({ remote: "origin", remoteBranch: "main" });
     });
 
-    it("resolves from remote field with matching remote branch", () => {
-        const branch = makeBranch({ name: "feature", remote: "origin" });
-        const remoteBranch = makeBranch({
-            name: "origin/feature",
-            isRemote: true,
-        });
-        const result = resolveTrackedRemoteBranch(branch, [remoteBranch]);
-        expect(result).toEqual({ remote: "origin", remoteBranch: "feature" });
-    });
-
-    it("resolves via suffix match when exactly one match", () => {
-        const branch = makeBranch({ name: "feature" });
-        const remoteBranch = makeBranch({
-            name: "origin/feature",
-            isRemote: true,
-        });
-        const result = resolveTrackedRemoteBranch(branch, [remoteBranch]);
-        expect(result).toEqual({ remote: "origin", remoteBranch: "feature" });
-    });
-
-    it("returns null when multiple suffix matches exist", () => {
-        const branch = makeBranch({ name: "feature" });
-        const remotes = [
-            makeBranch({ name: "origin/feature", isRemote: true }),
-            makeBranch({ name: "upstream/feature", isRemote: true }),
-        ];
-        const result = resolveTrackedRemoteBranch(branch, remotes);
-        expect(result).toBeNull();
+    it("does not treat a remote name as a configured upstream", () => {
+        expect(resolveTrackedRemoteBranch(makeBranch({ name: "fix", remote: "origin" }))).toBeNull();
     });
 
     it("returns null when no match found", () => {
         const branch = makeBranch({ name: "feature" });
-        const result = resolveTrackedRemoteBranch(branch, []);
+        const result = resolveTrackedRemoteBranch(branch);
         expect(result).toBeNull();
     });
 });

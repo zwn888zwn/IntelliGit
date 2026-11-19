@@ -198,6 +198,10 @@ class MockEventEmitter<T> {
 }
 
 const defaultExecutorRunImpl = async (args: string[]) => {
+    if (args[0] === "for-each-ref" && args[1].includes("upstream:remoteref")) {
+        const name = args[2].slice("refs/heads/".length);
+        return [args[2], "origin", `refs/heads/${name}`, "origin"].join("\0");
+    }
     if (args.join(" ") === "branch --show-current") return "main";
     if (args.join(" ") === "rev-parse --verify FETCH_HEAD") return "cab12345";
     if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
@@ -1840,7 +1844,7 @@ describe("extension integration", () => {
         expect(
             executorRun.mock.calls.filter(
                 ([args]) =>
-                    args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD",
+                    args[0] === "merge" && args[1] === "--ff-only" && args[2] === "cab12345",
             ),
         ).toHaveLength(2);
         expect(showInformationMessage).toHaveBeenCalledWith(
@@ -1857,15 +1861,32 @@ describe("extension integration", () => {
             allRepositories: true,
         });
 
-        expect(
-            executorRun.mock.calls.filter(
-                ([args]) => args[0] === "push" && args[1] === "origin" && args[2] === "main:main",
-            ),
-        ).toHaveLength(2);
+        expect(gitOpsState.push).toHaveBeenCalledTimes(2);
+        expect(gitOpsState.push).toHaveBeenCalledWith("main");
         expect(showInformationMessage).toHaveBeenCalledWith(
             "Pushed main in 2 repositories.",
         );
         expect(showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it.each(["Merge", "Rebase", "Cancel"])("uses the divergence picker for each repository during bulk Update (%s)", async choice => {
+        const { activate } = await import("../../src/extension");
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: [] } as unknown as MockExtensionContext);
+        executorRun.mockImplementation(async args => {
+            if (args[0] === "merge" && args[1] === "--ff-only") throw new Error("diverged");
+            if (args[0] === "rev-list" && args[1] === "--left-right") return "1 1";
+            return defaultExecutorRunImpl(args);
+        });
+        showQuickPick.mockImplementation(async items => items.find(item => item.label === choice));
+        await latestCommitGraphProvider!.emitBranchAction({ action: "updateBranch", branchName: "main", allRepositories: true });
+        const picks = showQuickPick.mock.calls.filter(([, options]) => options?.title?.includes("Update main"));
+        expect(picks.map(([, options]) => options.title.split(" · ")[0])).toEqual(
+            choice === "Cancel" ? ["repo-a"] : ["repo-a", "repo-b"],
+        );
+        for (const [items] of picks) expect(items.map(item => item.label)).toEqual(["Merge", "Rebase"]);
+        const writes = executorRun.mock.calls.map(([args]) => args).filter(args =>
+            args[0] === "rebase" || (args[0] === "merge" && args[1] === "--no-ff"));
+        expect(writes.map(args => args[0])).toEqual(choice === "Cancel" ? [] : [choice.toLowerCase(), choice.toLowerCase()]);
     });
 
     it("prefills and selects the current branch when creating from the branch popup", async () => {
@@ -4235,8 +4256,6 @@ describe("extension integration", () => {
             if (args[0] === "rebase" && args[1] === "fail-rebase") throw new Error("rebase boom");
             if (args[0] === "merge" && args[1] === "fail-merge") throw new Error("merge boom");
             if (args[0] === "fetch") throw new Error("fetch boom");
-            if (args[0] === "push" && args[2]?.startsWith("force-fail"))
-                throw new Error("push boom");
             if (args[0] === "branch" && args[1] === "-m" && args[2] === "fail-rename") {
                 throw new Error("rename boom");
             }
@@ -4313,6 +4332,8 @@ describe("extension integration", () => {
             branch: { name: "main", isRemote: false, isCurrent: false, remote: "origin" },
         });
 
+        gitOpsState.push.mockResolvedValueOnce("").mockRejectedValueOnce(new Error("No remote configured for branch topic."))
+            .mockRejectedValueOnce(new Error("push boom"));
         await registeredCommands.get("intelligit.pushBranch")?.({
             branch: { name: "main", isRemote: false, isCurrent: true },
         });

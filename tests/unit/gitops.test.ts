@@ -879,155 +879,78 @@ describe("GitOps", () => {
     });
 
     describe("push", () => {
-        it("calls git push", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.push();
-
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["push"]);
+        it("pushes the selected branch only to its configured upstream, including a different branch name", async () => {
+            const executor = createMockExecutor({ "for-each-ref": ["refs/heads/fix", "origin", "refs/heads/team/review", ""].join("\0") });
+            const confirm = vi.fn();
+            await new GitOps(executor, confirm).push("fix");
+            expect(confirm).not.toHaveBeenCalled();
+            expect(executor.runWithStderr).toHaveBeenCalledWith(["push", "origin", "refs/heads/fix:refs/heads/team/review"]);
         });
 
-        it("retries with --set-upstream when push fails due to missing upstream and user confirms", async () => {
-            const noUpstreamError = new Error(
-                [
-                    "fatal: The current branch feature/no-upstream has no upstream branch.",
-                    "To push the current branch and set the remote as upstream, use",
-                    "",
-                    "    git push --set-upstream origin feature/no-upstream",
-                ].join("\n"),
-            );
-            const run = vi.fn(async (args: string[]) => {
-                const key = args.join(" ");
-                if (key === "push") throw noUpstreamError;
-                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                return "";
+        it("respects a separately configured push remote for Commit and Push", async () => {
+            const executor = createMockExecutor({
+                "branch --show-current": "main",
+                "for-each-ref": ["refs/heads/main", "upstream", "refs/heads/main", "fork"].join("\0"),
             });
-            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
-            const confirmSetUpstream = vi.fn(async () => true);
-            const ops = new GitOps(executor, confirmSetUpstream);
-
-            await expect(ops.push()).resolves.toBe("ok");
-
-            expect(confirmSetUpstream).toHaveBeenCalledWith("origin", "feature/no-upstream");
-            const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
-            expect(calls).toEqual([
-                ["push"],
-                ["push", "--set-upstream", "origin", "feature/no-upstream"],
-            ]);
+            await new GitOps(executor).push();
+            expect(executor.runWithStderr).toHaveBeenLastCalledWith(["push"]);
         });
 
-        it("parses short -u upstream suggestion", async () => {
-            const noUpstreamError = new Error(
-                [
-                    "fatal: The current branch feature/no-upstream has no upstream branch.",
-                    "To push the current branch and set the remote as upstream, use",
-                    "",
-                    "    git push -u origin feature/no-upstream",
-                ].join("\n"),
-            );
-            const run = vi.fn(async (args: string[]) => {
-                const key = args.join(" ");
-                if (key === "push") throw noUpstreamError;
-                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                return "";
-            });
-            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
-            const confirmSetUpstream = vi.fn(async () => true);
-            const ops = new GitOps(executor, confirmSetUpstream);
-
-            await expect(ops.push()).resolves.toBe("ok");
-            expect(confirmSetUpstream).toHaveBeenCalledWith("origin", "feature/no-upstream");
-        });
-
-        it("parses --set-upstream=remote upstream suggestion", async () => {
-            const noUpstreamError = new Error(
-                [
-                    "fatal: The current branch feature/no-upstream has no upstream branch.",
-                    "To push the current branch and set the remote as upstream, use",
-                    "",
-                    "    git push --set-upstream=origin feature/no-upstream",
-                ].join("\n"),
-            );
-            const run = vi.fn(async (args: string[]) => {
-                const key = args.join(" ");
-                if (key === "push") throw noUpstreamError;
-                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                return "";
-            });
-            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
-            const confirmSetUpstream = vi.fn(async () => true);
-            const ops = new GitOps(executor, confirmSetUpstream);
-
-            await expect(ops.push()).resolves.toBe("ok");
-            expect(confirmSetUpstream).toHaveBeenCalledWith("origin", "feature/no-upstream");
-        });
-
-        it("retries with --set-upstream when git reports a localized upstream error", async () => {
-            const noUpstreamError = new Error(
-                [
-                    "fatal: 当前分支 feature/no-upstream 没有对应的上游分支。",
-                    "为推送当前分支并建立与远程上游的跟踪，使用",
-                    "",
-                    "    git push --set-upstream origin feature/no-upstream",
-                ].join("\n"),
-            );
-            const run = vi.fn(async (args: string[]) => {
-                const key = args.join(" ");
-                if (key === "push") throw noUpstreamError;
-                if (key === "push --set-upstream origin feature/no-upstream") return "ok";
-                return "";
-            });
-            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
-            const confirmSetUpstream = vi.fn(async () => true);
-            const ops = new GitOps(executor, confirmSetUpstream);
-
-            await expect(ops.push()).resolves.toBe("ok");
-            expect(confirmSetUpstream).toHaveBeenCalledWith("origin", "feature/no-upstream");
-        });
-
-        it("throws UpstreamPushDeclinedError when upstream setup is declined", async () => {
-            const noUpstreamError = new Error(
-                [
-                    "fatal: The current branch feature/no-upstream has no upstream branch.",
-                    "To push the current branch and set the remote as upstream, use",
-                    "",
-                    "    git push --set-upstream origin feature/no-upstream",
-                ].join("\n"),
-            );
-            const run = vi.fn(async (args: string[]) => {
-                if (args.join(" ") === "push") throw noUpstreamError;
-                return "";
-            });
-            const executor = { run, runWithStderr: run } as unknown as GitExecutor;
-            const confirmSetUpstream = vi.fn(async () => false);
-            const ops = new GitOps(executor, confirmSetUpstream);
-
-            await expect(ops.push()).rejects.toThrow(UpstreamPushDeclinedError);
-            expect(confirmSetUpstream).toHaveBeenCalledTimes(1);
-            expect((executor.run as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+        it("confirms the exact first push target before writing even with autoSetupRemote enabled", async () => {
+            const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-branch-push-"));
+            try {
+                const executor = new GitExecutor(root);
+                const git = (args: string[]) => executor.runWithStderr(args);
+                await git(["init", "-qb", "fix"]);
+                await git(["config", "core.hooksPath", path.join(root, ".git", "empty-hooks")]);
+                await git(["config", "push.autoSetupRemote", "true"]);
+                const commit = (subject: string) => git(["-c", "commit.gpgsign=false", "-c", "user.email=test@example.invalid",
+                    "-c", "user.name=Test", "commit", "--allow-empty", "-qm", subject]);
+                await commit("A");
+                const before = (await git(["rev-parse", "HEAD"])).trim();
+                const remote = path.join(root, ".git", "test-remote");
+                await git(["init", "-q", "--bare", remote]);
+                await git(["remote", "add", "origin", remote]);
+                await git(["push", "origin", "HEAD:refs/heads/team/fix"]);
+                await commit("B");
+                const confirm = vi.fn(async () => false);
+                const ops = new GitOps(executor, confirm);
+                await expect(ops.push()).rejects.toBeInstanceOf(UpstreamPushDeclinedError);
+                expect(confirm).toHaveBeenCalledWith("origin", "fix");
+                expect((await git(["--git-dir", remote, "for-each-ref", "--format=%(refname:short)"])).trim()).toBe("team/fix");
+                confirm.mockResolvedValue(true);
+                await ops.push();
+                expect((await git(["rev-parse", "--abbrev-ref", "@{upstream}"])).trim()).toBe("origin/fix");
+                await commit("C");
+                await ops.push();
+                expect(confirm).toHaveBeenCalledTimes(2);
+                expect((await git(["--git-dir", remote, "rev-parse", "refs/heads/fix"])).trim()).toBe((await git(["rev-parse", "HEAD"])).trim());
+                expect((await git(["--git-dir", remote, "rev-parse", "refs/heads/team/fix"])).trim()).toBe(before);
+            } finally {
+                await fs.promises.rm(root, { recursive: true, force: true });
+            }
         });
     });
 
     describe("commitAndPush", () => {
         it("calls commit then push", async () => {
-            const executor = createMockExecutor({});
+            const executor = createMockExecutor({ "branch --show-current": "main", "for-each-ref": "refs/heads/main\0origin\0refs/heads/main\0" });
             const ops = new GitOps(executor);
             await ops.commitAndPush("msg");
 
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
             expect(calls[0][0]).toEqual(["commit", "-m", "msg"]);
-            expect(calls[1][0]).toEqual(["push"]);
+            expect(calls.at(-1)?.[0]).toEqual(["push", "origin", "refs/heads/main:refs/heads/main"]);
         });
 
         it("passes selected paths through to commit before push", async () => {
-            const executor = createMockExecutor({});
+            const executor = createMockExecutor({ "branch --show-current": "main", "for-each-ref": "refs/heads/main\0origin\0refs/heads/main\0" });
             const ops = new GitOps(executor);
             await ops.commitAndPush("msg", false, ["src/a.ts"]);
 
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
             expect(calls[0][0]).toEqual(["--literal-pathspecs", "commit", "-m", "msg", "--only", "--", "src/a.ts"]);
-            expect(calls[1][0]).toEqual(["push"]);
+            expect(calls.at(-1)?.[0]).toEqual(["push", "origin", "refs/heads/main:refs/heads/main"]);
         });
     });
 

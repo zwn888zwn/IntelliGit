@@ -3,6 +3,7 @@
 // in the branch column: checkout, rebase, merge, push, delete, etc.
 
 import * as vscode from "vscode";
+import { readBranchTracking } from "../git/branchTracking";
 import { GitExecutor } from "../git/executor";
 import { GitOps, UpstreamPushDeclinedError } from "../git/operations";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
@@ -16,8 +17,6 @@ import {
     getLocalBranchMergeStatusForDelete,
     isValidBranchName,
     resolveRemoteDeleteTarget,
-    resolveRemoteName,
-    resolveTrackedRemoteBranch,
     showDeletedBranchActions,
 } from "../services/gitHelpers";
 
@@ -57,6 +56,66 @@ export async function mergeBranchIntoCurrent(
     }
     await openConflictSession({ repository, sourceBranch, targetBranch });
     return false;
+}
+
+export async function updateBranchFromUpstream(
+    repository: RepositoryEntry,
+    branch: Branch,
+    tracked: { remote: string; remoteBranch: string },
+    openConflictSession: BranchCommandDeps["openConflictSession"],
+    refreshConflictUi: BranchCommandDeps["refreshConflictUi"],
+): Promise<boolean> {
+    const { executor, gitOps } = repository;
+    const name = branch.name;
+    await executor.run([
+        "fetch", tracked.remote,
+        branch.isCurrent ? tracked.remoteBranch : `${tracked.remoteBranch}:${name}`,
+        "--recurse-submodules=no", "--progress", "--prune",
+    ]);
+    if (!branch.isCurrent) return true;
+
+    const currentBranch = async () => (await executor.run(["branch", "--show-current"])).trim();
+    if (await currentBranch() !== name) throw new Error("The checked-out branch changed. Run Update again.");
+    const incoming = (await executor.run(["rev-parse", "--verify", "FETCH_HEAD"])).trim();
+    let head: string;
+    let ahead: number;
+    let behind: number;
+    try {
+        await executor.runWithStderr(["merge", "--ff-only", incoming]);
+        return true;
+    } catch (ffError) {
+        if (await gitOps.isMergeInProgress() || await gitOps.isRebaseInProgress()) throw ffError;
+        head = (await executor.run(["rev-parse", "HEAD"])).trim();
+        const counts = await executor.run(["rev-list", "--left-right", "--count", `${head}...${incoming}`]);
+        [ahead, behind] = counts.trim().split(/\s+/).map(Number);
+        if (!(ahead > 0 && behind > 0)) throw ffError;
+    }
+
+    const upstream = `${tracked.remote}/${tracked.remoteBranch}`;
+    const choice = await vscode.window.showQuickPick([
+        { label: "Merge", description: "Keep your local commits and create a merge commit" },
+        { label: "Rebase", description: "Replay your local commits onto the incoming changes" },
+    ], { title: `${repository.info.name} · Update ${name} from ${upstream} · ${ahead} outgoing, ${behind} incoming` });
+    if (!choice) return false;
+    if (await currentBranch() !== name || (await executor.run(["rev-parse", "HEAD"])).trim() !== head) {
+        throw new Error("The branch or commit changed. Run Update again.");
+    }
+    try {
+        // Merge can report conflicts only on stdout. Honor its exit code.
+        await executor.runWithStderr(choice.label === "Merge"
+            ? ["merge", "--no-ff", "-m", `Merge ${upstream} into ${name}`, incoming]
+            : ["rebase", "--autostash", incoming]);
+    } catch (err) {
+        const conflicts = await gitOps.getConflictFilesDetailed();
+        if (!conflicts.length) throw err;
+        await openConflictSession({ repository, sourceBranch: upstream, targetBranch: name });
+        await refreshConflictUi();
+        vscode.window.showWarningMessage(
+            `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
+        );
+        return false;
+    }
+    return true;
 }
 
 export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntry[] {
@@ -224,61 +283,11 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 if (!name || branch?.isRemote) return;
                 try {
                     const repository = deps.requireCurrentRepository();
-                    const { executor, gitOps } = repository;
-                    const updated = await runWithNotificationProgress(`Updating ${name}...`, async () => {
-                        const branches = getCurrentBranches();
-                        const tracked = resolveTrackedRemoteBranch(branch, branches.length ? branches : await gitOps.getBranches());
-                        if (!tracked) throw new Error(`No tracked remote branch configured for '${name}'.`);
-                        await executor.run([
-                            "fetch", tracked.remote,
-                            branch.isCurrent ? tracked.remoteBranch : `${tracked.remoteBranch}:${name}`,
-                            "--recurse-submodules=no", "--progress", "--prune",
-                        ]);
-                        if (!branch.isCurrent) return true;
-
-                        const currentBranch = async () => (await executor.run(["branch", "--show-current"])).trim();
-                        if (await currentBranch() !== name) throw new Error("The checked-out branch changed. Run Update again.");
-                        const incoming = (await executor.run(["rev-parse", "--verify", "FETCH_HEAD"])).trim();
-                        let head: string;
-                        let ahead: number;
-                        let behind: number;
-                        try {
-                            await executor.runWithStderr(["merge", "--ff-only", incoming]);
-                            return true;
-                        } catch (ffError) {
-                            if (await gitOps.isMergeInProgress() || await gitOps.isRebaseInProgress()) throw ffError;
-                            head = (await executor.run(["rev-parse", "HEAD"])).trim();
-                            const counts = await executor.run(["rev-list", "--left-right", "--count", `${head}...${incoming}`]);
-                            [ahead, behind] = counts.trim().split(/\s+/).map(Number);
-                            if (!(ahead > 0 && behind > 0)) throw ffError;
-                        }
-
-                        const upstream = `${tracked.remote}/${tracked.remoteBranch}`;
-                        const choice = await vscode.window.showQuickPick([
-                            { label: "Merge", description: "Keep your local commits and create a merge commit" },
-                            { label: "Rebase", description: "Replay your local commits onto the incoming changes" },
-                        ], { title: `Update ${name} from ${upstream} · ${ahead} outgoing, ${behind} incoming` });
-                        if (!choice) return false;
-                        if (await currentBranch() !== name || (await executor.run(["rev-parse", "HEAD"])).trim() !== head) {
-                            throw new Error("The branch or commit changed. Run Update again.");
-                        }
-                        try {
-                            // Merge can report conflicts only on stdout. Honor its exit code.
-                            await executor.runWithStderr(choice.label === "Merge"
-                                ? ["merge", "--no-ff", "-m", `Merge ${upstream} into ${name}`, incoming]
-                                : ["rebase", "--autostash", incoming]);
-                        } catch (err) {
-                            const conflicts = await gitOps.getConflictFilesDetailed();
-                            if (!conflicts.length) throw err;
-                            await openConflictSession({ repository, sourceBranch: upstream, targetBranch: name });
-                            await refreshConflictUi();
-                            vscode.window.showWarningMessage(
-                                `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
-                            );
-                            return false;
-                        }
-                        return true;
-                    });
+                    const { upstream } = await readBranchTracking(repository.executor, name);
+                    if (!upstream) throw new Error(`No tracked remote branch configured for '${name}'.`);
+                    const updated = await runWithNotificationProgress(`Updating ${name}...`, () =>
+                        updateBranchFromUpstream(repository, branch, upstream, openConflictSession, refreshConflictUi),
+                    );
                     if (!updated) return;
                     vscode.window.showInformationMessage(`Updated ${name}`);
                     await vscode.commands.executeCommand("intelligit.refresh");
@@ -294,42 +303,10 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 const branch = item.branch;
                 if (!branch || branch.isRemote) return;
                 try {
-                    let pushOutput = "";
-                    await runWithNotificationProgress(`Pushing ${branch.name}...`, async () => {
-                        const tracked = resolveTrackedRemoteBranch(branch, getCurrentBranches());
-                        if (branch.isCurrent) {
-                            if (tracked) {
-                                pushOutput = await executor.runWithStderr([
-                                    "push",
-                                    tracked.remote,
-                                    `${branch.name}:${tracked.remoteBranch}`,
-                                ]);
-                            } else {
-                                pushOutput = await gitOps.push();
-                            }
-                        } else {
-                            if (tracked) {
-                                pushOutput = await executor.runWithStderr([
-                                    "push",
-                                    tracked.remote,
-                                    `${branch.name}:${tracked.remoteBranch}`,
-                                ]);
-                            } else {
-                                const remote = await resolveRemoteName(branch, executor);
-                                if (!remote) {
-                                    throw new Error(
-                                        `No remote configured for branch ${branch.name}.`,
-                                    );
-                                }
-                                pushOutput = await executor.runWithStderr([
-                                    "push",
-                                    "-u",
-                                    remote,
-                                    branch.name,
-                                ]);
-                            }
-                        }
-                    });
+                    const repository = deps.requireCurrentRepository();
+                    const pushOutput = await runWithNotificationProgress(`Pushing ${branch.name}...`, () =>
+                        repository.gitOps.push(branch.name),
+                    );
                     await showPushSuccessWithRequestLink(`Pushed ${branch.name}`, pushOutput);
                     await vscode.commands.executeCommand("intelligit.refresh");
                 } catch (err) {
@@ -440,7 +417,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                         const forceDelete = confirmLabel === "Delete Anyway";
                         await executor.run(["branch", forceDelete ? "-D" : "-d", name]);
                         await vscode.commands.executeCommand("intelligit.refresh");
-                        await showDeletedBranchActions(branch, getCurrentBranches(), executor);
+                        await showDeletedBranchActions(branch, executor);
                     }
                 } catch (err) {
                     if (!isRemote && isBranchNotFullyMergedError(err)) {
@@ -453,7 +430,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                         try {
                             await executor.run(["branch", "-D", name]);
                             await vscode.commands.executeCommand("intelligit.refresh");
-                            await showDeletedBranchActions(branch, getCurrentBranches(), executor);
+                            await showDeletedBranchActions(branch, executor);
                         } catch (forceErr) {
                             const msg = getErrorMessage(forceErr);
                             vscode.window.showErrorMessage(`Delete failed: ${msg}`);

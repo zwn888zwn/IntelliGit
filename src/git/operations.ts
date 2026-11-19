@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { readBranchTracking, firstPushRemote } from "./branchTracking";
 import { GitExecutor } from "./executor";
 import { decodeGitQuotedPath } from "./pathEncoding";
 import type {
@@ -857,53 +858,26 @@ export class GitOps {
         return this.executor.run(["merge", "--abort"]);
     }
 
-    async push(): Promise<string> {
-        try {
-            return await this.executor.runWithStderr(["push"]);
-        } catch (err) {
-            if (!isNoUpstreamPushError(err)) throw err;
-
-            const suggested = parseSetUpstreamPushSuggestion(err);
-            const branch = suggested?.branch ?? (await this.resolveCurrentBranchNameForPush());
-            const remote = suggested?.remote ?? (await this.resolveDefaultRemoteNameForPush());
-            if (!branch || !remote) throw err;
-
-            const allowSetUpstream = await this.requestSetUpstreamPush(remote, branch);
-            if (!allowSetUpstream) {
-                throw new UpstreamPushDeclinedError();
+    async push(selectedBranch?: string): Promise<string> {
+        const branch = selectedBranch ?? (await this.executor.run(["branch", "--show-current"])).trim();
+        if (!branch) throw new Error("Check out a local branch before pushing.");
+        const { upstream, pushRemote } = await readBranchTracking(this.executor, branch);
+        const source = `refs/heads/${branch}`;
+        if (upstream) {
+            // Commit and Push also supports Git's separate push remote for fork workflows.
+            if (!selectedBranch && pushRemote && pushRemote !== upstream.remote) {
+                return this.executor.runWithStderr(["push"]);
             }
-
-            return this.executor.runWithStderr(["push", "--set-upstream", remote, branch]);
+            return this.executor.runWithStderr(["push", upstream.remote, `${source}:refs/heads/${upstream.remoteBranch}`]);
         }
+        const remote = await firstPushRemote(this.executor, branch, pushRemote);
+        if (!await this.requestSetUpstreamPush(remote, branch)) throw new UpstreamPushDeclinedError();
+        return this.executor.runWithStderr(["push", "--set-upstream", remote, `${source}:${source}`]);
     }
 
     async commitAndPush(message: string, amend: boolean = false, paths?: string[]): Promise<string> {
         await this.commit(message, amend, paths);
         return this.push();
-    }
-
-    private async resolveCurrentBranchNameForPush(): Promise<string | null> {
-        try {
-            const raw = await this.executor.run(["rev-parse", "--abbrev-ref", "HEAD"]);
-            const branch = raw.trim();
-            if (!branch || branch === "HEAD") return null;
-            return branch;
-        } catch {
-            return null;
-        }
-    }
-
-    private async resolveDefaultRemoteNameForPush(): Promise<string | null> {
-        try {
-            const remotes = await this.executor.run(["remote"]);
-            const firstRemote = remotes
-                .split("\n")
-                .map((r) => r.trim())
-                .find((r) => r.length > 0);
-            return firstRemote ?? null;
-        } catch {
-            return null;
-        }
     }
 
     private async requestSetUpstreamPush(remote: string, branch: string): Promise<boolean> {
@@ -1385,22 +1359,6 @@ function mapConflictSideState(code: string): MergeConflictFile["ours"] {
     if (code === "A") return "Added";
     if (code === "D") return "Deleted";
     return "Modified";
-}
-
-function isNoUpstreamPushError(err: unknown): boolean {
-    const message = getErrorMessage(err);
-    const lower = message.toLowerCase();
-    return lower.includes("has no upstream branch") || parseSetUpstreamPushSuggestion(err) !== null;
-}
-
-function parseSetUpstreamPushSuggestion(err: unknown): { remote: string; branch: string } | null {
-    const message = getErrorMessage(err);
-    const match = message.match(/git push\s+(?:--set-upstream(?:\s*=\s*|\s+)|-u\s+)(\S+)\s+(\S+)/);
-    if (!match) return null;
-    const remote = match[1]?.trim();
-    const branch = match[2]?.trim();
-    if (!remote || !branch) return null;
-    return { remote, branch };
 }
 
 function formatBlameDate(authorTime: number, authorTz: string): string {

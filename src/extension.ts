@@ -7,6 +7,8 @@ import { showSelectionHistory } from "./services/selectionHistory";
 import * as path from "path";
 import * as fs from "fs/promises";
 import * as vscode from "vscode";
+import { readBranchTracking } from "./git/branchTracking";
+import { UpstreamPushDeclinedError } from "./git/operations";
 import { CommitGraphViewProvider } from "./views/CommitGraphViewProvider";
 import { CommitInfoViewProvider } from "./views/CommitInfoViewProvider";
 import { CommitPanelViewProvider } from "./views/CommitPanelViewProvider";
@@ -18,7 +20,7 @@ import type { Branch, CommitDetail, GitWorktree, ProjectComparisonTarget } from 
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
-import { createBranchCommands, mergeBranchIntoCurrent } from "./commands/branchCommands";
+import { createBranchCommands, mergeBranchIntoCurrent, updateBranchFromUpstream } from "./commands/branchCommands";
 import { BranchStatusBarController } from "./commands/branchPopup";
 import { registerProjectSwitcher } from "./commands/projectPopup";
 import { RefreshService } from "./services/refreshService";
@@ -62,8 +64,6 @@ import {
 import {
     checkoutBranch,
     isValidBranchName,
-    resolveRemoteName,
-    resolveTrackedRemoteBranch,
 } from "./services/gitHelpers";
 import {
     buildWorktreeAddArgs,
@@ -1333,7 +1333,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             branches: Branch[];
             currentBranchName?: string;
             tracked?: { remote: string; remoteBranch: string };
-            pushRemote?: string;
         }> = [];
 
         for (const repository of repositories) {
@@ -1354,26 +1353,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
                 return;
             }
-            const tracked =
-                (action === "updateBranch" || action === "pushBranch"
-                    ? resolveTrackedRemoteBranch(branch, branches)
-                    : undefined) ?? undefined;
-            let pushRemote: string | undefined;
-            if (action === "updateBranch" && !tracked) {
-                vscode.window.showErrorMessage(
-                    `Update failed: No tracked remote branch configured for '${branch.name}' in ${repository.info.name}.`,
-                );
-                return;
-            }
-            if (action === "pushBranch" && !tracked && !branch.isCurrent) {
-                const resolved = await resolveRemoteName(branch, repository.executor);
-                if (!resolved) {
-                    vscode.window.showErrorMessage(
-                        `Push failed: No remote configured for branch ${branch.name} in ${repository.info.name}.`,
-                    );
+            let tracked;
+            if (action === "updateBranch") {
+                try {
+                    tracked = (await readBranchTracking(repository.executor, branch.name)).upstream ?? undefined;
+                    if (!tracked) throw new Error(`No tracked remote branch configured for '${branch.name}'.`);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Update failed in ${repository.info.name}: ${getErrorMessage(error)}`);
                     return;
                 }
-                pushRemote = resolved;
             }
             targets.push({
                 repository,
@@ -1381,7 +1369,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 branches,
                 currentBranchName: branches.find((item) => item.isCurrent)?.name,
                 tracked,
-                pushRemote,
             });
         }
 
@@ -1439,71 +1426,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                                 break;
                             }
                             case "updateBranch":
-                                if (!target.tracked) {
-                                    throw new Error(
-                                        `No tracked remote branch configured for '${target.branch.name}' in ${target.repository.info.name}.`,
-                                    );
-                                }
-                                if (target.branch.isCurrent) {
-                                    await target.repository.executor.run([
-                                        "fetch",
-                                        target.tracked.remote,
-                                        target.tracked.remoteBranch,
-                                        "--recurse-submodules=no",
-                                        "--progress",
-                                        "--prune",
-                                    ]);
-                                    try {
-                                        await target.repository.executor.run([
-                                            "merge",
-                                            "--ff-only",
-                                            "FETCH_HEAD",
-                                        ]);
-                                    } catch {
-                                        await target.repository.executor.run([
-                                            "rebase",
-                                            "--autostash",
-                                            "FETCH_HEAD",
-                                        ]);
-                                    }
-                                } else {
-                                    await target.repository.executor.run([
-                                        "fetch",
-                                        target.tracked.remote,
-                                        `${target.tracked.remoteBranch}:${target.branch.name}`,
-                                        "--recurse-submodules=no",
-                                        "--progress",
-                                        "--prune",
-                                    ]);
-                                }
+                                if (!target.tracked) throw new Error(`Missing upstream for '${target.branch.name}'.`);
+                                if (!await updateBranchFromUpstream(target.repository, target.branch, target.tracked,
+                                    openConflictSession, () => refreshService.refreshConflictUi())) return false;
                                 break;
-                            case "pushBranch": {
-                                let pushOutput: string;
-                                if (target.tracked) {
-                                    pushOutput = await target.repository.executor.runWithStderr([
-                                        "push",
-                                        target.tracked.remote,
-                                        `${target.branch.name}:${target.tracked.remoteBranch}`,
-                                    ]);
-                                } else if (target.branch.isCurrent) {
-                                    pushOutput = await target.repository.gitOps.push();
-                                } else {
-                                    pushOutput = await target.repository.executor.runWithStderr([
-                                        "push",
-                                        "-u",
-                                        target.pushRemote!,
-                                        target.branch.name,
-                                    ]);
-                                }
-                                pushOutputs.push(pushOutput);
+                            case "pushBranch":
+                                pushOutputs.push(await target.repository.gitOps.push(target.branch.name));
                                 break;
-                            }
                         }
                     }
                     return true;
                 },
             );
-            if (!completed) return;
+            if (!completed) {
+                await vscode.commands.executeCommand("intelligit.refresh");
+                return;
+            }
             const successMessage = `${successVerb} ${branchName} in ${targets.length} repositories.`;
             if (action === "pushBranch") {
                 await showPushSuccessWithRequestLink(successMessage, pushOutputs.join("\n"));
@@ -1512,6 +1450,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             }
             await vscode.commands.executeCommand("intelligit.refresh");
         } catch (error) {
+            if (error instanceof UpstreamPushDeclinedError) return;
             const message = getErrorMessage(error);
             vscode.window.showErrorMessage(`Action failed: ${message}`);
         }

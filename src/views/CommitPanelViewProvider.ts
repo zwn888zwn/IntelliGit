@@ -4,7 +4,7 @@
 // Frontend is a React + Chakra UI app loaded from dist/webview-commitpanel.js.
 
 import * as vscode from "vscode";
-import { GitOps } from "../git/operations";
+import { GitOps, UpstreamPushDeclinedError } from "../git/operations";
 import type {
     RepoPathRef,
     RepositoryContextInfo,
@@ -640,7 +640,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                     try {
                         pushed.push({ name, output: await git.push() });
                     } catch (error) {
-                        void this.reportPushFailure(repository, head, error);
+                        if (error instanceof UpstreamPushDeclinedError) {
+                            void vscode.window.showInformationMessage(`${name}: Committed locally. Push canceled.`);
+                        } else {
+                            void this.reportPushFailure(repository, head, error);
+                        }
                     }
                 }
             }

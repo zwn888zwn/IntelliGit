@@ -4,6 +4,7 @@
 
 import * as path from "path";
 import * as vscode from "vscode";
+import { firstPushRemote, readBranchTracking } from "../git/branchTracking";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
 import { prepareSquash, applySquash, prepareReword, applyReword, undoRewrite, type RewriteReceipt } from "../git/squash";
@@ -21,8 +22,6 @@ import {
     getUndoCommitCount,
     getCheckedOutBranchName,
     pickMainlineParent,
-    resolveTrackedRemoteBranch,
-    resolveRemoteName,
 } from "../services/gitHelpers";
 import type { Branch } from "../types";
 
@@ -223,65 +222,28 @@ export async function handleCommitContextAction(params: {
                 return;
             }
 
-            let currentBranch = currentBranches.find(
-                (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
-            );
-            let branchesSnapshot = currentBranches;
-            if (!currentBranch) {
-                // Stale cache — refresh branch metadata and retry
-                const freshBranches = await gitOps.getBranches();
-                currentBranch = freshBranches.find(
-                    (branch) => !branch.isRemote && branch.name === checkedOutBranchName,
-                );
-                branchesSnapshot = freshBranches;
-            }
-            if (!currentBranch) {
-                vscode.window.showErrorMessage(
-                    `Could not resolve branch metadata for '${checkedOutBranchName}'.`,
-                );
-                return;
-            }
+            const { upstream, pushRemote } = await readBranchTracking(executor, checkedOutBranchName);
+            const remote = upstream?.remote ?? await firstPushRemote(executor, checkedOutBranchName, pushRemote);
+            const destination = upstream?.remoteBranch ?? checkedOutBranchName;
+            const target = `${remote}/${destination}`;
+            const label = upstream ? "Push" : "Set Upstream and Push";
+            const question = upstream
+                ? `Push all commits up to ${short} to ${target}?`
+                : `Set upstream for '${checkedOutBranchName}' to '${target}' and push commits up to ${short}?`;
+            const confirm = await vscode.window.showWarningMessage(question, { modal: true }, label);
+            if (confirm !== label) return;
 
-            let target = resolveTrackedRemoteBranch(currentBranch, branchesSnapshot);
-            let setUpstream = false;
-            if (!target) {
-                const remote = await resolveRemoteName(currentBranch, executor);
-                if (!remote) {
-                    vscode.window.showErrorMessage(
-                        `No remote configured for branch ${currentBranch.name}.`,
-                    );
-                    return;
+            const pushOutput = await runWithNotificationProgress(`Pushing commits up to ${short}...`, () =>
+                executor.runWithStderr(["push", remote, `${validatedHash}:refs/heads/${destination}`]),
+            );
+            // Git cannot infer a local tracking branch when the pushed source is a SHA.
+            if (!upstream) {
+                try {
+                    await executor.run(["branch", "--set-upstream-to", target, checkedOutBranchName]);
+                } catch (error) {
+                    vscode.window.showWarningMessage(`Pushed to ${target}, but could not set the upstream: ${getErrorMessage(error)}`);
                 }
-
-                const setUpstreamConfirm = await vscode.window.showWarningMessage(
-                    `Branch '${currentBranch.name}' has no upstream. Set upstream to '${remote}/${currentBranch.name}' and push commits up to ${short}?`,
-                    { modal: true },
-                    "Set Upstream and Push",
-                );
-                if (setUpstreamConfirm !== "Set Upstream and Push") return;
-
-                target = { remote, remoteBranch: currentBranch.name };
-                setUpstream = true;
             }
-
-            const confirm = await vscode.window.showWarningMessage(
-                `Push all commits up to ${short} to ${target.remote}/${target.remoteBranch}?`,
-                { modal: true },
-                "Push",
-            );
-            if (confirm !== "Push") return;
-
-            let pushOutput = "";
-            await runWithNotificationProgress(`Pushing commits up to ${short}...`, async () => {
-                const destinationRef = `refs/heads/${target.remoteBranch}`;
-                const refspec = `${validatedHash}:${destinationRef}`;
-                pushOutput = await executor.runWithStderr([
-                    "push",
-                    ...(setUpstream ? ["-u"] : []),
-                    target.remote,
-                    refspec,
-                ]);
-            });
 
             await showPushSuccessWithRequestLink(`Pushed commits up to ${short}.`, pushOutput);
             await refreshAll();

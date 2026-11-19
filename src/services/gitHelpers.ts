@@ -90,30 +90,9 @@ export async function getCheckedOutBranchName(
 
 export function resolveTrackedRemoteBranch(
     branch: Branch,
-    currentBranches: Branch[],
 ): { remote: string; remoteBranch: string } | null {
     if (branch.upstream && branch.upstream.includes("/")) {
         const [remote, ...rest] = branch.upstream.split("/");
-        const remoteBranch = rest.join("/");
-        if (remote && remoteBranch) {
-            return { remote, remoteBranch };
-        }
-    }
-
-    if (branch.remote) {
-        const expected = `${branch.remote}/${branch.name}`;
-        if (currentBranches.some((b) => b.isRemote && b.name === expected)) {
-            return { remote: branch.remote, remoteBranch: branch.name };
-        }
-    }
-
-    // Fallback: match remote branches whose name ends with the local branch name.
-    // Only used when there is exactly one match to avoid ambiguity.
-    const suffixMatches = currentBranches.filter(
-        (b) => b.isRemote && b.name.endsWith(`/${branch.name}`),
-    );
-    if (suffixMatches.length === 1) {
-        const [remote, ...rest] = suffixMatches[0].name.split("/");
         const remoteBranch = rest.join("/");
         if (remote && remoteBranch) {
             return { remote, remoteBranch };
@@ -135,23 +114,6 @@ export function resolveRemoteDeleteTarget(
     if (!remote || !remoteBranch) return null;
 
     return { remote, remoteBranch };
-}
-
-export async function resolveRemoteName(
-    branch: Branch,
-    executor: GitExecutor,
-): Promise<string | null> {
-    if (branch.remote) return branch.remote;
-    try {
-        const raw = await executor.run(["remote"]);
-        const remotes = raw
-            .split("\n")
-            .map((r) => r.trim())
-            .filter(Boolean);
-        return remotes[0] ?? null;
-    } catch {
-        return null;
-    }
 }
 
 export async function getCommitParentHashes(
@@ -272,12 +234,11 @@ export async function getLocalBranchMergeStatusForDelete(
 
 export async function showDeletedBranchActions(
     branch: Branch,
-    currentBranches: Branch[],
     executor: GitExecutor,
 ): Promise<void> {
     const restoreLabel = "Restore";
     const deleteTrackedLabel = "Delete Tracked Branch";
-    const tracked = resolveTrackedRemoteBranch(branch, currentBranches);
+    const tracked = resolveTrackedRemoteBranch(branch);
     const buttons = tracked ? [restoreLabel, deleteTrackedLabel] : [restoreLabel];
     const action = await vscode.window.showInformationMessage(
         `Deleted: ${branch.name}`,
