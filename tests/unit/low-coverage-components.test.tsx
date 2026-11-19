@@ -1518,6 +1518,45 @@ describe("low coverage components", () => {
         }
     });
 
+    it("only loads tracking subjects after hover and caps a large incoming preview", async () => {
+        const local: Branch = { name: "topic", upstream: "origin/base", hash: "abc1234", isCurrent: true, isRemote: false, ahead: 1, behind: 48 };
+        const { root, container } = mount(
+            <BranchColumn branches={[local]} repository={{ name: "r", root: "/r", repoId: ".", color: "blue" }}
+                selectedBranch={null} onSelectBranch={vi.fn()} onBranchAction={vi.fn()} />,
+        );
+        const badge = container.querySelector("[data-branch-tooltip]")!;
+        const request = expect.objectContaining({ type: "getTrackingPreview", repoRoot: "/r", branchName: "topic" });
+        mockVscodeApi.postMessage.mockClear();
+        vi.useFakeTimers();
+        try {
+            const enter = () => act(() => badge.dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+            const leave = () => act(() => badge.dispatchEvent(new MouseEvent("pointerout", { bubbles: true })));
+            enter();
+            leave();
+            await act(() => vi.advanceTimersByTimeAsync(500));
+            expect(mockVscodeApi.postMessage).not.toHaveBeenCalled();
+            enter();
+            await act(() => vi.advanceTimersByTimeAsync(500));
+            expect(mockVscodeApi.postMessage).toHaveBeenCalledWith(request);
+            const { requestId } = mockVscodeApi.postMessage.mock.lastCall![0];
+            const reply = (id: number) => act(() => window.dispatchEvent(new MessageEvent("message", { data: {
+                type: "trackingPreview", requestId: id, preview: { incoming: ["third", "second", "first"], outgoing: ["my change"] },
+            } })));
+            reply(requestId - 1);
+            expect(document.querySelector('[role="tooltip"]')?.textContent).not.toContain("third");
+            reply(requestId);
+            const tooltip = document.querySelector('[role="tooltip"]')!;
+            expect(tooltip.textContent).toContain("Incoming · 48thirdsecondfirst+45 more");
+            expect(tooltip.textContent).toContain("Outgoing · 1my change");
+            expect(tooltip.textContent).toContain("rebase");
+            leave();
+            expect(document.querySelector('[role="tooltip"]')).toBeNull();
+        } finally {
+            vi.useRealTimers();
+            unmount(root, container);
+        }
+    });
+
     it("BranchColumn shows ahead/behind counts with push/pull colors", () => {
         const branches: Branch[] = [
             {

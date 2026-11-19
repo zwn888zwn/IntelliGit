@@ -1,5 +1,6 @@
-import { TooltipSurface, useTooltipDelay } from "../../shared/TooltipSurface";
+import { useTooltipDelay } from "../../shared/TooltipSurface";
 import React from "react";
+import { BranchTrackingTooltip } from "./BranchTrackingTooltip";
 import { BranchName } from "./BranchName";
 import { LuCloudUpload, LuFolderGit2, LuTag } from "react-icons/lu";
 import type { Branch, GitWorktree, ThemeFolderIconMap, ThemeTreeIcon } from "../../../../types";
@@ -24,6 +25,7 @@ const DEFAULT_BRANCH_ICON_YELLOW = "var(--vscode-charts-yellow, #f2c94c)";
 
 interface Props {
     node: TreeNode;
+    repoRoot?: string;
     worktrees?: GitWorktree[];
     remoteBranchNames?: ReadonlySet<string>;
     depth: number;
@@ -41,15 +43,16 @@ interface Props {
 
 export function TrackingBadge({
     branch,
+    repoRoot,
     remoteBranchNames,
 }: {
     branch: Branch;
+    repoRoot?: string;
     remoteBranchNames?: ReadonlySet<string>;
 }): React.ReactElement | null {
-    const [tooltipPos, setTooltipPos] = React.useState<{ x: number; y: number } | null>(null);
+    const [anchor, setAnchor] = React.useState<DOMRect | null>(null);
     const delay = useTooltipDelay();
     const hasNoRemoteBranch = !branch.isRemote && !remoteBranchNames?.has(branch.name);
-    if (!hasNoRemoteBranch && branch.ahead <= 0 && branch.behind <= 0) return null;
 
     const tooltipParts: string[] = [];
     if (branch.behind > 0) {
@@ -67,21 +70,22 @@ export function TrackingBadge({
         .join(" ");
 
     const showTooltip = (event: React.PointerEvent<HTMLElement>): void => {
-        const rect = event.currentTarget.getBoundingClientRect();
-        const x = event.clientX > 0 ? event.clientX : rect.left + rect.width / 2;
-        delay.show(() => setTooltipPos({ x, y: rect.top - 6 }));
+        const element = event.currentTarget;
+        delay.show(() => setAnchor(element.getBoundingClientRect()));
     };
 
-    const hideTooltip = (): void => { delay.cancel(); setTooltipPos(null); };
+    const hideTooltip = React.useCallback(() => setAnchor(null), []);
+    const cancelTooltip = () => { delay.cancel(); hideTooltip(); };
 
+    if (!tooltipText) return null;
     return (
         <span
             style={TRACKING_BADGE_STYLE}
             data-branch-tooltip={tooltipText}
             onPointerEnter={showTooltip}
-            onPointerLeave={hideTooltip}
-            onPointerDown={hideTooltip}
-            onContextMenu={hideTooltip}
+            onPointerLeave={cancelTooltip}
+            onPointerDown={cancelTooltip}
+            onContextMenu={cancelTooltip}
         >
             {hasNoRemoteBranch && (
                 <span
@@ -109,22 +113,11 @@ export function TrackingBadge({
                     {branch.behind}
                 </span>
             )}
-            {tooltipPos && (
-                <TooltipSurface
-                    style={{
-                        position: "fixed",
-                        left: tooltipPos.x,
-                        top: tooltipPos.y,
-                        transform: "translate(-50%, -100%)",
-
-                        whiteSpace: "nowrap",
-                        zIndex: 9999,
-                        pointerEvents: "none",
-
-                    }}
-                >
-                    {tooltipText}
-                </TooltipSurface>
+            {anchor && (
+                <BranchTrackingTooltip
+                    key={JSON.stringify([repoRoot, branch.name, branch.hash, branch.upstream, branch.ahead, branch.behind])}
+                    anchor={anchor} branch={branch} repoRoot={repoRoot} fallback={tooltipText} dismiss={hideTooltip}
+                />
             )}
         </span>
     );
@@ -132,6 +125,7 @@ export function TrackingBadge({
 
 export function BranchTreeNodeRow({
     node,
+    repoRoot,
     worktrees,
     remoteBranchNames,
     depth,
@@ -194,6 +188,7 @@ export function BranchTreeNodeRow({
                         <BranchTreeNodeRow
                             key={`${folderKey}/${child.branch?.name ?? child.label}-${index}`}
                             node={child}
+                            repoRoot={repoRoot}
                             worktrees={worktrees}
                             remoteBranchNames={remoteBranchNames}
                             depth={depth + 1}
@@ -266,7 +261,7 @@ export function BranchTreeNodeRow({
             )}
             <BranchName name={node.fullName ?? node.branch?.name ?? node.label}>{renderHighlightedLabel(node.label, filterNeedle)}</BranchName>
             {node.branch && (
-                <TrackingBadge branch={node.branch} remoteBranchNames={remoteBranchNames} />
+                <TrackingBadge branch={node.branch} repoRoot={repoRoot} remoteBranchNames={remoteBranchNames} />
             )}
         </div>
     );

@@ -718,6 +718,7 @@ export function BranchColumn({
                                 <BranchName name={current.name} style={{ marginLeft: 6, fontWeight: 400 }} />
                                 <TrackingBadge
                                     branch={current}
+                                    repoRoot={currentRepositoryRoot}
                                     remoteBranchNames={remoteBranchNames}
                                 />
                             </div>
@@ -736,6 +737,7 @@ export function BranchColumn({
                                 <BranchTreeNodeRow
                                     key={`local-${node.branch?.name ?? node.label}-${index}`}
                                     node={node}
+                                    repoRoot={currentRepositoryRoot}
                                     worktrees={repositoryWorktrees[repository?.root ?? ""]}
                                     remoteBranchNames={remoteBranchNames}
                                     depth={0}

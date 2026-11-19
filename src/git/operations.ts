@@ -4,6 +4,7 @@ import { GitExecutor } from "./executor";
 import { decodeGitQuotedPath } from "./pathEncoding";
 import type {
     Branch,
+    BranchTrackingPreview,
     Commit,
     CommitDetail,
     CommitFile,
@@ -177,6 +178,21 @@ export class GitOps {
             });
         }
         return branches;
+    }
+
+    async getBranchTrackingPreview(branch: Branch, upstreamHash: string): Promise<BranchTrackingPreview> {
+        const subjects = async (from: string, to: string) => {
+            const output = await this.executor.run([
+                "log", "--max-count=3", "--format=%s", "--no-notes", "--no-show-signature", "--no-decorate", "--no-color",
+                `${from}..${to}`, "--",
+            ]);
+            return output.trimEnd().split("\n").filter(Boolean).map(subject => subject.slice(0, 240));
+        };
+        const [incoming, outgoing] = await Promise.all([
+            branch.behind > 0 ? subjects(branch.hash, upstreamHash) : [],
+            branch.ahead > 0 ? subjects(upstreamHash, branch.hash) : [],
+        ]);
+        return { incoming, outgoing };
     }
 
     async getTags(): Promise<GitTag[]> {

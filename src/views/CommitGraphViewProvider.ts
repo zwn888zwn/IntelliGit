@@ -181,6 +181,19 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (msg: CommitGraphOutbound) => {
             try {
                 switch (msg.type) {
+                    case "getTrackingPreview": {
+                        if (msg.repoRoot !== this.repository?.root) break;
+                        const snapshot = this.branchSnapshotsByRoot[msg.repoRoot] ?? [];
+                        const branch = snapshot.find(item => !item.isRemote && item.name === msg.branchName);
+                        const upstream = branch?.upstream && snapshot.find(item => item.name === branch.upstream);
+                        if (branch && upstream) {
+                            // Use the same local ref snapshot as the badge counts. Hover never fetches.
+                            const preview = await this.getRepositoryEntry(msg.repoRoot).gitOps
+                                .getBranchTrackingPreview(branch, upstream.hash).catch(() => undefined);
+                            if (preview) this.postToWebview({ type: "trackingPreview", requestId: msg.requestId, preview });
+                        }
+                        break;
+                    }
                     case "setPipelineCommits":
                         this.stopPipelines();
                         this.pipelineCommitKeys = new Set(msg.commits.map(({ repoRoot, hash }) => `${repoRoot}\u0000${hash}`));

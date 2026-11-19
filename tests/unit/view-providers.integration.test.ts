@@ -624,6 +624,26 @@ describe("view providers integration", () => {
         }
     });
 
+    it("loads the hovered branch's configured upstream from the displayed repository", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const preview = { incoming: ["new upstream commit"], outgoing: ["local fix"] };
+        const gitOps = { ...makeGitOpsMock(), getBranchTrackingPreview: vi.fn(async () => preview) };
+        const provider = new CommitGraphViewProvider({ fsPath: "/ext", path: "/ext" } as never, gitOps as never);
+        const local = { name: "topic", upstream: "origin/base", hash: "abc1234", isRemote: false, isCurrent: true, ahead: 1, behind: 48 };
+        provider.setRepositoryContext(testRepository);
+        provider.setBranches([local, { ...local, name: "origin/base", hash: "def5678", isRemote: true, isCurrent: false }]);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+        await webview.send({ type: "ready" });
+        const request = { type: "getTrackingPreview", requestId: 7, branchName: "topic" };
+        await webview.send({ ...request, repoRoot: "/other" });
+        expect(gitOps.getBranchTrackingPreview).not.toHaveBeenCalled();
+        await webview.send({ ...request, repoRoot: "/repo" });
+        expect(gitOps.getBranchTrackingPreview).toHaveBeenCalledWith(local, "def5678");
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "trackingPreview", requestId: 7, preview });
+        provider.dispose();
+    });
+
     it("filters local and remote branch histories through the picker and retains the filter on pagination", async () => {
         const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
         const gitOps = makeGitOpsMock();

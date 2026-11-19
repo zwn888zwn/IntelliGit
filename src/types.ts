@@ -9,6 +9,11 @@ export interface Branch {
     behind: number;
 }
 
+export interface BranchTrackingPreview {
+    incoming: string[];
+    outgoing: string[];
+}
+
 export interface GitTag {
     name: string;
     hash: string;
