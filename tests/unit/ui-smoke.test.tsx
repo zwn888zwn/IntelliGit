@@ -205,6 +205,7 @@ describe("webview ui smoke", () => {
                 <CommitArea
                     commitMessage="feat: message"
                     isAmend={false}
+                    canAmend={true}
                     onMessageChange={noop}
                     onAmendChange={noop}
                     onCommit={noop}

@@ -143,6 +143,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 type: "update",
                 repositories: this.getRepositories().map((entry) => entry.info),
                 mergingRoots: [],
+                amendableRoots: [],
                 files: [],
                 stashes: [],
                 shelfFiles: [],
@@ -164,11 +165,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             await this.iconTheme.initIconThemeData();
             const repositories = this.getRepositories();
             const statuses = await Promise.all(repositories.map(async entry => {
-                const [files, merging] = await Promise.all([
+                const [files, merging, canAmend] = await Promise.all([
                     entry.gitOps.getStatus().then(files => this.iconTheme.decorateWorkingFiles(files)),
                     entry.gitOps.isMergeInProgress(),
+                    entry.gitOps.canAmendHead().catch(() => false),
                 ]);
-                return { root: entry.root, files, merging };
+                return { root: entry.root, files, merging, canAmend };
             }));
             const files = statuses.flatMap(status => status.files);
             const stashes = await this.gitOps.listShelved();
@@ -205,6 +207,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 type: "update",
                 repositories: repositories.map((entry) => entry.info),
                 mergingRoots: statuses.filter(status => status.merging).map(status => status.root),
+                amendableRoots: statuses.filter(status => status.canAmend).map(status => status.root),
                 files,
                 stashes,
                 shelfFiles,
@@ -595,6 +598,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             const repository = this.getRepositoryEntry(root);
             if (await repository.gitOps.isMergeInProgress()) {
                 void vscode.window.showWarningMessage(`${repository.info.name}: Finish the merge in the Merge Conflicts panel.`);
+                await this.refreshData();
+                return;
+            }
+            if (amend && !(await repository.gitOps.canAmendHead())) {
+                void vscode.window.showWarningMessage(`${repository.info.name}: Amend requires an unpushed commit. Create a new commit instead.`);
                 await this.refreshData();
                 return;
             }

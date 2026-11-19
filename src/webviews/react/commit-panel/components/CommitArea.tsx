@@ -9,6 +9,7 @@ import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 interface Props {
     commitMessage: string;
     isAmend: boolean;
+    canAmend: boolean;
     onOpenMerge?: () => void;
     onMessageChange: (message: string) => void;
     onAmendChange: (isAmend: boolean) => void;
@@ -19,6 +20,7 @@ interface Props {
 export function CommitArea({
     commitMessage,
     isAmend,
+    canAmend,
     onOpenMerge,
     onMessageChange,
     onAmendChange,
@@ -41,10 +43,13 @@ export function CommitArea({
                 py="3px"
                 fontSize="12px"
                 minH="24px"
-                cursor="pointer"
+                cursor={canAmend ? "pointer" : "default"}
+                opacity={canAmend ? 1 : 0.55}
+                title={canAmend ? undefined : "Amend requires an unpushed commit in a single repository."}
             >
                 <VscCheckbox
                     isChecked={isAmend}
+                    disabled={!canAmend}
                     onChange={() => onAmendChange(!isAmend)}
                     inputId={amendCheckboxId}
                     inputTestId="amend-checkbox"

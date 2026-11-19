@@ -796,7 +796,16 @@ export class GitOps {
         await this.executor.run(["--literal-pathspecs", "add", "--", ...paths]);
     }
 
+    async canAmendHead(): Promise<boolean> {
+        // HEAD must exist and be unreachable from every local remote-tracking ref.
+        const unpublished = await this.executor.run(["rev-list", "--max-count=1", "--ignore-missing", "HEAD", "--not", "--remotes"]);
+        return Boolean(unpublished.trim());
+    }
+
     async commit(message: string, amend: boolean = false, paths?: string[]): Promise<string> {
+        if (amend && !(await this.canAmendHead())) {
+            throw new Error("Amend requires an unpushed commit. Create a new commit instead.");
+        }
         const args = amend && !message ? ["commit", "--no-edit"] : ["commit", "-m", message];
         if (amend) args.push("--amend");
         if (amend && paths?.length === 0) {

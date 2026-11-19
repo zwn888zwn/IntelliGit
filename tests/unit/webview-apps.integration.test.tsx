@@ -171,6 +171,33 @@ describe("CommitPanelApp integration", () => {
         expect(button("Commit and Push...").disabled).toBe(false);
     });
 
+    it("exits Amend and preserves the ordinary draft when the commit is pushed", async () => {
+        vi.resetModules();
+        installVsCodeMock();
+        createRootHost();
+        await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+        await flush();
+        const repo = { root: "/repo", name: "repo" };
+        const send = (data: unknown) => act(() => window.dispatchEvent(new MessageEvent("message", { data })));
+        const update = (amendableRoots: string[]) => send({ type: "update", repositories: [repo], amendableRoots });
+        send({ type: "setRepositoryContext", repository: repo });
+        update([repo.root]);
+        const checkbox = document.querySelector<HTMLInputElement>('[data-testid="amend-checkbox"]')!;
+        const message = document.querySelector("textarea")!;
+        fireInput(message, "next change");
+        fireClick(checkbox);
+        send({ type: "amendMessage", repoRoot: repo.root, message: "previous commit" });
+        expect(checkbox.checked).toBe(true);
+        expect(message.value).toBe("previous commit");
+        update([]);
+        expect(checkbox.disabled).toBe(true);
+        expect(checkbox.checked).toBe(false);
+        expect(message.value).toBe("next change");
+        update([repo.root]);
+        expect(checkbox.disabled).toBe(false);
+        expect(checkbox.checked).toBe(false);
+    });
+
     it("creates a stash from the toolbar dialog", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock({ checked: [] });
@@ -272,6 +299,7 @@ describe("CommitPanelApp integration", () => {
                     data: {
                         type: "update",
                         repositories: [{ root: "/repo", name: "repo" }],
+                        amendableRoots: ["/repo"],
                         files: [
                             {
                                 repoRoot: "/repo",

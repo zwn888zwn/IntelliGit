@@ -68,24 +68,32 @@ function App(): React.ReactElement {
     const mergingRoot = state.mergingRoots?.find(root => checkedTargets.length
         ? checkedTargets.some(target => target.repoRoot === root) : state.repository?.root === root);
     const amendRoot = checkedTargets[0]?.repoRoot ?? state.repository?.root;
-    const commitMessage = state.isAmend && amendRoot
+    const canAmend = !!amendRoot && state.amendableRoots.includes(amendRoot)
+        && checkedTargets.every(target => target.repoRoot === amendRoot);
+
+    useEffect(() => {
+        if (state.isAmend && !canAmend) dispatch({ type: "SET_AMEND", isAmend: false });
+    }, [state.isAmend, canAmend, dispatch]);
+
+    const isAmend = state.isAmend && canAmend;
+    const commitMessage = isAmend && amendRoot
         ? state.amendMessages[amendRoot] ?? "" : state.commitMessage;
 
     useEffect(() => {
-        if (state.isAmend && amendRoot) {
+        if (isAmend && amendRoot) {
             vscode.postMessage({ type: "getLastCommitMessage", repoRoot: amendRoot });
         }
-    }, [state.isAmend, amendRoot, vscode]);
+    }, [isAmend, amendRoot, vscode]);
 
     const handleMessageChange = useCallback(
         (message: string) => {
-            if (state.isAmend && amendRoot) {
+            if (isAmend && amendRoot) {
                 dispatch({ type: "SET_AMEND_MESSAGE", repoRoot: amendRoot, message });
             } else {
                 dispatch({ type: "SET_COMMIT_MESSAGE", message });
             }
         },
-        [dispatch, state.isAmend, amendRoot],
+        [dispatch, isAmend, amendRoot],
     );
 
     const handleAmendChange = useCallback(
@@ -101,11 +109,11 @@ function App(): React.ReactElement {
                 type: "commitSelected",
                 targets: checkedTargets,
                 message: commitMessage.trim(),
-                amend: state.isAmend,
+                amend: isAmend,
                 push,
             });
         },
-        [vscode, commitMessage, state.isAmend, checkedTargets],
+        [vscode, commitMessage, isAmend, checkedTargets],
     );
 
     const handleCommit = useCallback(() => {
@@ -168,7 +176,8 @@ function App(): React.ReactElement {
                             currentRepository={state.repository}
                             activeFile={state.activeFile}
                             commitMessage={commitMessage}
-                            isAmend={state.isAmend}
+                            isAmend={isAmend}
+                            canAmend={canAmend}
                             onOpenMerge={mergingRoot ? () => vscode.postMessage({ type: "openMergeSession", repoRoot: mergingRoot }) : undefined}
                             isRefreshing={state.isRefreshing}
                             checkedPaths={checkedPaths}

@@ -5,6 +5,7 @@ import React, { useRef, useEffect } from "react";
 
 interface Props {
     isChecked: boolean;
+    disabled?: boolean;
     isIndeterminate?: boolean;
     onChange: () => void;
     inputTestId?: string;
@@ -21,6 +22,7 @@ const CHECK_COLOR = "#c8ddff";
 
 function VscCheckboxInner({
     isChecked,
+    disabled,
     isIndeterminate,
     onChange,
     inputTestId,
@@ -54,6 +56,7 @@ function VscCheckboxInner({
                 id={inputId}
                 data-testid={inputTestId}
                 checked={isChecked}
+                disabled={disabled}
                 onChange={(e) => {
                     e.stopPropagation();
                     onChange();
@@ -63,7 +66,7 @@ function VscCheckboxInner({
                     width: "100%",
                     height: "100%",
                     opacity: 0,
-                    cursor: "pointer",
+                    cursor: disabled ? "default" : "pointer",
                     margin: 0,
                 }}
             />

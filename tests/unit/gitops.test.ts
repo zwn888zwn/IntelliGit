@@ -838,13 +838,12 @@ describe("GitOps", () => {
             expect(call).toEqual(["commit", "-m", "test message"]);
         });
 
-        it("includes --amend flag when amend is true", async () => {
-            const executor = createMockExecutor({});
+        it("includes --amend for an unpublished HEAD", async () => {
+            const executor = createMockExecutor({ "rev-list": "abc123" });
             const ops = new GitOps(executor);
             await ops.commit("amend message", true);
 
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toContain("--amend");
+            expect(executor.run).toHaveBeenCalledWith(["commit", "-m", "amend message", "--amend"]);
         });
 
         it("limits commit to selected paths when provided", async () => {

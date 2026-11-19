@@ -27,6 +27,7 @@ interface Props {
     folderIconsByName?: ThemeFolderIconMap;
     commitMessage: string;
     isAmend: boolean;
+    canAmend: boolean;
     onOpenMerge?: () => void;
     isRefreshing: boolean;
     checkedPaths: Set<string>;
@@ -55,6 +56,7 @@ export function CommitTab({
     folderIconsByName,
     commitMessage,
     isAmend,
+    canAmend,
     onOpenMerge,
     isRefreshing,
     checkedPaths,
@@ -185,6 +187,7 @@ export function CommitTab({
                 <CommitArea
                     commitMessage={commitMessage}
                     isAmend={isAmend}
+                    canAmend={canAmend}
                     onOpenMerge={onOpenMerge}
                     onMessageChange={onMessageChange}
                     onAmendChange={onAmendChange}

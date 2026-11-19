@@ -61,6 +61,7 @@ export type InboundMessage =
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
           mergingRoots?: string[];
+          amendableRoots?: string[];
       }
     | { type: "amendMessage"; repoRoot: string; message: string }
     | { type: "lastCommitMessage"; message: string }
@@ -74,6 +75,7 @@ export type InboundMessage =
 export interface CommitPanelState {
     repositories: RepositoryContextInfo[];
     mergingRoots: string[];
+    amendableRoots: string[];
     files: WorkingFile[];
     stashes: StashEntry[];
     shelfFiles: WorkingFile[];
@@ -107,6 +109,7 @@ export type CommitPanelAction =
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
           mergingRoots?: string[];
+          amendableRoots?: string[];
       }
     | { type: "SET_AMEND_MESSAGE"; repoRoot: string; message: string; initial?: boolean }
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }

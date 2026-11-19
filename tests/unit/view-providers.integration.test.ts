@@ -301,6 +301,7 @@ function makeGitOpsMock() {
         getPushHead: vi.fn(async () => "abcdef123456\nrefs/heads/main"),
         commitAndPush: vi.fn(async () => "ok"),
         isMergeInProgress: vi.fn(async () => false),
+        canAmendHead: vi.fn(async () => true),
         getPendingCommitMessage: vi.fn(async () => ""),
         getLastCommitMessage: vi.fn(async () => "last message"),
         rollbackAll: vi.fn(async () => undefined),
@@ -1315,6 +1316,13 @@ describe("view providers integration", () => {
             await git(["init", "--bare", remote]);
             await git(["remote", "add", "origin", remote]);
             await git(["push", "-u", "origin", "HEAD"]);
+            const publishedHead = await git(["rev-parse", "HEAD"]);
+            const indexBefore = await git(["write-tree"]);
+            await webview.send({ type: "commitSelected", amend: true, message: "already published", paths: ["test2.go"], push: true });
+            expect(await git(["rev-parse", "HEAD"])).toBe(publishedHead);
+            expect(await git(["write-tree"])).toBe(indexBefore);
+            expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "update", amendableRoots: [] }));
+            await expect(ops.commit("already published", true, [])).rejects.toThrow("unpushed commit");
             await git(["remote", "set-url", "--push", "origin", join(root, ".git", "offline")]);
             showErrorMessage.mockImplementationOnce(async () => {
                 await git(["remote", "set-url", "--push", "origin", remote]);
