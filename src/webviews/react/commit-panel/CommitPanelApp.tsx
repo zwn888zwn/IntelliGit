@@ -64,38 +64,45 @@ function App(): React.ReactElement {
         }
     }, [isStashDialogOpen, repositories, state.repository?.root]);
 
+    const amendRoot = checkedTargets[0]?.repoRoot ?? state.repository?.root;
+    const commitMessage = state.isAmend && amendRoot
+        ? state.amendMessages[amendRoot] ?? "" : state.commitMessage;
+
+    useEffect(() => {
+        if (state.isAmend && amendRoot) {
+            vscode.postMessage({ type: "getLastCommitMessage", repoRoot: amendRoot });
+        }
+    }, [state.isAmend, amendRoot, vscode]);
+
     const handleMessageChange = useCallback(
         (message: string) => {
-            dispatch({ type: "SET_COMMIT_MESSAGE", message });
+            if (state.isAmend && amendRoot) {
+                dispatch({ type: "SET_AMEND_MESSAGE", repoRoot: amendRoot, message });
+            } else {
+                dispatch({ type: "SET_COMMIT_MESSAGE", message });
+            }
         },
-        [dispatch],
+        [dispatch, state.isAmend, amendRoot],
     );
 
     const handleAmendChange = useCallback(
         (isAmend: boolean) => {
             dispatch({ type: "SET_AMEND", isAmend });
-            if (isAmend) {
-                vscode.postMessage({ type: "getLastCommitMessage" });
-            }
         },
-        [dispatch, vscode],
+        [dispatch],
     );
 
     const stageCheckedAndCommit = useCallback(
         (push: boolean) => {
-            const msg = state.commitMessage.trim();
-            const targets = commitFiles
-                .filter((file) => checkedPaths.has(getCheckedFileKey(file)))
-                .map((file) => ({ repoRoot: file.repoRoot, path: file.path }));
             vscode.postMessage({
                 type: "commitSelected",
-                targets,
-                message: msg,
+                targets: checkedTargets,
+                message: commitMessage.trim(),
                 amend: state.isAmend,
                 push,
             });
         },
-        [vscode, state.commitMessage, state.isAmend, checkedPaths, commitFiles],
+        [vscode, commitMessage, state.isAmend, checkedTargets],
     );
 
     const handleCommit = useCallback(() => {
@@ -167,7 +174,7 @@ function App(): React.ReactElement {
                             repositories={repositories}
                             currentRepository={state.repository}
                             activeFile={state.activeFile}
-                            commitMessage={state.commitMessage}
+                            commitMessage={commitMessage}
                             isAmend={state.isAmend}
                             isRefreshing={state.isRefreshing}
                             checkedPaths={checkedPaths}

@@ -817,7 +817,7 @@ describe("GitOps", () => {
             await ops.stageFiles(["src/a.ts", "src/b.ts"]);
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["add", "--", "src/a.ts", "src/b.ts"]);
+            expect(call).toEqual(["--literal-pathspecs", "add", "--", "src/a.ts", "src/b.ts"]);
         });
 
         it("skips empty paths array", async () => {
@@ -872,6 +872,7 @@ describe("GitOps", () => {
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
             expect(call).toEqual([
+                "--literal-pathspecs",
                 "commit",
                 "-m",
                 "selected message",
@@ -1044,7 +1045,7 @@ describe("GitOps", () => {
             await ops.commitAndPush("msg", false, ["src/a.ts"]);
 
             const calls = (executor.run as ReturnType<typeof vi.fn>).mock.calls;
-            expect(calls[0][0]).toEqual(["commit", "-m", "msg", "--only", "--", "src/a.ts"]);
+            expect(calls[0][0]).toEqual(["--literal-pathspecs", "commit", "-m", "msg", "--only", "--", "src/a.ts"]);
             expect(calls[1][0]).toEqual(["push"]);
         });
     });

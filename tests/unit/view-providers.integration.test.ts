@@ -50,7 +50,7 @@ class FakeDisposable {
     }
 }
 
-const showErrorMessage = vi.fn(async () => undefined);
+const showErrorMessage = vi.fn(async (): Promise<string | undefined> => undefined);
 const showWarningMessage = vi.fn(async () => undefined);
 const showInformationMessage = vi.fn(async () => undefined);
 const showTextDocument = vi.fn(async () => undefined);
@@ -299,6 +299,8 @@ function makeGitOpsMock() {
         stageFiles: vi.fn(async () => undefined),
         unstageFiles: vi.fn(async () => undefined),
         commit: vi.fn(async () => "ok"),
+        push: vi.fn(async () => "ok"),
+        getPushHead: vi.fn(async () => "abcdef123456\nrefs/heads/main"),
         commitAndPush: vi.fn(async () => "ok"),
         getPendingCommitMessage: vi.fn(async () => ""),
         getLastCommitMessage: vi.fn(async () => "last message"),
@@ -1143,9 +1145,9 @@ describe("view providers integration", () => {
         });
         await webview.send({ type: "commitAndPush", message: "feat: push", amend: false });
         expect(gitOps.commit).toHaveBeenCalled();
-        expect(gitOps.commitAndPush).toHaveBeenCalled();
+        expect(gitOps.push).toHaveBeenCalledTimes(2);
         expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
-        expect(gitOps.commitAndPush).toHaveBeenCalledWith("feat: selected", false, ["src/a.ts"]);
+        expect(gitOps.commit).toHaveBeenCalledWith("feat: selected", false, ["src/a.ts"]);
         expect(withProgress).toHaveBeenCalled();
 
         await webview.send({ type: "getLastCommitMessage" });
@@ -1183,6 +1185,83 @@ describe("view providers integration", () => {
 
         expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
         expect(gitOps.commit).toHaveBeenCalledWith("feat: selected only", false, ["src/a.ts"]);
+        provider.dispose();
+    });
+
+    it("amends checked files, preserves the index and retries a rejected push against a local remote", async () => {
+        const fs = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const { GitExecutor } = await import("../../src/git/executor");
+        const { GitOps } = await import("../../src/git/operations");
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const root = await fs.mkdtemp(join(tmpdir(), "intelligit-amend-"));
+        const executor = new GitExecutor(root);
+        const git = (args: string[]) => executor.run(args);
+        const ops = new GitOps(executor, undefined, { repoRoot: root });
+        const uri = { fsPath: root, path: root };
+        const provider = new CommitPanelViewProvider(uri as never, ops, () => uri as never);
+        try {
+            await git(["init", "-q"]);
+            await git(["config", "user.name", "Test"]);
+            await git(["config", "user.email", "test@example.org"]);
+            await git(["config", "core.hooksPath", join(root, ".git", "empty-hooks")]);
+            await git(["config", "commit.gpgSign", "false"]);
+            await fs.writeFile(join(root, "a"), "initial");
+            await fs.writeFile(join(root, "old"), "renamed");
+            await fs.writeFile(join(root, "removed"), "deleted");
+            await git(["add", "."]);
+            await git(["commit", "-qm", "original"]);
+            await git(["mv", "old", "new"]);
+            await git(["rm", "removed"]);
+            await fs.writeFile(join(root, "a"), "unrelated");
+            await git(["add", "a"]);
+            await fs.writeFile(join(root, "test[2].go"), "package test");
+            await fs.writeFile(join(root, "test2.go"), "leave untracked");
+            provider.setRepositoryContext({ ...testRepository, root });
+            const webview = createWebviewView();
+            provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+            await webview.send({ type: "ready" });
+            await webview.send({ type: "commitSelected", amend: true, message: "", paths: ["test[2].go", "new", "removed"] });
+            expect((await git(["ls-tree", "--name-only", "HEAD"])).trim().split("\n")).toEqual(["a", "new", "test[2].go"]);
+            expect(await git(["show", "HEAD:a"])).toBe("initial");
+            expect((await git(["log", "-1", "--format=%s"])).trim()).toBe("original");
+            await webview.send({ type: "commitSelected", amend: true, message: "corrected", paths: [] });
+            expect((await git(["log", "-1", "--format=%s"])).trim()).toBe("corrected");
+            expect((await git(["diff", "--cached", "--name-only"])).trim()).toBe("a");
+            expect((await git(["rev-list", "--count", "HEAD"])).trim()).toBe("1");
+
+            const remote = join(root, ".git", "test-remote.git");
+            await git(["init", "--bare", remote]);
+            await git(["remote", "add", "origin", remote]);
+            await git(["push", "-u", "origin", "HEAD"]);
+            await git(["remote", "set-url", "--push", "origin", join(root, ".git", "offline")]);
+            showErrorMessage.mockImplementationOnce(async () => {
+                await git(["remote", "set-url", "--push", "origin", remote]);
+                return "Retry Push";
+            });
+            await webview.send({ type: "commitSelected", paths: ["test2.go"], message: "second", push: true });
+            await vi.waitFor(() => expect(showInformationMessage).toHaveBeenCalledWith("Pushed repo successfully."));
+            expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Committed locally"), "Retry Push");
+            expect(await git(["rev-parse", "@{u}"])).toEqual(await git(["rev-parse", "HEAD"]));
+            expect((await git(["rev-list", "--count", "HEAD"])).trim()).toBe("2");
+            expect((await git(["diff", "--cached", "--name-only"])).trim()).toBe("a");
+        } finally {
+            provider.dispose();
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
+    it.each([false, true])("reports a successful commit after push rejection and checks HEAD before retry (switched=%s)", async switched => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        gitOps.push.mockRejectedValueOnce(new Error("non-fast-forward"));
+        if (switched) gitOps.getPushHead.mockResolvedValueOnce("abcdef123456\nrefs/heads/other");
+        showErrorMessage.mockResolvedValueOnce("Retry Push");
+        await webview.send({ type: "commitSelected", paths: ["new.go"], message: "test", push: true });
+        expect(showErrorMessage).toHaveBeenCalledWith(expect.stringMatching(/Committed locally.*abcdef12.*non-fast-forward/), "Retry Push");
+        expect(gitOps.commit).toHaveBeenCalledTimes(1);
+        expect(gitOps.push).toHaveBeenCalledTimes(switched ? 1 : 2);
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "committed" });
         provider.dispose();
     });
 

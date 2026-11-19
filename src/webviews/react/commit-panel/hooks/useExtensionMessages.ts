@@ -20,6 +20,7 @@ const initialState: CommitPanelState = {
     commitMessage: "",
     suggestedCommitMessage: "",
     isAmend: false,
+    amendMessages: {},
     isRefreshing: false,
     error: null,
 };
@@ -52,10 +53,13 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
         }
         case "SET_REFRESHING":
             return { ...state, isRefreshing: action.active };
+        case "SET_AMEND_MESSAGE":
+            if (!state.isAmend || (action.initial && state.amendMessages[action.repoRoot] !== undefined)) return state;
+            return { ...state, amendMessages: { ...state.amendMessages, [action.repoRoot]: action.message } };
         case "SET_LAST_COMMIT_MESSAGE":
             return { ...state, commitMessage: action.message };
         case "COMMITTED":
-            return { ...state, commitMessage: "", isAmend: false };
+            return { ...state, commitMessage: "", isAmend: false, amendMessages: {} };
         case "SET_REPOSITORY_CONTEXT":
             return { ...state, repository: action.repository };
         case "SET_ACTIVE_FILE":
@@ -65,7 +69,7 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
         case "SET_COMMIT_MESSAGE":
             return { ...state, commitMessage: action.message };
         case "SET_AMEND":
-            return { ...state, isAmend: action.isAmend };
+            return { ...state, isAmend: action.isAmend, amendMessages: {} };
     }
 }
 
@@ -92,6 +96,9 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                         iconFonts: msg.iconFonts,
                         suggestedCommitMessage: msg.suggestedCommitMessage,
                     });
+                    break;
+                case "amendMessage":
+                    dispatch({ type: "SET_AMEND_MESSAGE", repoRoot: msg.repoRoot, message: msg.message, initial: true });
                     break;
                 case "lastCommitMessage":
                     dispatch({ type: "SET_LAST_COMMIT_MESSAGE", message: msg.message });

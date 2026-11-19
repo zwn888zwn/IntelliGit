@@ -112,6 +112,7 @@ export interface CommitDetail {
 }
 
 export interface WorkingFile {
+    renamedFrom?: string;
     repoId: string;
     repoRoot: string;
     path: string;

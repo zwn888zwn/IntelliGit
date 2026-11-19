@@ -52,6 +52,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private shelfFiles: WorkingFile[] = [];
     private folderIconsByName: ThemeFolderIconMap = {};
     private lastFileCount = 0;
+    private committing = false;
     private activeFile: RepoPathRef | null = null;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
@@ -533,6 +534,114 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private async commitCheckedFiles(repository: RepositoryEntry, paths: string[], message: string, amend: boolean): Promise<void> {
+        const selected = new Set(paths);
+        const commitPaths = new Set(paths);
+        const toStage = new Set(paths);
+        for (const file of this.files) {
+            if (file.repoRoot !== repository.root || !selected.has(file.path)) continue;
+            if (file.renamedFrom) commitPaths.add(file.renamedFrom);
+            // A staged deletion is already absent from the index. If the user
+            // recreated it, the unstaged row below will add its new contents.
+            if (file.staged && file.status === "D") toStage.delete(file.path);
+            if (!file.staged) toStage.add(file.path);
+        }
+        if (toStage.size) await repository.gitOps.stageFiles([...toStage]);
+        await repository.gitOps.commit(message, amend, [...commitPaths]);
+    }
+
+    private async commitFromPanel(msg: { type: string; [key: string]: unknown }): Promise<void> {
+        const message = typeof msg.message === "string" ? msg.message.trim() : "";
+        const amend = msg.amend === true;
+        const push = msg.type === "commitAndPush" || msg.push === true;
+        const selected = msg.type === "commitSelected";
+        const targets = selected ? this.getMessageTargets(msg) : [];
+        if (!message && !amend) {
+            void vscode.window.showWarningMessage("Enter a commit message.");
+            return;
+        }
+        if (selected && !amend && !targets.length) {
+            void vscode.window.showWarningMessage("Select files to commit.");
+            return;
+        }
+        const grouped = this.groupTargetsByRepository(targets);
+        if (amend && grouped.size > 1) {
+            void vscode.window.showWarningMessage("Amend one repository at a time. Select files from a single repository.");
+            return;
+        }
+        if (!grouped.size) grouped.set(this.getRepositoryRoot().fsPath, []);
+        if (this.hasPartiallyStagedTarget(targets)) {
+            const answer = await vscode.window.showWarningMessage(
+                "该文件还有未暂存的新修改，继续提交会将最新工作区版本一并暂存和提交。",
+                { modal: true }, "继续提交",
+            );
+            if (answer !== "继续提交") return;
+        }
+
+        const commitErrors: string[] = [];
+        const completed: string[] = [];
+        const pushed: { name: string; output: string }[] = [];
+        await runWithNotificationProgress(push ? "Committing and pushing..." : "Committing...", async () => {
+            for (const [root, paths] of grouped) {
+                const repository = this.getRepositoryEntry(root);
+                const name = repository.info.relativePath ?? repository.info.name;
+                const git = repository.gitOps;
+                try {
+                    if (selected) {
+                        await this.commitCheckedFiles(repository, paths, message, amend);
+                    } else {
+                        await git.commit(message, amend);
+                    }
+                    completed.push(name);
+                } catch (error) {
+                    commitErrors.push(`${name}: ${getErrorMessage(error)}`);
+                    continue;
+                }
+                if (push) {
+                    const head = await git.getPushHead().catch(() => "");
+                    try {
+                        pushed.push({ name, output: await git.push() });
+                    } catch (error) {
+                        void this.reportPushFailure(repository, head, error);
+                    }
+                }
+            }
+        });
+        if (!commitErrors.length) this.postCommitCompleted(message);
+        await this.refreshData();
+        if (pushed.length) {
+            void showPushSuccessWithRequestLink(
+                `Committed and pushed: ${pushed.map(item => item.name).join(", ")}`,
+                pushed.map(item => item.output).join("\n"),
+            );
+        }
+        if (commitErrors.length) {
+            throw new Error(`Committed ${completed.length} repos.\n${commitErrors.join("\n")}`);
+        }
+        if (!push) {
+            void vscode.window.showInformationMessage(`Committed successfully: ${completed.join(", ")}`);
+        }
+    }
+
+    private async reportPushFailure(repository: RepositoryEntry, head: string, error: unknown): Promise<void> {
+        const name = repository.info.name;
+        const hash = head.split("\n")[0].slice(0, 8);
+        const message = `${name}: Committed locally${hash ? " (" + hash + ")" : ""}. Push failed: ${getErrorMessage(error)}`;
+        const retry = "Retry Push";
+        const action = await vscode.window.showErrorMessage(message, ...(head ? [retry] : []));
+        if (action !== retry) return;
+        try {
+            if (await repository.gitOps.getPushHead() !== head) {
+                void vscode.window.showWarningMessage(`${name}: The branch or commit has changed. Push from the branch you want to publish.`);
+                return;
+            }
+            const output = await runWithNotificationProgress("Pushing...", () => repository.gitOps.push());
+            void showPushSuccessWithRequestLink(`Pushed ${name} successfully.`, output);
+        } catch (retryError) {
+            void vscode.window.showErrorMessage(`${name}: Push failed: ${getErrorMessage(retryError)}`);
+        }
+    }
+
     private getMessageTargets(
         msg: { [key: string]: unknown },
         field: string = "targets",
@@ -596,135 +705,28 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 break;
             }
 
-            case "commitSelected": {
-                const message = (typeof msg.message === "string" ? msg.message : "").trim();
-                const amend = msg.amend === true;
-                const push = msg.push === true;
-                const targets = this.getMessageTargets(msg);
-                if (!message && !amend) {
-                    vscode.window.showWarningMessage("Enter a commit message.");
-                    return;
-                }
-                if (targets.length === 0 && !amend) {
-                    vscode.window.showWarningMessage("Select files to commit.");
-                    return;
-                }
-                if (!amend && this.hasPartiallyStagedTarget(targets)) {
-                    const choice = await vscode.window.showWarningMessage(
-                        "该文件还有未暂存的新修改，继续提交会将最新工作区版本一并暂存和提交。",
-                        { modal: true },
-                        "继续提交",
-                    );
-                    if (choice !== "继续提交") return;
-                }
-                if (amend || targets.length === 0) {
-                    let pushOutput = "";
-                    await runWithNotificationProgress(
-                        push ? "Committing and pushing..." : "Committing...",
-                        async () => {
-                            if (push) {
-                                pushOutput = await this.gitOps.commitAndPush(message, amend);
-                            } else {
-                                await this.gitOps.commit(message, amend);
-                            }
-                        },
-                    );
-                    if (push) {
-                        await showPushSuccessWithRequestLink(
-                            "Committed and pushed successfully.",
-                            pushOutput,
-                        );
-                    } else {
-                        vscode.window.showInformationMessage("Committed successfully.");
-                    }
-                } else {
-                    const grouped = this.groupTargetsByRepository(targets);
-                    const successes: string[] = [];
-                    const failures: string[] = [];
-                    const pushOutputs: string[] = [];
-                    await runWithNotificationProgress(
-                        push ? "Committing and pushing..." : "Committing...",
-                        async () => {
-                            for (const [repoRoot, paths] of grouped) {
-                                const repository = this.getRepositoryEntry(repoRoot);
-                                try {
-                                    await repository.gitOps.stageFiles(paths);
-                                    if (push) {
-                                        const pushOutput = await repository.gitOps.commitAndPush(
-                                            message,
-                                            false,
-                                            paths,
-                                        );
-                                        pushOutputs.push(pushOutput);
-                                    } else {
-                                        await repository.gitOps.commit(message, false, paths);
-                                    }
-                                    successes.push(repository.info.relativePath ?? repository.info.name);
-                                } catch (error) {
-                                    failures.push(
-                                        `${repository.info.relativePath ?? repository.info.name}: ${getErrorMessage(error)}`,
-                                    );
-                                }
-                            }
-                        },
-                    );
-                    if (failures.length > 0) {
-                        throw new Error(
-                            `Committed ${successes.length} repos.\n${failures.join("\n")}`,
-                        );
-                    }
-                    const successVerb = push ? "Committed and pushed" : "Committed";
-                    const successMessage = `${successVerb} ${successes.length} repos: ${successes.join(", ")}`;
-                    if (push) {
-                        await showPushSuccessWithRequestLink(successMessage, pushOutputs.join("\n"));
-                    } else {
-                        vscode.window.showInformationMessage(successMessage);
-                    }
-                }
-                this.postCommitCompleted(message);
-                await this.refreshData();
-                break;
-            }
-
-            case "commit": {
-                const message = (typeof msg.message === "string" ? msg.message : "").trim();
-                const amend = msg.amend === true;
-                if (!message && !amend) {
-                    vscode.window.showWarningMessage("Enter a commit message.");
-                    return;
-                }
-                await runWithNotificationProgress("Committing...", async () => {
-                    await this.gitOps.commit(message, amend);
-                });
-                vscode.window.showInformationMessage("Committed successfully.");
-                this.postCommitCompleted(message);
-                await this.refreshData();
-                break;
-            }
-
+            case "commitSelected":
+            case "commit":
             case "commitAndPush": {
-                const message = (typeof msg.message === "string" ? msg.message : "").trim();
-                const amend = msg.amend === true;
-                if (!message && !amend) {
-                    vscode.window.showWarningMessage("Enter a commit message.");
-                    return;
+                if (this.committing) return;
+                this.committing = true;
+                try {
+                    await this.commitFromPanel(msg);
+                } finally {
+                    this.committing = false;
                 }
-                let pushOutput = "";
-                await runWithNotificationProgress("Committing and pushing...", async () => {
-                    pushOutput = await this.gitOps.commitAndPush(message, amend);
-                });
-                await showPushSuccessWithRequestLink(
-                    "Committed and pushed successfully.",
-                    pushOutput,
-                );
-                this.postCommitCompleted(message);
-                await this.refreshData();
                 break;
             }
 
             case "getLastCommitMessage": {
-                const lastMsg = await this.gitOps.getLastCommitMessage();
-                this.postToWebview({ type: "lastCommitMessage", message: lastMsg });
+                const root = msg.repoRoot;
+                if (typeof root === "string") {
+                    const message = await this.getRepositoryEntry(root).gitOps.getLastCommitMessage();
+                    this.postToWebview({ type: "amendMessage", repoRoot: root, message });
+                } else {
+                    const message = await this.gitOps.getLastCommitMessage();
+                    this.postToWebview({ type: "lastCommitMessage", message });
+                }
                 break;
             }
 

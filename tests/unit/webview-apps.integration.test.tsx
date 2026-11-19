@@ -237,12 +237,17 @@ describe("CommitPanelApp integration", () => {
         expect(vscode.postMessage).toHaveBeenCalledWith({ type: "ready" });
 
         act(() => {
+            window.dispatchEvent(new MessageEvent("message", {
+                data: { type: "setRepositoryContext", repository: { root: "/repo", name: "repo" } },
+            }));
             window.dispatchEvent(
                 new MessageEvent("message", {
                     data: {
                         type: "update",
+                        repositories: [{ root: "/repo", name: "repo" }],
                         files: [
                             {
+                                repoRoot: "/repo",
                                 path: "src/webviews/react/CommitPanelApp.tsx",
                                 status: "M",
                                 staged: false,
@@ -250,6 +255,7 @@ describe("CommitPanelApp integration", () => {
                                 deletions: 1,
                             },
                             {
+                                repoRoot: "/repo",
                                 path: "package.json",
                                 status: "?",
                                 staged: false,
@@ -267,6 +273,7 @@ describe("CommitPanelApp integration", () => {
                         ],
                         shelfFiles: [
                             {
+                                repoRoot: "/repo",
                                 path: "src/webviews/react/CommitPanelApp.tsx",
                                 status: "M",
                                 staged: false,
@@ -288,12 +295,12 @@ describe("CommitPanelApp integration", () => {
         fireClick(document.querySelector('button[aria-label="Expand All"]'));
         fireClick(document.querySelector('button[aria-label="Collapse All"]'));
 
-        const checkboxes = Array.from(
-            document.querySelectorAll('input[type="checkbox"]'),
-        ) as HTMLInputElement[];
-        if (checkboxes.length > 0) {
-            fireClick(checkboxes[0]);
-        }
+        fireClick(document.querySelector('button[aria-label="Expand All"]'));
+        await flush();
+        const fileCheckbox = document.querySelector('[title="package.json"]')
+            ?.parentElement?.querySelector('input[type="checkbox"]');
+        expect(fileCheckbox).toBeTruthy();
+        fireClick(fileCheckbox!);
 
         const textarea = document.querySelector(
             'textarea[placeholder="Commit Message"]',
@@ -310,7 +317,7 @@ describe("CommitPanelApp integration", () => {
         act(() => {
             window.dispatchEvent(
                 new MessageEvent("message", {
-                    data: { type: "lastCommitMessage", message: "last commit body" },
+                    data: { type: "amendMessage", repoRoot: "/repo", message: "last commit body" },
                 }),
             );
         });
@@ -318,6 +325,12 @@ describe("CommitPanelApp integration", () => {
         expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toContain(
             "last commit body",
         );
+
+        fireClick(Array.from(document.querySelectorAll("button")).find(b => b.textContent?.trim() === "Commit and Push...")!);
+        expect(vscode.postMessage).toHaveBeenCalledWith({
+            type: "commitSelected", amend: true, message: "last commit body", push: true,
+            targets: [{ repoRoot: "/repo", path: "package.json" }],
+        });
 
         act(() => {
             window.dispatchEvent(new MessageEvent("message", { data: { type: "committed" } }));
@@ -349,7 +362,7 @@ describe("CommitPanelApp integration", () => {
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "refresh" }),
         );
-        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "getLastCommitMessage" });
+        expect(vscode.postMessage).toHaveBeenCalledWith({ type: "getLastCommitMessage", repoRoot: "/repo" });
         expect(vscode.postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "shelfApply", index: 0 }),
         );

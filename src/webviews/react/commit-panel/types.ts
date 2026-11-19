@@ -24,7 +24,7 @@ export type OutboundMessage =
     | { type: "commitSelected"; targets: RepoPathRef[]; message: string; amend: boolean; push: boolean }
     | { type: "commit"; message: string; amend: boolean }
     | { type: "commitAndPush"; message: string; amend: boolean }
-    | { type: "getLastCommitMessage" }
+    | { type: "getLastCommitMessage"; repoRoot?: string }
     | { type: "rollback"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
     | { type: "showStageDiff"; target: RepoPathRef; staged: boolean }
@@ -63,6 +63,7 @@ export type InboundMessage =
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
       }
+    | { type: "amendMessage"; repoRoot: string; message: string }
     | { type: "lastCommitMessage"; message: string }
     | { type: "committed" }
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
@@ -85,6 +86,7 @@ export interface CommitPanelState {
     activeFile: RepoPathRef | null;
     commitMessage: string;
     suggestedCommitMessage: string;
+    amendMessages: Record<string, string>;
     isAmend: boolean;
     isRefreshing: boolean;
     error: string | null;
@@ -105,6 +107,7 @@ export type CommitPanelAction =
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
       }
+    | { type: "SET_AMEND_MESSAGE"; repoRoot: string; message: string; initial?: boolean }
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }
     | { type: "COMMITTED" }
     | { type: "SET_REPOSITORY_CONTEXT"; repository: RepositoryContextInfo | null }

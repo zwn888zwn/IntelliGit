@@ -270,7 +270,6 @@ describe("app logic coverage", () => {
             message: "next message",
         });
         expect(dispatch).toHaveBeenCalledWith({ type: "SET_AMEND", isAmend: true });
-        expect(postMessage).toHaveBeenCalledWith({ type: "getLastCommitMessage" });
         expect(postMessage).toHaveBeenCalledWith(
             expect.objectContaining({ type: "commitSelected", push: false }),
         );

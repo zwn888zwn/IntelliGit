@@ -489,9 +489,11 @@ export class GitOps {
 
             const isRenameOrCopy =
                 index === "R" || index === "C" || worktree === "R" || worktree === "C";
+            let renamedFrom: string | undefined;
             if (isRenameOrCopy && i + 1 < entries.length) {
                 // In porcelain -z output, rename/copy emits an extra NUL-terminated source path.
-                i += 1;
+                const source = entries[++i];
+                if (index === "R" || worktree === "R") renamedFrom = normalizeGitOutputPath(source);
             }
 
             if (hasStaged && hasUnstaged) {
@@ -500,6 +502,7 @@ export class GitOps {
                         repoId: this.repoMetadata?.repoId ?? ".",
                         repoRoot: this.repoMetadata?.repoRoot ?? "",
                         path,
+                        ...(renamedFrom ? { renamedFrom } : {}),
                         status: stagedStatus,
                         staged: true,
                         additions: 0,
@@ -515,6 +518,7 @@ export class GitOps {
                         repoId: this.repoMetadata?.repoId ?? ".",
                         repoRoot: this.repoMetadata?.repoRoot ?? "",
                         path,
+                        ...(renamedFrom ? { renamedFrom } : {}),
                         status: unstagedStatus,
                         staged: false,
                         additions: 0,
@@ -526,6 +530,7 @@ export class GitOps {
                     repoId: this.repoMetadata?.repoId ?? ".",
                     repoRoot: this.repoMetadata?.repoRoot ?? "",
                     path,
+                    ...(renamedFrom ? { renamedFrom } : {}),
                     status: stagedStatus,
                     staged: true,
                     additions: 0,
@@ -536,6 +541,7 @@ export class GitOps {
                     repoId: this.repoMetadata?.repoId ?? ".",
                     repoRoot: this.repoMetadata?.repoRoot ?? "",
                     path,
+                    ...(renamedFrom ? { renamedFrom } : {}),
                     status: unstagedStatus,
                     staged: false,
                     additions: 0,
@@ -809,7 +815,7 @@ export class GitOps {
 
     async stageFiles(paths: string[]): Promise<void> {
         if (paths.length === 0) return;
-        await this.executor.run(["add", "--", ...paths]);
+        await this.executor.run(["--literal-pathspecs", "add", "--", ...paths]);
     }
 
     async unstageFiles(paths: string[]): Promise<void> {
@@ -818,9 +824,12 @@ export class GitOps {
     }
 
     async commit(message: string, amend: boolean = false, paths?: string[]): Promise<string> {
-        const args = ["commit", "-m", message];
+        const args = amend && !message ? ["commit", "--no-edit"] : ["commit", "-m", message];
         if (amend) args.push("--amend");
-        if (paths && paths.length > 0 && !(await this.isMergeInProgress())) {
+        if (amend && paths?.length === 0) {
+            args.push("--only"); // Message-only amend preserves the index.
+        } else if (paths && paths.length > 0 && (amend || !(await this.isMergeInProgress()))) {
+            args.unshift("--literal-pathspecs");
             args.push("--only", "--", ...paths);
         }
         return this.executor.run(args);
@@ -925,6 +934,11 @@ export class GitOps {
             confirmLabel,
         );
         return selection === confirmLabel;
+    }
+
+    async getPushHead(): Promise<string> {
+        // Include the branch: another branch may point at the same commit.
+        return (await this.executor.run(["rev-parse", "HEAD", "--symbolic-full-name", "HEAD"])).trim();
     }
 
     async getLastCommitMessage(): Promise<string> {
