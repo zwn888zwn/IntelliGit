@@ -533,6 +533,12 @@ export async function handleCommitContextAction(params: {
             return;
         }
         case "dropCommit": {
+            const branch = (await executor.run(["branch", "--show-current"])).trim();
+            if (!branch) {
+                vscode.window.showErrorMessage("Check out a local branch before dropping a commit.");
+                return;
+            }
+            const head = (await executor.run(["rev-parse", "HEAD"])).trim();
             if (!(await isCommitUnpushed(validatedHash, gitOps))) {
                 vscode.window.showErrorMessage(
                     "Drop Commit is available only for unpushed commits.",
@@ -544,7 +550,7 @@ export async function handleCommitContextAction(params: {
                 return;
             }
             try {
-                await executor.run(["merge-base", "--is-ancestor", validatedHash, "HEAD"]);
+                await executor.runWithStderr(["merge-base", "--is-ancestor", validatedHash, head]);
             } catch {
                 vscode.window.showErrorMessage(
                     `Commit ${short} is not in the current branch history.`,
@@ -557,25 +563,23 @@ export async function handleCommitContextAction(params: {
                 return;
             }
             const confirm = await vscode.window.showWarningMessage(
-                `Drop commit ${short} from current branch history?`,
+                `Drop commit ${short} from ${branch}?`,
                 { modal: true },
                 "Drop",
             );
             if (confirm !== "Drop") return;
             try {
-                await executor.run([
-                    "rebase",
-                    "--onto",
-                    `${validatedHash}^`,
-                    validatedHash,
-                    "HEAD",
-                ]);
+                if ((await executor.run(["branch", "--show-current"])).trim() !== branch ||
+                    (await executor.run(["rev-parse", "HEAD"])).trim() !== head) {
+                    throw new Error("The branch or commit changed. Select the commit again.");
+                }
+                if (!(await isCommitUnpushed(validatedHash, gitOps))) throw new Error("This commit has already been pushed.");
+                // Omitting the branch argument keeps the rebase attached to the current branch.
+                await executor.runWithStderr(["rebase", "--onto", `${validatedHash}^`, validatedHash]);
                 vscode.window.showInformationMessage(`Dropped ${short} from history.`);
             } catch (err) {
-                const message = getErrorMessage(err);
-                vscode.window.showErrorMessage(
-                    `Failed to drop commit: ${message}. Run 'git rebase --abort' to recover.`,
-                );
+                const recovery = await gitOps.isRebaseInProgress() ? " Run 'git rebase --abort' to recover." : "";
+                vscode.window.showErrorMessage(`Failed to drop commit: ${getErrorMessage(err)}${recovery}`);
             }
             await refreshAll();
             return;

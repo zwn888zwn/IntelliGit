@@ -33,12 +33,30 @@ export interface BranchCommandDeps {
         targetBranch?: string;
     }) => Promise<void>;
     refreshConflictUi: () => Promise<void>;
-    finalizeMergeIfReady: () => Promise<boolean>;
+    finalizeMergeIfReady: (repository: RepositoryEntry) => Promise<boolean>;
 }
 
 export interface BranchCommandEntry {
     id: string;
     handler: (item: { branch?: Branch }) => Promise<void>;
+}
+
+/** Returns false when the merge must be finished in the conflicts panel. */
+export async function mergeBranchIntoCurrent(
+    repository: RepositoryEntry,
+    sourceBranch: string,
+    targetBranch: string | undefined,
+    openConflictSession: BranchCommandDeps["openConflictSession"],
+): Promise<boolean> {
+    try {
+        // Git can write conflicts entirely to stdout and still exit with status 1.
+        await repository.executor.runWithStderr(["merge", sourceBranch]);
+        if (!(await repository.gitOps.isMergeInProgress())) return true;
+    } catch (error) {
+        if (!(await repository.gitOps.getConflictFilesDetailed()).length) throw error;
+    }
+    await openConflictSession({ repository, sourceBranch, targetBranch });
+    return false;
 }
 
 export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntry[] {
@@ -52,14 +70,14 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
         finalizeMergeIfReady,
     } = deps;
 
-    const continueExistingMergeIfNeeded = async (sourceBranch?: string): Promise<boolean> => {
+    const continueExistingMergeIfNeeded = async (repository: RepositoryEntry, sourceBranch: string, targetBranch?: string): Promise<boolean> => {
+        const { gitOps } = repository;
         if (!(await gitOps.isMergeInProgress())) return false;
 
         const conflicts = await gitOps.getConflictFilesDetailed();
         if (conflicts.length > 0) {
             await openConflictSession({
-                sourceBranch,
-                targetBranch: getCurrentBranchName() || undefined,
+                repository, sourceBranch, targetBranch,
             });
             await refreshConflictUi();
             vscode.window.showWarningMessage(
@@ -68,7 +86,7 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
             return true;
         }
 
-        if (await finalizeMergeIfReady()) return true;
+        if (await finalizeMergeIfReady(repository)) return true;
 
         await refreshConflictUi();
         vscode.window.showWarningMessage(
@@ -177,40 +195,22 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 const name = item.branch?.name;
                 if (!name) return;
                 try {
-                    if (await continueExistingMergeIfNeeded(name)) return;
-                } catch (err) {
-                    const msg = getErrorMessage(err);
-                    vscode.window.showErrorMessage(`Merge failed: ${msg}`);
-                    return;
-                }
-                const confirm = await vscode.window.showWarningMessage(
-                    `Merge ${name} into current branch?`,
-                    { modal: true },
-                    "Merge",
-                );
-                if (confirm !== "Merge") return;
-                try {
-                    await executor.run(["merge", name]);
+                    const repository = deps.requireCurrentRepository();
+                    const currentBranch = async () => (await repository.executor.run(["branch", "--show-current"])).trim();
+                    const target = await currentBranch();
+                    if (await continueExistingMergeIfNeeded(repository, name, target || undefined)) return;
+                    const confirm = await vscode.window.showWarningMessage(
+                        `Merge ${name} into ${target || "HEAD"}?`, { modal: true }, "Merge",
+                    );
+                    if (confirm !== "Merge") return;
+                    if (await currentBranch() !== target) throw new Error("The checked-out branch changed. Run Merge again.");
+                    if (!await mergeBranchIntoCurrent(repository, name, target || undefined, openConflictSession)) {
+                        await refreshConflictUi();
+                        return;
+                    }
                     vscode.window.showInformationMessage(`Merged ${name}`);
                     await vscode.commands.executeCommand("intelligit.refresh");
                 } catch (err) {
-                    try {
-                        if (await continueExistingMergeIfNeeded(name)) return;
-                        const conflicts = await gitOps.getConflictFilesDetailed();
-                        if (conflicts.length > 0) {
-                            await openConflictSession({
-                                sourceBranch: name,
-                                targetBranch: getCurrentBranchName() || undefined,
-                            });
-                            await refreshConflictUi();
-                            vscode.window.showWarningMessage(
-                                `Merge produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
-                            );
-                            return;
-                        }
-                    } catch {
-                        // Fall back to merge error if conflict inspection/session launch fails.
-                    }
                     const msg = getErrorMessage(err);
                     vscode.window.showErrorMessage(`Merge failed: ${msg}`);
                 }

@@ -18,7 +18,7 @@ import type { Branch, CommitDetail, GitWorktree, ProjectComparisonTarget } from 
 import { getErrorMessage } from "./utils/errors";
 import { assertRepoRelativePath, deleteFileWithFallback } from "./utils/fileOps";
 import { handleCommitContextAction } from "./commands/commitCommands";
-import { createBranchCommands } from "./commands/branchCommands";
+import { createBranchCommands, mergeBranchIntoCurrent } from "./commands/branchCommands";
 import { BranchStatusBarController } from "./commands/branchPopup";
 import { registerProjectSwitcher } from "./commands/projectPopup";
 import { RefreshService } from "./services/refreshService";
@@ -895,7 +895,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const hash = payload.hash;
             const repoRoot = "repoRoot" in payload ? payload.repoRoot : requireCurrentRepository().root;
             try {
-                if ((action === "squashCommits" || action === "editCommitMessage") && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
+                if ((action === "squashCommits" || action === "editCommitMessage" || action === "dropCommit") && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
                     throw new Error("The selected repository is no longer available.");
                 }
                 const repository =
@@ -1407,13 +1407,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                       : "Checked out and rebased";
         try {
             const pushOutputs: string[] = [];
-            await runWithNotificationProgress(
+            const completed = await runWithNotificationProgress(
                 `${actionLabel} ${branchName} in all repositories...`,
                 async () => {
                     for (const target of targets) {
                         switch (action) {
                             case "mergeIntoCurrent":
-                                await target.repository.executor.run(["merge", target.branch.name]);
+                                if (!await mergeBranchIntoCurrent(target.repository, target.branch.name, target.currentBranchName, openConflictSession)) {
+                                    await refreshService.refreshConflictUi();
+                                    return false;
+                                }
                                 break;
                             case "rebaseCurrentOnto":
                                 await target.repository.executor.run(["rebase", target.branch.name]);
@@ -1497,8 +1500,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                             }
                         }
                     }
+                    return true;
                 },
             );
+            if (!completed) return;
             const successMessage = `${successVerb} ${branchName} in ${targets.length} repositories.`;
             if (action === "pushBranch") {
                 await showPushSuccessWithRequestLink(successMessage, pushOutputs.join("\n"));
