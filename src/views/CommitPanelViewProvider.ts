@@ -559,18 +559,22 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
     private async commitCheckedFiles(repository: RepositoryEntry, paths: string[], message: string, amend: boolean): Promise<void> {
         const selected = new Set(paths);
-        const commitPaths = new Set(paths);
+        const renameSources = new Set<string>();
         const toStage = new Set(paths);
         for (const file of this.files) {
             if (file.repoRoot !== repository.root || !selected.has(file.path)) continue;
-            if (file.renamedFrom) commitPaths.add(file.renamedFrom);
+            if (file.renamedFrom && !selected.has(file.renamedFrom)) renameSources.add(file.renamedFrom);
             // A staged deletion is already absent from the index. If the user
             // recreated it, the unstaged row below will add its new contents.
             if (file.staged && file.status === "D") toStage.delete(file.path);
             if (!file.staged) toStage.add(file.path);
         }
         if (toStage.size) await repository.gitOps.stageFiles([...toStage]);
-        await repository.gitOps.commit(message, amend, [...commitPaths]);
+        if (renameSources.size) {
+            await repository.gitOps.commitWithRenameSources(message, amend, paths, [...renameSources]);
+        } else {
+            await repository.gitOps.commit(message, amend, paths);
+        }
     }
 
     private async commitFromPanel(msg: { type: string; [key: string]: unknown }): Promise<void> {

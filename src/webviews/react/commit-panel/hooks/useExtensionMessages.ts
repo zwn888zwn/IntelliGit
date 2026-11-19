@@ -78,7 +78,18 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
 }
 
 export function useExtensionMessages(): [CommitPanelState, React.Dispatch<CommitPanelAction>] {
-    const [state, dispatch] = useReducer(reducer, initialState);
+    const [state, dispatch] = useReducer(reducer, initialState, initial => {
+        const draft = getVsCodeApi().getState()?.commitDraft;
+        return { ...initial, commitMessage: typeof draft === "string" ? draft : "" };
+    });
+
+    useEffect(() => {
+        const vscode = getVsCodeApi();
+        const saved = vscode.getState() ?? {};
+        // The host supplies automatic merge messages again on refresh.
+        const draft = state.commitMessage === state.suggestedCommitMessage ? "" : state.commitMessage;
+        if ((saved.commitDraft ?? "") !== draft) vscode.setState({ ...saved, commitDraft: draft });
+    }, [state.commitMessage, state.suggestedCommitMessage]);
 
     useEffect(() => {
         const vscode = getVsCodeApi();

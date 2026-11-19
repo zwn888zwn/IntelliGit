@@ -203,6 +203,47 @@ describe("CommitPanelApp integration", () => {
         expect(checkbox.checked).toBe(false);
     });
 
+    it("restores the commit draft and prunes selections only after repository status arrives", async () => {
+        const repo = { root: "/repo", name: "repo" };
+        const keys = ["one.go", "removed.go"].map(path => repo.root + "\0" + path);
+        let saved: Record<string, unknown> = { checked: keys, groupByDir: false };
+        const send = (data: unknown) => act(() => window.dispatchEvent(new MessageEvent("message", { data })));
+        async function mount() {
+            vi.resetModules();
+            const api = installVsCodeMock();
+            api.getState.mockImplementation(() => saved);
+            api.setState.mockImplementation(next => { saved = next; });
+            createRootHost();
+            await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+            await flush();
+            return api;
+        }
+        const update = (paths: string[]) => send({ type: "update", repositories: [repo],
+            files: paths.map(path => ({ repoRoot: repo.root, path, status: "M", staged: false, additions: 1, deletions: 0 })) });
+        await mount();
+        update(["one.go", "removed.go"]);
+        fireInput(document.querySelector("textarea")!, "draft before reload");
+        for (const entry of mountedAppRoots) {
+            act(() => entry.root.unmount());
+            mountedAppRoots.delete(entry);
+        }
+        document.body.innerHTML = "";
+        const api = await mount();
+        expect(saved.checked).toEqual(keys);
+        expect(document.querySelector("textarea")!.value).toBe("draft before reload");
+        update(["one.go"]);
+        expect(saved.checked).toEqual([keys[0]]);
+        fireClick(Array.from(document.querySelectorAll('button:not([role="tab"])')).find(b => b.textContent?.trim() === "Commit")!);
+        expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: "commitSelected", message: "draft before reload", targets: [{ repoRoot: repo.root, path: "one.go" }],
+        }));
+        send({ type: "committed" });
+        update([]);
+        expect(saved.checked).toEqual([]);
+        expect(saved.commitDraft).toBe("");
+        expect(saved.groupByDir).toBe(false);
+    });
+
     it("creates a stash from the toolbar dialog", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock({ checked: [] });

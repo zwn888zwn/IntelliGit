@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { tmpdir } from "os";
 import { readBranchTracking, firstPushRemote } from "./branchTracking";
 import { GitExecutor } from "./executor";
 import { decodeGitQuotedPath } from "./pathEncoding";
@@ -816,6 +817,28 @@ export class GitOps {
             args.push("--only", "--", ...paths);
         }
         return this.executor.run(args);
+    }
+
+    // A rename source is a deletion, even when a new, unchecked file now occupies that path.
+    // A path-limited git commit would read its contents from the working tree.
+    async commitWithRenameSources(message: string, amend: boolean, paths: string[], sources: string[]): Promise<void> {
+        const before = await this.getPushHead();
+        const head = before.split("\n")[0];
+        const stagedTree = (await this.executor.run(["write-tree"])).trim();
+        const dir = await fs.promises.mkdtemp(path.join(tmpdir(), "intelligit-commit-"));
+        const index = path.join(dir, "index");
+        try {
+            const git = (args: string[]) => this.executor.runWithStderr(args, index);
+            await git(["read-tree", head]);
+            await git(["update-index", "--force-remove", "--", ...sources]);
+            await git(["--literal-pathspecs", "restore", "--staged", `--source=${stagedTree}`, "--", ...paths]);
+            if (await this.getPushHead() !== before) throw new Error("HEAD changed. Refresh and select the files again.");
+            if (await this.isMergeInProgress()) throw new Error("Finish the merge in the Merge Conflicts panel.");
+            if (amend && !(await this.canAmendHead())) throw new Error("Amend requires an unpushed commit.");
+            await git(["commit", ...(amend ? ["--amend"] : []), ...(amend && !message ? ["--no-edit"] : ["-m", message])]);
+        } finally {
+            await fs.promises.rm(dir, { recursive: true, force: true });
+        }
     }
 
     async isMergeInProgress(): Promise<boolean> {

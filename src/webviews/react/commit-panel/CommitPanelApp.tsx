@@ -33,7 +33,7 @@ function App(): React.ReactElement {
         return Array.from(byPath.values());
     }, [state.files]);
     const { checkedPaths, toggleFile, toggleFolder, toggleSection, isAllChecked, isSomeChecked } =
-        useCheckedFiles(commitFiles);
+        useCheckedFiles(repositories.length ? commitFiles : undefined);
 
     const vscode = getVsCodeApi();
     const [groupByDir, setGroupByDir] = useState<boolean>(() => {

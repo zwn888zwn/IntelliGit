@@ -18,7 +18,7 @@ export function getCheckedFileKey(file: Pick<WorkingFile, "repoRoot" | "path">):
     return `${file.repoRoot}\u0000${file.path}`;
 }
 
-export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
+export function useCheckedFiles(allFiles: WorkingFile[] | undefined): CheckedFilesAPI {
     const [checkedPaths, setCheckedPaths] = useState<Set<string>>(() => {
         const vscode = getVsCodeApi();
         const saved = vscode.getState();
@@ -28,6 +28,7 @@ export function useCheckedFiles(allFiles: WorkingFile[]): CheckedFilesAPI {
 
     // Prune stale paths when file list changes
     useEffect(() => {
+        if (!allFiles) return; // The host has not sent a repository snapshot yet.
         const validPaths = new Set(allFiles.map((f) => getCheckedFileKey(f)));
         setCheckedPaths((prev) => {
             const next = new Set<string>();

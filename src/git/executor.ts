@@ -18,10 +18,13 @@ export class GitExecutor {
         return this.git.raw(["-c", "core.quotepath=false", ...args]);
     }
 
-    async runWithStderr(args: string[]): Promise<string> {
+    async runWithStderr(args: string[], indexFile?: string): Promise<string> {
         const gitArgs = ["-c", "core.quotepath=false", ...args];
         return new Promise((resolve, reject) => {
-            const child = spawn("git", gitArgs, { cwd: this.repoRoot });
+            const child = spawn("git", gitArgs, {
+                cwd: this.repoRoot,
+                ...(indexFile ? { env: { ...process.env, GIT_INDEX_FILE: indexFile } } : {}),
+            });
             let stdout = "";
             let stderr = "";
 

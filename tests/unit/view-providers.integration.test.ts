@@ -1275,6 +1275,53 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it.each([
+        { selected: ["new"], oldInCommit: false, amend: false },
+        { selected: ["new", "old"], oldInCommit: true, amend: false },
+        { selected: ["new"], oldInCommit: false, amend: true },
+    ])("commits a rename with a reused source path ($selected, amend=$amend)", async ({ selected, oldInCommit, amend }) => {
+        const fs = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const { GitExecutor } = await import("../../src/git/executor");
+        const { GitOps } = await import("../../src/git/operations");
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const root = await fs.mkdtemp(join(tmpdir(), "intelligit-rename-"));
+        const executor = new GitExecutor(root);
+        const git = (...args: string[]) => executor.runWithStderr(args);
+        const ops = new GitOps(executor, undefined, { repoId: ".", repoRoot: root });
+        const uri = { fsPath: root, path: root };
+        const provider = new CommitPanelViewProvider(uri as never, ops, () => uri as never);
+        try {
+            await git("init", "-q");
+            await git("config", "user.name", "Test");
+            await git("config", "user.email", "test@example.org");
+            await git("config", "core.hooksPath", join(root, ".git", "empty-hooks"));
+            await git("config", "commit.gpgsign", "false");
+            await fs.writeFile(join(root, "old"), "original");
+            await git("add", "old");
+            await git("commit", "-qm", "base");
+            await git("mv", "old", "new");
+            await fs.writeFile(join(root, "old"), "independent");
+            await fs.writeFile(join(root, "other"), "already staged");
+            await git("add", "other");
+            provider.setRepositoryContext({ ...testRepository, root });
+            const webview = createWebviewView();
+            provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+            await webview.send({ type: "ready" });
+            await webview.send({ type: "commitSelected", paths: selected, message: "rename", amend });
+            expect((await git("ls-tree", "--name-only", "HEAD")).trim().split("\n")).toEqual(oldInCommit ? ["new", "old"] : ["new"]);
+            expect(await git("show", "HEAD:new")).toBe("original");
+            expect((await git("diff", "--cached", "--name-only")).trim()).toBe("other");
+            expect(await fs.readFile(join(root, "old"), "utf8")).toBe("independent");
+            if (oldInCommit) expect(await git("show", "HEAD:old")).toBe("independent");
+            else expect(await git("status", "--short")).toContain("?? old");
+        } finally {
+            provider.dispose();
+            await fs.rm(root, { recursive: true, force: true });
+        }
+    });
+
     it("amends checked files, preserves the index and retries a rejected push against a local remote", async () => {
         const fs = await import("node:fs/promises");
         const { tmpdir } = await import("node:os");
