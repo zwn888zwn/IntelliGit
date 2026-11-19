@@ -134,12 +134,6 @@ export async function isCommitUnpushed(hash: string, gitOps: GitOps): Promise<bo
     return unpushed.some((h) => isHashMatch(h, hash));
 }
 
-export async function getUndoCommitCount(hash: string, executor: GitExecutor): Promise<number> {
-    const raw = (await executor.run(["rev-list", "--count", `${hash}^..HEAD`])).trim();
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
-}
-
 export async function pickMainlineParent(
     hash: string,
     actionLabel: string,

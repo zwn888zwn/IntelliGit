@@ -598,9 +598,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         isContinuingRebase = true;
         try {
             await ensureRepositoryContextActive(repository);
-            await runWithNotificationProgress("Continuing rebase...", async () => {
-                await repository.gitOps.continueRebase();
-            });
+            try {
+                await runWithNotificationProgress("Continuing rebase...", async () => {
+                    await repository.gitOps.continueRebase();
+                });
+            } catch (error) {
+                if (!(await repository.gitOps.isRebaseInProgress()) ||
+                    !(await repository.gitOps.getConflictFilesDetailed()).length) throw error;
+                await refreshService.refreshConflictUi();
+                vscode.window.showWarningMessage("Rebase stopped at the next conflicting commit.");
+                return false;
+            }
             vscode.window.showInformationMessage("Rebase continued successfully.");
             await vscode.commands.executeCommand("intelligit.refresh");
             return true;
@@ -691,10 +699,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     await handleConflictStateChanged(repository, resolvedPath, false, false);
                 },
                 onFinish: async () => {
-                    if (await continueRebaseIfReady(repository)) return true;
+                    if (await repository.gitOps.isRebaseInProgress()) return continueRebaseIfReady(repository);
                     return finalizeMergeIfReady(repository);
                 },
-                onMergeAborted: async () => {
+                onAbort: async () => {
                     await vscode.commands.executeCommand("intelligit.refresh");
                 },
             },
@@ -895,7 +903,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const hash = payload.hash;
             const repoRoot = "repoRoot" in payload ? payload.repoRoot : requireCurrentRepository().root;
             try {
-                if ((action === "squashCommits" || action === "editCommitMessage" || action === "dropCommit") && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
+                if ((action === "squashCommits" || action === "editCommitMessage" || action === "dropCommit" || action === "undoCommit") && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
                     throw new Error("The selected repository is no longer available.");
                 }
                 const repository =

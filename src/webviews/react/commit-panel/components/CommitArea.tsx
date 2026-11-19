@@ -32,7 +32,7 @@ export function CommitArea({
         <Flex direction="column" overflow="hidden" flex={1}>
             {onOpenMerge ? (
                 <Button size="xs" variant="link" alignSelf="flex-start" mx="7px" minH="24px" onClick={onOpenMerge}>
-                    Open Merge Conflicts to finish merge
+                    Open Merge Conflicts to continue
                 </Button>
             ) : <Flex
                 as="label"

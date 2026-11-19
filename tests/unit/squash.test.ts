@@ -13,7 +13,8 @@ const git = (...args: string[]) =>
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
     }).trim();
-const executor = { run: async (args: string[]) => git(...args) };
+const run = async (args: string[]) => git(...args);
+const executor = { run, runWithStderr: run };
 function commit(file: string, content: string, subject: string): string {
     writeFileSync(join(root, file), content);
     git("add", "--", file);
@@ -103,6 +104,7 @@ describe("squash selected commits", () => {
         const plan = await prepareSquash(executor, [a, b]);
         const index = git("write-tree");
         const failing = {
+            ...executor,
             run: async (args: string[]) => {
                 if (args[0] === "commit-tree") throw new Error("signing failed");
                 return git(...args);
@@ -166,7 +168,7 @@ describe("edit unpublished history", () => {
         expect(git("rev-parse", "HEAD")).toBe(c);
     });
 
-    it("leaves the branch and staged content intact if the commit-msg hook rejects the new text", async () => {
+    it.each(["", "echo rejected-message >&2\n"])("keeps history intact after a rejecting commit-msg hook (%j)", async output => {
         const ops = new GitExecutor(root);
         const a = commit("a", "a", "First");
         const b = commit("b", "b", "Second");
@@ -174,12 +176,12 @@ describe("edit unpublished history", () => {
         const reword = await prepareReword(ops, a);
         const hooks = join(root, ".git", "hooks-disabled");
         mkdirSync(hooks);
-        writeFileSync(join(hooks, "commit-msg"), "#!/bin/sh\necho rejected-message >&2\nexit 1\n", { mode: 0o755 });
+        writeFileSync(join(hooks, "commit-msg"), `#!/bin/sh\n${output}exit 1\n`, { mode: 0o755 });
         writeFileSync(join(root, "extra"), "for later");
         git("add", "extra");
         const index = git("write-tree");
-        await expect(applySquash(ops, squash, "bad")).rejects.toThrow("rejected-message");
-        await expect(applyReword(ops, reword, "bad")).rejects.toThrow("rejected-message");
+        await expect(applySquash(ops, squash, "bad")).rejects.toThrow(output ? "rejected-message" : "exit code 1");
+        await expect(applyReword(ops, reword, "bad")).rejects.toThrow(output ? "rejected-message" : "exit code 1");
         expect(git("rev-parse", "HEAD")).toBe(b);
         expect(git("write-tree")).toBe(index);
     });

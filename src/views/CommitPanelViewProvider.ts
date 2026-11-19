@@ -142,7 +142,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             this.postToWebview({
                 type: "update",
                 repositories: this.getRepositories().map((entry) => entry.info),
-                mergingRoots: [],
+                conflictSessionRoots: [],
                 amendableRoots: [],
                 files: [],
                 stashes: [],
@@ -165,12 +165,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             await this.iconTheme.initIconThemeData();
             const repositories = this.getRepositories();
             const statuses = await Promise.all(repositories.map(async entry => {
-                const [files, merging, canAmend] = await Promise.all([
+                const [files, operation, canAmend] = await Promise.all([
                     entry.gitOps.getStatus().then(files => this.iconTheme.decorateWorkingFiles(files)),
-                    entry.gitOps.isMergeInProgress(),
+                    entry.gitOps.getConflictOperation(),
                     entry.gitOps.canAmendHead().catch(() => false),
                 ]);
-                return { root: entry.root, files, merging, canAmend };
+                return { root: entry.root, files, operation, canAmend };
             }));
             const files = statuses.flatMap(status => status.files);
             const stashes = await this.gitOps.listShelved();
@@ -206,7 +206,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             this.postToWebview({
                 type: "update",
                 repositories: repositories.map((entry) => entry.info),
-                mergingRoots: statuses.filter(status => status.merging).map(status => status.root),
+                conflictSessionRoots: statuses.filter(status => status.operation).map(status => status.root),
                 amendableRoots: statuses.filter(status => status.canAmend).map(status => status.root),
                 files,
                 stashes,
@@ -600,8 +600,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         // Preflight every selected repository before staging or committing in any of them.
         for (const root of grouped.keys()) {
             const repository = this.getRepositoryEntry(root);
-            if (await repository.gitOps.isMergeInProgress()) {
-                void vscode.window.showWarningMessage(`${repository.info.name}: Finish the merge in the Merge Conflicts panel.`);
+            const operation = await repository.gitOps.getConflictOperation();
+            if (operation) {
+                void vscode.window.showWarningMessage(`${repository.info.name}: Finish the ${operation} in the Merge Conflicts panel.`);
                 await this.refreshData();
                 return;
             }
@@ -781,8 +782,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 if (confirm !== "Rollback") return;
                 // Check all selected repositories before changing any of them.
                 for (const repository of repositories) {
-                    if (await repository.gitOps.isMergeInProgress()) {
-                        void vscode.window.showWarningMessage(`${repository.info.name}: Use the Merge Conflicts panel to finish or abort the merge.`);
+                    const operation = await repository.gitOps.getConflictOperation();
+                    if (operation) {
+                        void vscode.window.showWarningMessage(`${repository.info.name}: Use the Merge Conflicts panel to finish or abort the ${operation}.`);
                         await this.refreshData();
                         return;
                     }

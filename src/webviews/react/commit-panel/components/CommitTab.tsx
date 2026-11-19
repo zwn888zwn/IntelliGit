@@ -28,7 +28,7 @@ interface Props {
     commitMessage: string;
     isAmend: boolean;
     canAmend: boolean;
-    mergingRoots: string[];
+    conflictSessionRoots: string[];
     onOpenMerge?: () => void;
     isRefreshing: boolean;
     checkedPaths: Set<string>;
@@ -58,7 +58,7 @@ export function CommitTab({
     commitMessage,
     isAmend,
     canAmend,
-    mergingRoots,
+    conflictSessionRoots,
     onOpenMerge,
     isRefreshing,
     checkedPaths,
@@ -132,7 +132,7 @@ export function CommitTab({
 
             <Box flex="1 1 auto" overflowY="auto" minH="40px">
                 <FileTree
-                    mergingRoots={mergingRoots}
+                    conflictSessionRoots={conflictSessionRoots}
                     repositories={repositories}
                     currentRepository={currentRepository}
                     activeFile={activeFile}

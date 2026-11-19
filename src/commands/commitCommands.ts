@@ -7,7 +7,7 @@ import * as vscode from "vscode";
 import { firstPushRemote, readBranchTracking } from "../git/branchTracking";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
-import { prepareSquash, applySquash, prepareReword, applyReword, undoRewrite, type RewriteReceipt } from "../git/squash";
+import { prepareSquash, applySquash, prepareReword, applyReword, prepareLocalCommitRange, checkLocalCommitRange, undoRewrite, type RewriteReceipt } from "../git/squash";
 import type { CommitAction, EditHistoryPrompt } from "../webviews/react/commitGraphTypes";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
@@ -19,7 +19,6 @@ import {
     isCommitUnpushed,
     isMergeCommitHash,
     getCommitParentHashes,
-    getUndoCommitCount,
     getCheckedOutBranchName,
     pickMainlineParent,
 } from "../services/gitHelpers";
@@ -434,40 +433,46 @@ export async function handleCommitContextAction(params: {
             await refreshAll();
             return;
         }
-        case "undoCommit": {
+        case "undoCommit":
+        case "dropCommit": {
+            const undo = action === "undoCommit";
+            const label = undo ? "Undo" : "Drop";
             if (!(await isCommitUnpushed(validatedHash, gitOps))) {
-                vscode.window.showErrorMessage(
-                    "Undo Commit is available only for unpushed commits.",
-                );
+                vscode.window.showErrorMessage(`${label} Commit is available only for unpushed commits.`);
                 return;
             }
             if (await isMergeCommitHash(validatedHash, executor)) {
-                vscode.window.showErrorMessage("Undo Commit is not available for merge commits.");
+                vscode.window.showErrorMessage(`${label} Commit is not available for merge commits.`);
                 return;
             }
             try {
-                await executor.run(["merge-base", "--is-ancestor", validatedHash, "HEAD"]);
-            } catch {
-                vscode.window.showErrorMessage(
-                    `Commit ${short} is not in the current branch history.`,
-                );
-                return;
+                const plan = await prepareLocalCommitRange(executor, validatedHash);
+                const branch = plan.branch.replace(/^refs\/heads\//, "");
+                const commitLabel = plan.count === 1 ? "commit" : "commits";
+                const subject = undo
+                    ? `Undo ${plan.count} ${commitLabel} on ${branch} from ${short} through HEAD? The changes will stay staged.`
+                    : `Drop commit ${short} from ${branch}?`;
+                const confirm = await vscode.window.showWarningMessage(subject, { modal: true }, label);
+                if (confirm !== label) return;
+                await checkLocalCommitRange(executor, plan);
+
+                if (undo) {
+                    await executor.runWithStderr(["reset", "--soft", plan.parent]);
+                    vscode.window.showInformationMessage(`Undid ${plan.count} ${commitLabel} from ${short} through HEAD.`);
+                } else {
+                    try {
+                        // Git should keep HEAD attached and leave other branch refs alone.
+                        await executor.runWithStderr(["-c", "rebase.updateRefs=false", "rebase", "--onto", plan.parent, plan.selected]);
+                        vscode.window.showInformationMessage(`Dropped ${short} from history.`);
+                    } catch (error) {
+                        const recovery = await gitOps.isRebaseInProgress() ? " Run 'git rebase --abort' to recover." : "";
+                        vscode.window.showErrorMessage(`Failed to drop commit: ${getErrorMessage(error)}${recovery}`);
+                    }
+                }
+                await refreshAll();
+            } catch (error) {
+                vscode.window.showErrorMessage(getErrorMessage(error));
             }
-            const undoParents = await getCommitParentHashes(validatedHash, executor);
-            if (undoParents.length === 0) {
-                vscode.window.showErrorMessage("Cannot undo the initial commit of the repository.");
-                return;
-            }
-            const undoCount = await getUndoCommitCount(validatedHash, executor);
-            const confirm = await vscode.window.showWarningMessage(
-                `Undo ${undoCount} commit(s) up to ${short} (soft reset)?`,
-                { modal: true },
-                "Undo",
-            );
-            if (confirm !== "Undo") return;
-            await executor.run(["reset", "--soft", `${validatedHash}^`]);
-            vscode.window.showInformationMessage(`Undid ${undoCount} commit(s) up to ${short}.`);
-            await refreshAll();
             return;
         }
         case "editCommitMessage": {
@@ -492,58 +497,6 @@ export async function handleCommitContextAction(params: {
             if (!message?.trim() || message === plan.message) return;
             const receipt = await runWithNotificationProgress("Editing commit message...", () => applyReword(executor, plan, message));
             await finishRewrite(receipt, `Updated commit message (${receipt.firstRewritten.slice(0, 8)}).`);
-            return;
-        }
-        case "dropCommit": {
-            const branch = (await executor.run(["branch", "--show-current"])).trim();
-            if (!branch) {
-                vscode.window.showErrorMessage("Check out a local branch before dropping a commit.");
-                return;
-            }
-            const head = (await executor.run(["rev-parse", "HEAD"])).trim();
-            if (!(await isCommitUnpushed(validatedHash, gitOps))) {
-                vscode.window.showErrorMessage(
-                    "Drop Commit is available only for unpushed commits.",
-                );
-                return;
-            }
-            if (await isMergeCommitHash(validatedHash, executor)) {
-                vscode.window.showErrorMessage("Drop Commit is not available for merge commits.");
-                return;
-            }
-            try {
-                await executor.runWithStderr(["merge-base", "--is-ancestor", validatedHash, head]);
-            } catch {
-                vscode.window.showErrorMessage(
-                    `Commit ${short} is not in the current branch history.`,
-                );
-                return;
-            }
-            const dropParents = await getCommitParentHashes(validatedHash, executor);
-            if (dropParents.length === 0) {
-                vscode.window.showErrorMessage("Cannot drop the initial commit of the repository.");
-                return;
-            }
-            const confirm = await vscode.window.showWarningMessage(
-                `Drop commit ${short} from ${branch}?`,
-                { modal: true },
-                "Drop",
-            );
-            if (confirm !== "Drop") return;
-            try {
-                if ((await executor.run(["branch", "--show-current"])).trim() !== branch ||
-                    (await executor.run(["rev-parse", "HEAD"])).trim() !== head) {
-                    throw new Error("The branch or commit changed. Select the commit again.");
-                }
-                if (!(await isCommitUnpushed(validatedHash, gitOps))) throw new Error("This commit has already been pushed.");
-                // Omitting the branch argument keeps the rebase attached to the current branch.
-                await executor.runWithStderr(["rebase", "--onto", `${validatedHash}^`, validatedHash]);
-                vscode.window.showInformationMessage(`Dropped ${short} from history.`);
-            } catch (err) {
-                const recovery = await gitOps.isRebaseInProgress() ? " Run 'git rebase --abort' to recover." : "";
-                vscode.window.showErrorMessage(`Failed to drop commit: ${getErrorMessage(err)}${recovery}`);
-            }
-            await refreshAll();
             return;
         }
         case "interactiveRebaseFromHere": {

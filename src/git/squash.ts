@@ -15,6 +15,7 @@ export interface SquashPlan {
 }
 
 type Reader = Pick<GitExecutor, "run">;
+type GitRunner = Pick<GitExecutor, "run" | "runWithStderr">;
 
 async function checkedBranch(executor: Reader): Promise<string> {
     const gitDir = (await executor.run(["rev-parse", "--absolute-git-dir"])).trim();
@@ -32,7 +33,7 @@ async function requireUnpublished(executor: Reader, oldest: string): Promise<voi
 
 // commit-tree bypasses commit-msg. Validate the user's new message just as
 // a normal commit would, without sharing Git's mutable COMMIT_EDITMSG file.
-async function checkedMessage(executor: Reader, text: string): Promise<string> {
+async function checkedMessage(executor: GitRunner, text: string): Promise<string> {
     if (!text.trim() || text.includes("\0")) throw new Error("Enter a valid commit message.");
     const hooks = (await executor.run(["rev-parse", "--path-format=absolute", "--git-path", "hooks"])).trim();
     if (!existsSync(join(hooks, "commit-msg"))) return text;
@@ -40,7 +41,7 @@ async function checkedMessage(executor: Reader, text: string): Promise<string> {
     try {
         const file = join(dir, "COMMIT_EDITMSG");
         await writeFile(file, text.endsWith("\n") ? text : text + "\n");
-        await executor.run(["hook", "run", "--ignore-missing", "commit-msg", "--", file]);
+        await executor.runWithStderr(["hook", "run", "--ignore-missing", "commit-msg", "--", file]);
         const checked = await readFile(file, "utf8");
         if (!checked.trim() || checked.includes("\0")) throw new Error("The commit-msg hook returned an invalid message.");
         return checked;
@@ -109,7 +110,7 @@ export async function prepareSquash(
 
 /** Reuses HEAD's tree so staged, unstaged and untracked files remain untouched. */
 export async function applySquash(
-    executor: Pick<GitExecutor, "run">,
+    executor: GitRunner,
     plan: SquashPlan,
     message: string,
 ): Promise<string> {
@@ -137,6 +138,38 @@ async function checkTip(executor: Reader, branch: string, expected: string) {
     if (await checkedBranch(executor) !== branch || (await executor.run(["rev-parse", "HEAD"])).trim() !== expected) {
         throw new Error("The checked-out branch changed. Select the commits again.");
     }
+}
+
+interface LocalCommitRange {
+    branch: string;
+    head: string;
+    selected: string;
+    parent: string;
+    count: number;
+}
+
+export async function prepareLocalCommitRange(executor: Reader, target: string): Promise<LocalCommitRange> {
+    const branch = await checkedBranch(executor);
+    if (!branch) throw new Error("Check out a local branch before rewriting commits.");
+    const head = (await executor.run(["rev-parse", "HEAD"])).trim();
+    const [selected, parent, ...otherParents] = (
+        await executor.run(["rev-list", "--parents", "-n", "1", target])
+    ).trim().split(/\s+/);
+    if (!parent) throw new Error("Select a commit after the initial commit.");
+    if (otherParents.length) throw new Error("Select a non-merge commit.");
+
+    const range = (await executor.run(["rev-list", "--first-parent", "--parents", `${parent}..${head}`]))
+        .trim().split("\n").map(line => line.split(/\s+/));
+    if (range.at(-1)?.[0] !== selected || range.some(row => row.length !== 2)) {
+        throw new Error("Select a commit in the current branch's latest sequence of non-merge commits.");
+    }
+    await requireUnpublished(executor, selected);
+    return { branch, head, selected, parent, count: range.length };
+}
+
+export async function checkLocalCommitRange(executor: Reader, plan: LocalCommitRange): Promise<void> {
+    await requireUnpublished(executor, plan.selected);
+    await checkTip(executor, plan.branch, plan.head);
 }
 
 async function moveBranch(executor: Reader, branch: string, from: string, to: string, oldest: string, reason: string) {
@@ -186,7 +219,7 @@ export async function prepareReword(executor: Reader, target: string) {
 }
 
 export async function applyReword(
-    executor: Pick<GitExecutor, "run" | "writeCommit">,
+    executor: GitRunner & Pick<GitExecutor, "writeCommit">,
     plan: Awaited<ReturnType<typeof prepareReword>>,
     message: string,
 ): Promise<RewriteReceipt> {

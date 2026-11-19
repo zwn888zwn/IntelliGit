@@ -18,7 +18,7 @@ import type {
 import type { TreeEntry } from "../types";
 
 interface Props {
-    mergingRoots?: string[];
+    conflictSessionRoots?: string[];
     repositories: RepositoryContextInfo[];
     currentRepository: RepositoryContextInfo | null;
     activeFile: { repoRoot: string; path: string } | null;
@@ -41,7 +41,7 @@ interface Props {
 }
 
 export function FileTree({
-    mergingRoots,
+    conflictSessionRoots,
     repositories,
     currentRepository,
     activeFile,
@@ -92,7 +92,7 @@ export function FileTree({
                 <RepositorySection
                     key={repository.root}
                     repository={repository}
-                    isMerging={!!mergingRoots?.includes(repository.root)}
+                    hasConflictSession={!!conflictSessionRoots?.includes(repository.root)}
                     isCurrent={currentRepository?.root === repository.root}
                     activeFile={activeFile}
                     files={repoFiles}
@@ -120,13 +120,13 @@ export function FileTree({
 interface RepositorySectionProps extends Omit<Props, "repositories" | "currentRepository"> {
     repository: RepositoryContextInfo;
     isCurrent: boolean;
-    isMerging: boolean;
+    hasConflictSession: boolean;
 }
 
 function RepositorySection({
     repository,
     isCurrent,
-    isMerging,
+    hasConflictSession,
     files,
     activeFile,
     groupByDir,
@@ -210,7 +210,7 @@ function RepositorySection({
     }, [repository.root]);
 
     return (
-        <Box data-vscode-context={JSON.stringify({ intelligitMerging: isMerging })} borderBottom="1px solid var(--vscode-panel-border, #444)">
+        <Box data-vscode-context={JSON.stringify({ intelligitConflictSession: hasConflictSession })} borderBottom="1px solid var(--vscode-panel-border, #444)">
             <Flex
                 align="center"
                 gap="8px"

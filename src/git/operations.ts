@@ -833,7 +833,8 @@ export class GitOps {
             await git(["update-index", "--force-remove", "--", ...sources]);
             await git(["--literal-pathspecs", "restore", "--staged", `--source=${stagedTree}`, "--", ...paths]);
             if (await this.getPushHead() !== before) throw new Error("HEAD changed. Refresh and select the files again.");
-            if (await this.isMergeInProgress()) throw new Error("Finish the merge in the Merge Conflicts panel.");
+            const operation = await this.getConflictOperation();
+            if (operation) throw new Error(`Finish the ${operation} in the Merge Conflicts panel.`);
             if (amend && !(await this.canAmendHead())) throw new Error("Amend requires an unpushed commit.");
             await git(["commit", ...(amend ? ["--amend"] : []), ...(amend && !message ? ["--no-edit"] : ["-m", message])]);
         } finally {
@@ -868,17 +869,26 @@ export class GitOps {
         return false;
     }
 
+    async getConflictOperation(): Promise<"merge" | "rebase" | null> {
+        if (await this.isRebaseInProgress()) return "rebase";
+        return (await this.isMergeInProgress()) ? "merge" : null;
+    }
+
     async getReplayedCommitHash(): Promise<string | undefined> {
         return this.executor.run(["rev-parse", "--verify", "--short", "REBASE_HEAD"])
             .then(value => value.trim() || undefined, () => undefined);
     }
 
     async continueRebase(): Promise<string> {
-        return this.executor.run(["-c", "core.editor=true", "rebase", "--continue"]);
+        return this.executor.runWithStderr(["-c", "core.editor=true", "rebase", "--continue"]);
     }
 
     async abortMerge(): Promise<string> {
-        return this.executor.run(["merge", "--abort"]);
+        return this.executor.runWithStderr(["merge", "--abort"]);
+    }
+
+    async abortRebase(): Promise<string> {
+        return this.executor.runWithStderr(["rebase", "--abort"]);
     }
 
     async push(selectedBranch?: string): Promise<string> {
@@ -945,8 +955,9 @@ export class GitOps {
     }
 
     private async assertRollbackAllowed(): Promise<void> {
-        if (await this.isMergeInProgress()) {
-            throw new Error("A merge is in progress. Use the Merge Conflicts panel to finish or abort it.");
+        const operation = await this.getConflictOperation();
+        if (operation) {
+            throw new Error(`A ${operation} is in progress. Use the Merge Conflicts panel to finish or abort it.`);
         }
     }
 

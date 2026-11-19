@@ -65,7 +65,7 @@ function App(): React.ReactElement {
         }
     }, [isStashDialogOpen, repositories, state.repository?.root]);
 
-    const mergingRoot = state.mergingRoots?.find(root => checkedTargets.length
+    const conflictSessionRoot = state.conflictSessionRoots?.find(root => checkedTargets.length
         ? checkedTargets.some(target => target.repoRoot === root) : state.repository?.root === root);
     const amendRoot = checkedTargets[0]?.repoRoot ?? state.repository?.root;
     const canAmend = !!amendRoot && state.amendableRoots.includes(amendRoot)
@@ -179,8 +179,8 @@ function App(): React.ReactElement {
                             commitMessage={commitMessage}
                             isAmend={isAmend}
                             canAmend={canAmend}
-                            mergingRoots={state.mergingRoots}
-                            onOpenMerge={mergingRoot ? () => vscode.postMessage({ type: "openMergeSession", repoRoot: mergingRoot }) : undefined}
+                            conflictSessionRoots={state.conflictSessionRoots}
+                            onOpenMerge={conflictSessionRoot ? () => vscode.postMessage({ type: "openMergeSession", repoRoot: conflictSessionRoot }) : undefined}
                             isRefreshing={state.isRefreshing}
                             checkedPaths={checkedPaths}
                             onToggleFile={toggleFile}

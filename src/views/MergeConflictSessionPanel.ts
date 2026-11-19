@@ -25,7 +25,7 @@ interface MergeConflictSessionCallbacks {
     onOpenMergeConflict: (filePath: string) => Promise<void>;
     onConflictStateChanged: (resolvedPath?: string) => Promise<void>;
     onFinish: () => Promise<boolean>;
-    onMergeAborted: () => Promise<void>;
+    onAbort: () => Promise<void>;
 }
 
 interface MergeConflictSessionContext {
@@ -47,6 +47,7 @@ export class MergeConflictSessionPanel {
     >();
     private readonly workingFileSnapshots = new Map<string, Uint8Array>();
     private simpleConflictsResolved = false;
+    private replayedCommit?: string;
 
     private constructor(
         panel: vscode.WebviewPanel,
@@ -169,6 +170,11 @@ export class MergeConflictSessionPanel {
         this.targetBranch = "current branch";
         this.updateLabels(labels);
         this.updateCallbacks(callbacks);
+        this.replayedCommit = undefined;
+        this.resetFiles();
+    }
+
+    private resetFiles(): void {
         this.lastFiles = [];
         this.sessionFiles.clear();
         this.conflictCounts.clear();
@@ -223,25 +229,30 @@ export class MergeConflictSessionPanel {
             case "acceptAndFinish": {
                 if ((await this.gitOps.getConflictFilesDetailed()).length > 0) return;
                 if (await this.callbacks.onFinish()) this.panel.dispose();
+                else await this.postSessionData();
                 return;
             }
 
             case "close": {
-                if (!(await this.gitOps.isMergeInProgress())) {
+                const gitOps = this.gitOps;
+                const operation = await gitOps.getConflictOperation();
+                if (!operation) {
                     this.panel.dispose();
                     return;
                 }
                 const confirm = await vscode.window.showWarningMessage(
-                    "Abort merge?",
+                    `Abort ${operation}?`,
                     { modal: true },
                     "Abort",
                 );
                 if (confirm !== "Abort") return;
-                await runWithNotificationProgress("Aborting merge...", async () => {
-                    await this.gitOps.abortMerge();
+                if (!this.isAlive() || this.gitOps !== gitOps || await gitOps.getConflictOperation() !== operation) return;
+                await runWithNotificationProgress(`Aborting ${operation}...`, async () => {
+                    if (operation === "rebase") await gitOps.abortRebase();
+                    else await gitOps.abortMerge();
                 });
-                await this.callbacks.onMergeAborted();
-                vscode.window.showInformationMessage("Merge aborted.");
+                await this.callbacks.onAbort();
+                vscode.window.showInformationMessage(operation === "rebase" ? "Rebase aborted." : "Merge aborted.");
                 this.panel.dispose();
                 return;
             }
@@ -268,9 +279,15 @@ export class MergeConflictSessionPanel {
         } = {},
     ): Promise<void> {
         if (!this.isAlive()) return;
-        const previousFiles = this.lastFiles;
+        const rebase = await this.gitOps.isRebaseInProgress();
+        const replayedCommit = rebase ? await this.gitOps.getReplayedCommitHash() : undefined;
         const files = await this.gitOps.getConflictFilesDetailed();
         if (!this.isAlive()) return;
+        if (replayedCommit !== this.replayedCommit) {
+            this.resetFiles();
+            this.replayedCommit = replayedCommit;
+        }
+        const previousFiles = this.lastFiles;
         for (const file of files) {
             this.sessionFiles.set(file.path, file);
             if (this.repoRoot && !this.workingFileSnapshots.has(file.path)) {
@@ -308,10 +325,9 @@ export class MergeConflictSessionPanel {
             },
         );
 
-        const rebase = await this.gitOps.isRebaseInProgress();
         const data: MergeConflictSessionData = {
             rebase,
-            replayedCommit: rebase ? await this.gitOps.getReplayedCommitHash() : undefined,
+            replayedCommit,
             sourceBranch: this.sourceBranch,
             targetBranch: this.targetBranch,
             files: sessionFiles,

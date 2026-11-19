@@ -154,7 +154,7 @@ describe("CommitPanelApp integration", () => {
         await flush();
         const repo = { root: "/repo", name: "repo", repoId: ".", color: "#888" };
         const send = (data: unknown) => act(() => window.dispatchEvent(new MessageEvent("message", { data })));
-        const update = (mergingRoots: string[]) => send({ type: "update", repositories: [repo], mergingRoots,
+        const update = (conflictSessionRoots: string[]) => send({ type: "update", repositories: [repo], conflictSessionRoots,
             files: [], stashes: [], shelfFiles: [], selectedShelfIndex: null });
         send({ type: "setRepositoryContext", repository: repo });
         update([repo.root]);
@@ -167,7 +167,7 @@ describe("CommitPanelApp integration", () => {
         expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "rollback" }));
         expect(button("Commit").disabled).toBe(true);
         expect(button("Commit and Push...").disabled).toBe(true);
-        fireClick(button("Open Merge Conflicts to finish merge"));
+        fireClick(button("Open Merge Conflicts to continue"));
         expect(api.postMessage).toHaveBeenCalledWith({ type: "openMergeSession", repoRoot: repo.root });
         update([]);
         await flush();

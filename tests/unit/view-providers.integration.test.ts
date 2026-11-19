@@ -300,7 +300,7 @@ function makeGitOpsMock() {
         push: vi.fn(async () => "ok"),
         getPushHead: vi.fn(async () => "abcdef123456\nrefs/heads/main"),
         commitAndPush: vi.fn(async () => "ok"),
-        isMergeInProgress: vi.fn(async () => false),
+        getConflictOperation: vi.fn(async (): Promise<"merge" | "rebase" | null> => null),
         canAmendHead: vi.fn(async () => true),
         getPendingCommitMessage: vi.fn(async () => ""),
         getLastCommitMessage: vi.fn(async () => "last message"),
@@ -1168,11 +1168,11 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
-    it("blocks ordinary commits before staging during a merge and routes Finish to the target repository", async () => {
+    it.each(["merge", "rebase"] as const)("blocks ordinary commit and rollback during %s and routes Finish to the target repository", async operation => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
-        gitOps.isMergeInProgress.mockResolvedValue(true);
+        gitOps.getConflictOperation.mockResolvedValue(operation);
         await provider.refresh();
-        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "update", mergingRoots: ["/repo"] }));
+        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "update", conflictSessionRoots: ["/repo"] }));
         for (const push of [false, true]) {
             await webview.send({ type: "commitSelected", paths: ["src/a.ts"], message: "only A", push });
         }
@@ -1187,7 +1187,7 @@ describe("view providers integration", () => {
         expect(gitOps.push).not.toHaveBeenCalled();
         await webview.send({ type: "openMergeSession", repoRoot: "/repo" });
         expect(executeCommand).toHaveBeenCalledWith("intelligit.openConflictSession", "/repo");
-        gitOps.isMergeInProgress.mockResolvedValue(false);
+        gitOps.getConflictOperation.mockResolvedValue(null);
         await webview.send({ type: "commitSelected", paths: ["src/a.ts"], message: "only A" });
         expect(gitOps.commit).toHaveBeenCalledWith("only A", false, ["src/a.ts"]);
         provider.dispose();

@@ -60,7 +60,7 @@ export type InboundMessage =
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
-          mergingRoots?: string[];
+          conflictSessionRoots?: string[];
           amendableRoots?: string[];
       }
     | { type: "amendMessage"; repoRoot: string; message: string }
@@ -74,7 +74,7 @@ export type InboundMessage =
 /** Reducer state for the commit panel app. */
 export interface CommitPanelState {
     repositories: RepositoryContextInfo[];
-    mergingRoots: string[];
+    conflictSessionRoots: string[];
     amendableRoots: string[];
     files: WorkingFile[];
     stashes: StashEntry[];
@@ -109,7 +109,7 @@ export type CommitPanelAction =
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
-          mergingRoots?: string[];
+          conflictSessionRoots?: string[];
           amendableRoots?: string[];
       }
     | { type: "SET_AMEND_MESSAGE"; repoRoot: string; message: string; initial?: boolean }

@@ -93,3 +93,100 @@ it("keeps both branches intact when checkout changes during confirmation", async
     expect(git("rev-parse", "main", "other")).toBe(head + "\n" + head);
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
 });
+
+function undo(hash: string) {
+    return handleCommitContextAction({ action: "undoCommit", hash, executor, gitOps, repoRoot: root,
+        currentBranches: [], refreshAll: vi.fn(), editHistoryMessage: vi.fn() });
+}
+
+it("undoes a local suffix without modifying the index or the worktree", async () => {
+    const base = git("rev-parse", "HEAD");
+    git("update-ref", "refs/remotes/origin/main", base);
+    const target = commit("b", "B");
+    const head = commit("c", "C");
+    const index = git("write-tree");
+    writeFileSync(join(root, "b"), "unstaged edits");
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce("Undo" as never);
+
+    await undo(target);
+    expect(git("rev-parse", "HEAD", "ORIG_HEAD")).toBe(base + "\n" + head);
+    expect(git("write-tree")).toBe(index);
+    expect(git("status", "--porcelain")).toBe("AM b\nA  c");
+});
+
+it.each([
+    ["Undo", "other branch"], ["Undo", "across a merge"], ["Undo", "already published"],
+    ["Drop", "across a merge"],
+])("rejects %s Commit %s before prompting", async (action, scenario) => {
+    git("switch", "-qc", "topic");
+    const topic = commit("topic", "topic");
+    git("switch", "-q", "main");
+    const main = commit("main", "main");
+    const target = scenario === "other branch" ? topic : main;
+    if (scenario === "across a merge") git("merge", "--no-ff", "--no-edit", "topic");
+    if (scenario === "already published") git("update-ref", "refs/remotes/origin/main", main);
+    const head = git("rev-parse", "HEAD");
+
+    if (action === "Undo") await undo(target);
+    else await drop(target);
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+    expect(git("rev-parse", "HEAD", "topic")).toBe(head + "\n" + topic);
+    expect(git("status", "--porcelain")).toBe("");
+});
+
+it("keeps a second branch unchanged on Drop Commit when Git rebase.updateRefs is enabled", async () => {
+    const removed = commit("b", "B");
+    const other = commit("c", "C");
+    git("branch", "other");
+    commit("d", "D");
+    git("config", "rebase.updateRefs", "true");
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce("Drop" as never);
+
+    await drop(removed);
+    expect(git("branch", "--show-current")).toBe("main");
+    expect(git("log", "--format=%s", "main")).toBe("D\nC\nA");
+    expect(git("rev-parse", "other")).toBe(other);
+});
+
+it.each(["branch", "HEAD", "remote tracking ref"])("rechecks %s after Undo Commit confirmation", async changed => {
+    const target = commit("b", "B");
+    let expected = target;
+    vi.mocked(vscode.window.showWarningMessage).mockImplementationOnce(async () => {
+        if (changed === "branch") git("switch", "-qc", "other");
+        if (changed === "HEAD") expected = commit("c", "C");
+        if (changed === "remote tracking ref") git("update-ref", "refs/remotes/origin/main", target);
+        return "Undo" as never;
+    });
+
+    await undo(target);
+    expect(git("rev-parse", "HEAD", "main")).toBe(expected + "\n" + expected);
+    expect(git("branch", "--show-current")).toBe(changed === "branch" ? "other" : "main");
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+});
+
+it.each(["continue", "abort"])("protects a rebase resolution from rollback until %s", async action => {
+    git("switch", "-qc", "topic");
+    commit("base", "incoming");
+    git("switch", "-q", "main");
+    commit("base", "local");
+    expect(() => git("rebase", "topic")).toThrow();
+    writeFileSync(join(root, "base"), "resolved");
+    git("add", "base");
+    writeFileSync(join(root, "notes"), "untracked");
+    const status = git("status", "--porcelain");
+    const index = git("write-tree");
+
+    expect(await gitOps.getConflictOperation()).toBe("rebase");
+    await expect(gitOps.rollbackFiles(["base", "notes"])).rejects.toThrow("A rebase is in progress");
+    await expect(gitOps.rollbackAll()).rejects.toThrow("A rebase is in progress");
+    expect(git("status", "--porcelain")).toBe(status);
+    expect(git("write-tree")).toBe(index);
+
+    if (action === "continue") await gitOps.continueRebase();
+    else await gitOps.abortRebase();
+    expect(git("branch", "--show-current")).toBe("main");
+    expect(git("show", "HEAD:base")).toBe(action === "continue" ? "resolved" : "local");
+    expect(await gitOps.getConflictOperation()).toBeNull();
+});

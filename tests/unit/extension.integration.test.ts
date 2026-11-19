@@ -203,6 +203,7 @@ const defaultExecutorRunImpl = async (args: string[]) => {
         return [args[2], "origin", `refs/heads/${name}`, "origin"].join("\0");
     }
     if (args.join(" ") === "branch --show-current") return "main";
+    if (args.join(" ") === "symbolic-ref --quiet HEAD") return "refs/heads/main";
     if (args.join(" ") === "rev-parse --verify FETCH_HEAD") return "cab12345";
     if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
     if (args[0] === "rev-parse" && args[1] === "--short") return args[2]?.slice(0, 7) ?? "feed123";
@@ -318,6 +319,8 @@ const gitOpsState = {
     isRebaseInProgress: vi.fn(async () => false),
     continueRebase: vi.fn(async () => "continued"),
     abortMerge: vi.fn(async () => ""),
+    abortRebase: vi.fn(async () => ""),
+    getConflictOperation: vi.fn(async (): Promise<"merge" | "rebase" | null> => null),
     getPendingCommitMessage: vi.fn(async () => ""),
     push: vi.fn(async () => ""),
 };
@@ -506,6 +509,7 @@ class MockEditorBlameController {
 }
 
 vi.mock("fs", () => ({
+    existsSync: () => false,
     watch: vi.fn((...args: unknown[]) => {
         fsWatchPaths.push(String(args[0]));
         const callback = args[args.length - 1];
@@ -821,6 +825,8 @@ vi.mock("../../src/git/operations", async (importOriginal) => {
             getReplayedCommitHash = gitOpsState.getReplayedCommitHash;
             isMergeInProgress = gitOpsState.isMergeInProgress;
             abortMerge = gitOpsState.abortMerge;
+            abortRebase = gitOpsState.abortRebase;
+            getConflictOperation = gitOpsState.getConflictOperation;
             getPendingCommitMessage = gitOpsState.getPendingCommitMessage;
             push = gitOpsState.push;
         },
@@ -927,6 +933,8 @@ vi.mock("../../src/services/RepositoryContextService", () => ({
         getReplayedCommitHash: gitOpsState.getReplayedCommitHash,
         isMergeInProgress: gitOpsState.isMergeInProgress,
         abortMerge: gitOpsState.abortMerge,
+        abortRebase: gitOpsState.abortRebase,
+        getConflictOperation: gitOpsState.getConflictOperation,
         getPendingCommitMessage: gitOpsState.getPendingCommitMessage,
         push: gitOpsState.push,
     })),
@@ -1341,6 +1349,8 @@ describe("extension integration", () => {
         gitOpsState.commitAndPush.mockResolvedValue("committed and pushed");
         gitOpsState.isMergeInProgress.mockResolvedValue(false);
         gitOpsState.isRebaseInProgress.mockResolvedValue(false);
+        gitOpsState.getConflictOperation.mockImplementation(async () => await gitOpsState.isMergeInProgress()
+            ? "merge" : (await gitOpsState.isRebaseInProgress() ? "rebase" : null));
         gitOpsState.continueRebase.mockResolvedValue("continued");
         gitOpsState.abortMerge.mockResolvedValue("");
         gitOpsState.getPendingCommitMessage.mockResolvedValue("");
@@ -2810,7 +2820,7 @@ describe("extension integration", () => {
         (sessionPanel as { dispose?: () => void } | undefined)?.dispose?.();
     });
 
-    it("aborts an active merge when the conflict session is closed", async () => {
+    it.each(["merge", "rebase"])("aborts an active %s from the conflict session", async operation => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -2818,7 +2828,8 @@ describe("extension integration", () => {
         } as unknown as MockExtensionContext;
         await activate(context);
         (latestWebviewPanel as { dispose?: () => void } | undefined)?.dispose?.();
-        gitOpsState.isMergeInProgress.mockResolvedValue(true);
+        gitOpsState.isMergeInProgress.mockResolvedValue(operation === "merge");
+        gitOpsState.isRebaseInProgress.mockResolvedValue(operation === "rebase");
         gitOpsState.getConflictFilesDetailed.mockResolvedValue([
             {
                 path: "src/conflicted.ts",
@@ -2832,12 +2843,42 @@ describe("extension integration", () => {
         await latestWebviewPanel?.emitMessage({ type: "close" });
 
         expect(showWarningMessage).toHaveBeenCalledWith(
-            "Abort merge?",
+            `Abort ${operation}?`,
             { modal: true },
             "Abort",
         );
-        expect(gitOpsState.abortMerge).toHaveBeenCalled();
-        expect(showInformationMessage).toHaveBeenCalledWith("Merge aborted.");
+        expect(gitOpsState.abortMerge).toHaveBeenCalledTimes(operation === "merge" ? 1 : 0);
+        expect(gitOpsState.abortRebase).toHaveBeenCalledTimes(operation === "rebase" ? 1 : 0);
+        expect(showInformationMessage).toHaveBeenCalledWith(operation === "rebase" ? "Rebase aborted." : "Merge aborted.");
+    });
+
+    it("replaces the conflict list when Finish stops at a later rebase commit", async () => {
+        const { activate } = await import("../../src/extension");
+        await activate({ extensionUri: { fsPath: "/ext", path: "/ext" }, subscriptions: [] } as unknown as MockExtensionContext);
+        const conflict = { path: "first.go", code: "UU", ours: "Modified", theirs: "Modified" } as const;
+        gitOpsState.isRebaseInProgress.mockResolvedValue(true);
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([conflict]);
+        await registeredCommands.get("intelligit.openConflictSession")?.();
+        const panel = latestWebviewPanel!;
+        await panel.emitMessage({ type: "ready" });
+        gitOpsState.getConflictFilesDetailed.mockResolvedValue([]);
+        gitOpsState.continueRebase.mockImplementationOnce(async () => {
+            gitOpsState.getReplayedCommitHash.mockResolvedValue("beef123");
+            gitOpsState.getConflictFilesDetailed.mockResolvedValue([{ ...conflict, path: "second.go" }]);
+            throw new Error("could not apply beef123");
+        });
+
+        await panel.emitMessage({ type: "acceptAndFinish" });
+        expect(panel.webview.postMessage).toHaveBeenLastCalledWith({
+            type: "setSessionData",
+            data: expect.objectContaining({
+                replayedCommit: "beef123",
+                files: [expect.objectContaining({ path: "second.go", resolved: false })],
+            }),
+        });
+        expect(showInformationMessage).not.toHaveBeenCalledWith("Rebase continued successfully.");
+        expect(showWarningMessage).toHaveBeenCalledWith("Rebase stopped at the next conflicting commit.");
+        panel.dispose();
     });
 
     it("finishes the merge only after the conflict session accepts it", async () => {
