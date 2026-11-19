@@ -403,8 +403,20 @@
                 "icon": "$(arrow-left)"
             },
             {
+                "command": "intelligit.conflictKeepUpstream",
+                "title": "Keep Upstream Version",
+                "category": "IntelliGit",
+                "icon": "$(arrow-left)"
+            },
+            {
                 "command": "intelligit.conflictAcceptTheirs",
                 "title": "Accept Theirs",
+                "category": "IntelliGit",
+                "icon": "$(arrow-right)"
+            },
+            {
+                "command": "intelligit.conflictKeepLocalCommit",
+                "title": "Keep Local Commit Version",
                 "category": "IntelliGit",
                 "icon": "$(arrow-right)"
             },
@@ -587,18 +599,28 @@
                     "group": "inline@1"
                 },
                 {
+                    "command": "intelligit.conflictKeepUpstream",
+                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.rebaseConflictFile",
+                    "group": "inline@1"
+                },
+                {
                     "command": "intelligit.conflictAcceptTheirs",
                     "when": "view == intelligit.mergeConflicts && viewItem == intelligit.conflictFile",
                     "group": "inline@2"
                 },
                 {
+                    "command": "intelligit.conflictKeepLocalCommit",
+                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.rebaseConflictFile",
+                    "group": "inline@2"
+                },
+                {
                     "command": "intelligit.openMergeConflict",
-                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.conflictFile",
+                    "when": "view == intelligit.mergeConflicts && viewItem =~ /^intelligit\\.(conflictFile|rebaseConflictFile)$/",
                     "group": "navigation@1"
                 },
                 {
                     "command": "intelligit.openMergeConflictInJetBrains",
-                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.conflictFile",
+                    "when": "view == intelligit.mergeConflicts && viewItem =~ /^intelligit\\.(conflictFile|rebaseConflictFile)$/",
                     "group": "navigation@2"
                 },
                 {
@@ -607,8 +629,18 @@
                     "group": "1_actions@1"
                 },
                 {
+                    "command": "intelligit.conflictKeepUpstream",
+                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.rebaseConflictFile",
+                    "group": "1_actions@1"
+                },
+                {
                     "command": "intelligit.conflictAcceptTheirs",
                     "when": "view == intelligit.mergeConflicts && viewItem == intelligit.conflictFile",
+                    "group": "1_actions@2"
+                },
+                {
+                    "command": "intelligit.conflictKeepLocalCommit",
+                    "when": "view == intelligit.mergeConflicts && viewItem == intelligit.rebaseConflictFile",
                     "group": "1_actions@2"
                 }
             ],

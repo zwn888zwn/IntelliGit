@@ -147,15 +147,22 @@ export async function handleCommitContextAction(params: {
             return;
         }
         case "resetCurrentToHere": {
-            const confirm = await vscode.window.showWarningMessage(
-                `Hard reset current branch to ${short}? This will reset the index and working tree and permanently discard any uncommitted changes.`,
-                { modal: true },
-                "Reset",
-            );
-            if (confirm !== "Reset") return;
+            const mode = await vscode.window.showQuickPick([
+                { label: "Keep working files (Mixed)", description: "Move the branch here and leave changes unstaged.", flag: "--mixed" },
+                { label: "Discard working changes (Hard)", description: "Restore tracked files and the index to this commit.", flag: "--hard" },
+            ], { title: `Reset current branch to ${short}`, placeHolder: "Choose what happens to your files" });
+            if (!mode) return;
+            if (mode.flag === "--hard") {
+                const confirm = await vscode.window.showWarningMessage(
+                    `Hard reset to ${short}? Uncommitted changes to tracked files will be lost.`,
+                    { modal: true }, "Discard Changes and Reset",
+                );
+                if (confirm !== "Discard Changes and Reset") return;
+            }
             try {
-                await executor.run(["reset", "--hard", validatedHash]);
-                vscode.window.showInformationMessage(`Reset current branch to ${short}.`);
+                await executor.run(["reset", mode.flag, validatedHash]);
+                const result = mode.flag === "--mixed" ? "Working files were kept." : "Tracked files were restored.";
+                vscode.window.showInformationMessage(`Reset current branch to ${short}. ${result}`);
             } catch (err) {
                 const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(`Reset failed: ${message}`);

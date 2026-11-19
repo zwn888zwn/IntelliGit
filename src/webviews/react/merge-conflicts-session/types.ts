@@ -7,6 +7,8 @@ export interface MergeConflictSessionFile extends MergeConflictFile {
 }
 
 export interface MergeConflictSessionData {
+    rebase?: boolean;
+    replayedCommit?: string;
     sourceBranch: string;
     targetBranch: string;
     files: MergeConflictSessionFile[];
@@ -18,6 +20,7 @@ export type OutboundMessage =
     | { type: "ready" }
     | { type: "refresh" }
     | { type: "openMerge"; filePath: string }
+    | { type: "keepUpstream" | "keepLocalCommit"; filePath: string; replayedCommit?: string }
     | { type: "acceptYours"; filePath: string }
     | { type: "acceptTheirs"; filePath: string }
     | { type: "resolveAllSimple" }

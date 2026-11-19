@@ -6,12 +6,14 @@ export class MergeConflictTreeItem extends vscode.TreeItem {
     constructor(
         public readonly filePath: string,
         workspaceRoot: vscode.Uri,
+        rebase = false,
     ) {
         const label = path.basename(filePath) || filePath;
         super(label, vscode.TreeItemCollapsibleState.None);
         this.description = path.dirname(filePath) === "." ? undefined : path.dirname(filePath);
         this.tooltip = filePath;
-        this.contextValue = "intelligit.conflictFile";
+        this.contextValue = rebase ? "intelligit.rebaseConflictFile" : "intelligit.conflictFile";
+        this.resourceUri = vscode.Uri.joinPath(workspaceRoot, filePath);
         this.iconPath = new vscode.ThemeIcon(
             "warning",
             new vscode.ThemeColor("problemsWarningIcon.foreground"),
@@ -29,6 +31,7 @@ export class MergeConflictsTreeProvider implements vscode.TreeDataProvider<Merge
     private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
+    private rebase = false;
     private conflicts: string[] = [];
 
     constructor(
@@ -43,6 +46,7 @@ export class MergeConflictsTreeProvider implements vscode.TreeDataProvider<Merge
     async refresh(): Promise<number> {
         try {
             this.conflicts = await this.gitOps.getConflictedFiles();
+            this.rebase = this.conflicts.length > 0 && await this.gitOps.isRebaseInProgress();
         } catch {
             this.conflicts = [];
             this._onDidChangeTreeData.fire();
@@ -61,7 +65,7 @@ export class MergeConflictsTreeProvider implements vscode.TreeDataProvider<Merge
         const repoRoot = this.getRepositoryRootUri();
         if (!repoRoot) return [];
         return this.conflicts.map(
-            (filePath) => new MergeConflictTreeItem(filePath, repoRoot),
+            (filePath) => new MergeConflictTreeItem(filePath, repoRoot, this.rebase),
         );
     }
 

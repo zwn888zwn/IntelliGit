@@ -89,6 +89,18 @@ exports.run = async () => {
         try {
             stagePanel.setRepositoryContext({ root: workspace, name: "test", repoId: "." });
             await stagePanel.refresh();
+            const checked = ["a.go", "games.go"].map(file => ({ repoRoot: workspace, path: file }));
+            await stagePanel.openWorkingFileDiff(checked[0], checked);
+            await stagePanel.navigateFile("next", vscode.window.activeTextEditor);
+            assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.label, "games.go (HEAD ↔ Working Tree) · 2/2");
+            const checkedState = await stagePanel.getDiffNavigationState(vscode.window.activeTextEditor);
+            assert.equal(checkedState.hasNext, false);
+            assert.equal(checkedState.totalFiles, 2);
+            await stagePanel.navigateFile("previous", vscode.window.activeTextEditor);
+            assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.label, "a.go (HEAD ↔ Working Tree) · 1/2");
+            await vscode.commands.executeCommand("workbench.action.closeModalEditor");
+            await until(() => vscode.window.tabGroups.all.length === 1, "close checked-file preview");
+            console.log("PASS: checked-file preview skips unchecked files in both directions");
             for (const staged of [true, false]) {
                 const label = staged ? "HEAD ↔ Index" : "Index ↔ Working Tree";
                 await stagePanel.openStageDiff({ repoRoot: workspace, path: "a.go" }, staged);

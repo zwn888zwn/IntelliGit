@@ -308,6 +308,7 @@ const gitOpsState = {
     commit: vi.fn(async () => "committed"),
     commitAndPush: vi.fn(async () => "committed and pushed"),
     isMergeInProgress: vi.fn(async () => false),
+    getReplayedCommitHash: vi.fn(async () => "abcd123"),
     isRebaseInProgress: vi.fn(async () => false),
     continueRebase: vi.fn(async () => "continued"),
     abortMerge: vi.fn(async () => ""),
@@ -810,6 +811,8 @@ vi.mock("../../src/git/operations", async (importOriginal) => {
             stageFile = gitOpsState.stageFile;
             commit = gitOpsState.commit;
             commitAndPush = gitOpsState.commitAndPush;
+            isRebaseInProgress = gitOpsState.isRebaseInProgress;
+            getReplayedCommitHash = gitOpsState.getReplayedCommitHash;
             isMergeInProgress = gitOpsState.isMergeInProgress;
             abortMerge = gitOpsState.abortMerge;
             getPendingCommitMessage = gitOpsState.getPendingCommitMessage;
@@ -914,6 +917,8 @@ vi.mock("../../src/services/RepositoryContextService", () => ({
         stageFile: gitOpsState.stageFile,
         commit: gitOpsState.commit,
         commitAndPush: gitOpsState.commitAndPush,
+        isRebaseInProgress: gitOpsState.isRebaseInProgress,
+        getReplayedCommitHash: gitOpsState.getReplayedCommitHash,
         isMergeInProgress: gitOpsState.isMergeInProgress,
         abortMerge: gitOpsState.abortMerge,
         getPendingCommitMessage: gitOpsState.getPendingCommitMessage,
@@ -2465,6 +2470,7 @@ describe("extension integration", () => {
     });
 
     it("restores a conflict session when a rebase awaits completion after activation", async () => {
+        gitOpsState.getReplayedCommitHash.mockResolvedValue("abcd123");
         gitOpsState.isRebaseInProgress.mockResolvedValue(true);
         const { activate } = await import("../../src/extension");
         const context = {
@@ -2487,6 +2493,9 @@ describe("extension integration", () => {
         await registeredCommands.get("intelligit.openConflictSession")?.();
         expect(createWebviewPanelMock).toHaveBeenCalledTimes(2);
 
+        expect(latestWebviewPanel?.webview.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            type: "setSessionData", data: expect.objectContaining({ rebase: true, replayedCommit: "abcd123" }),
+        }));
         await latestWebviewPanel?.emitMessage({ type: "acceptAndFinish" });
         expect(gitOpsState.continueRebase).toHaveBeenCalled();
     });
@@ -2920,6 +2929,24 @@ describe("extension integration", () => {
             }),
             expect.any(Function),
         );
+    });
+
+    it("defaults reset to mixed and only hard-resets after explicit confirmation", async () => {
+        const { handleCommitContextAction } = await import("../../src/commands/commitCommands");
+        const reset = () => handleCommitContextAction({
+            action: "resetCurrentToHere", hash: "abcd1234", executor: { run: executorRun } as never,
+            gitOps: gitOpsState as never, repoRoot: "/repo-a", currentBranches: [], refreshAll: async () => {},
+        });
+        await reset();
+        expect(executorRun).toHaveBeenCalledWith(["reset", "--mixed", "abcd1234"]);
+        showQuickPick.mockImplementationOnce(async items => items[1]);
+        showWarningMessage.mockResolvedValueOnce(undefined);
+        await reset();
+        expect(executorRun).not.toHaveBeenCalledWith(["reset", "--hard", "abcd1234"]);
+        showQuickPick.mockImplementationOnce(async items => items[1]);
+        showWarningMessage.mockResolvedValueOnce("Discard Changes and Reset");
+        await reset();
+        expect(executorRun).toHaveBeenCalledWith(["reset", "--hard", "abcd1234"]);
     });
 
     it("handles commit context actions forwarded from commit graph", async () => {
@@ -3926,7 +3953,7 @@ describe("extension integration", () => {
             );
 
             executorRun.mockImplementation(async (args: string[]) => {
-                if (args[0] === "reset" && args[1] === "--hard") throw new Error("reset failed");
+                if (args[0] === "reset" && args[1] === "--mixed") throw new Error("reset failed");
                 return defaultExecutorRunImpl(args);
             });
             const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});

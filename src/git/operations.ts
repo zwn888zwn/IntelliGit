@@ -878,6 +878,11 @@ export class GitOps {
         return false;
     }
 
+    async getReplayedCommitHash(): Promise<string | undefined> {
+        return this.executor.run(["rev-parse", "--verify", "--short", "REBASE_HEAD"])
+            .then(value => value.trim() || undefined, () => undefined);
+    }
+
     async continueRebase(): Promise<string> {
         return this.executor.run(["-c", "core.editor=true", "rebase", "--continue"]);
     }

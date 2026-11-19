@@ -95,8 +95,8 @@ export function CommitTab({
         const selected = files.filter((file) => checkedPaths.has(getCheckedFileKey(file)));
         if (selected.length > 0) {
             vscode.postMessage({
-                type: "showDiff",
-                target: { repoRoot: selected[0].repoRoot, path: selected[0].path },
+                type: "previewCheckedDiffs",
+                targets: selected.map(({ repoRoot, path }) => ({ repoRoot, path })),
             });
         }
     }, [vscode, checkedPaths, files]);

@@ -1263,6 +1263,26 @@ describe("MergeEditorApp integration", () => {
 });
 
 describe("MergeConflictSessionApp integration", () => {
+    it("labels both rebase sides and applies the side clicked for the displayed commit", async () => {
+        vi.resetModules();
+        const vscode = installVsCodeMock();
+        createRootHost();
+        await import("../../src/webviews/react/merge-conflicts-session/MergeConflictSessionApp");
+        await flush();
+        act(() => window.dispatchEvent(new MessageEvent("message", { data: {
+            type: "setSessionData", data: {
+                rebase: true, replayedCommit: "abc1234", sourceBranch: "origin/main", targetBranch: "topic",
+                selectedPath: "a.go", files: [{ path: "a.go", ours: "Modified", theirs: "Modified", resolved: false }],
+            },
+        } })));
+        expect(document.querySelector("thead")?.textContent).toContain("Upstream (origin/main)");
+        expect(document.querySelector("thead")?.textContent).toContain("Local commit (abc1234)");
+        for (const [label, type] of [["Keep upstream version", "keepUpstream"], ["Keep local commit version", "keepLocalCommit"]]) {
+            fireClick(Array.from(document.querySelectorAll("button")).find(b => b.textContent === label)!);
+            expect(vscode.postMessage).toHaveBeenCalledWith({ type, filePath: "a.go", replayedCommit: "abc1234" });
+        }
+    });
+
     it("uses host-selected conflict paths when opening the merge editor", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock();

@@ -176,7 +176,7 @@ export class MergeConflictSessionPanel {
         this.simpleConflictsResolved = false;
     }
 
-    private async handleMessage(msg: { type?: unknown; filePath?: unknown }): Promise<void> {
+    private async handleMessage(msg: { type?: unknown; filePath?: unknown; replayedCommit?: unknown }): Promise<void> {
         const type = typeof msg.type === "string" ? msg.type : "";
         switch (type) {
             case "ready":
@@ -196,11 +196,19 @@ export class MergeConflictSessionPanel {
                 await this.resolveAllSimpleConflicts();
                 return;
 
+            case "keepUpstream":
+            case "keepLocalCommit":
             case "acceptYours":
             case "acceptTheirs": {
                 const filePath = this.getFilePath(msg.filePath);
                 if (!filePath) return;
-                const side = type === "acceptYours" ? "ours" : "theirs";
+                const rebaseAction = type === "keepUpstream" || type === "keepLocalCommit";
+                if (rebaseAction && (!(await this.gitOps.isRebaseInProgress()) ||
+                    msg.replayedCommit !== await this.gitOps.getReplayedCommitHash())) {
+                    await this.postSessionData();
+                    return;
+                }
+                const side = type === "acceptYours" || type === "keepUpstream" ? "ours" : "theirs";
                 await runWithNotificationProgress(
                     `Accepting ${side} for ${filePath}...`,
                     async () => {
@@ -300,7 +308,10 @@ export class MergeConflictSessionPanel {
             },
         );
 
+        const rebase = await this.gitOps.isRebaseInProgress();
         const data: MergeConflictSessionData = {
+            rebase,
+            replayedCommit: rebase ? await this.gitOps.getReplayedCommitHash() : undefined,
             sourceBranch: this.sourceBranch,
             targetBranch: this.targetBranch,
             files: sessionFiles,

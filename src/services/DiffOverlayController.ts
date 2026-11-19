@@ -26,9 +26,12 @@ interface ComparisonSession {
 
 /** Open directly in the modal, including custom diff editors with opaque tab inputs. */
 export async function openCommitPanelDiff(original: vscode.Uri, modified: vscode.Uri, title: string,
-    source: vscode.Uri, useNativeViewer = false): Promise<void> {
-    if (await activeController?.openPanelDiff(original, modified, title, source, useNativeViewer)) return;
+    source: vscode.Uri, useNativeViewer = false): Promise<vscode.Tab | undefined> {
+    const tab = await activeController?.openPanelDiff(original, modified, title, source, useNativeViewer);
+    if (tab) return tab;
     await vscode.commands.executeCommand("vscode.diff", original, modified, title);
+    const active = vscode.window.tabGroups?.activeTabGroup?.activeTab;
+    return active?.label === title ? active : undefined;
 }
 
 /** Creates the comparison webview after its modal anchor exists. */
@@ -249,16 +252,16 @@ export class DiffOverlayController implements vscode.Disposable {
     }
 
     openPanelDiff(original: vscode.Uri, modified: vscode.Uri, title: string,
-        source: vscode.Uri, useNativeViewer: boolean): Promise<boolean> {
+        source: vscode.Uri, useNativeViewer: boolean): Promise<vscode.Tab | undefined> {
         const pending = this.panelQueue.then(() => this.openPanelTab(original, modified, title, source, useNativeViewer));
         this.panelQueue = pending.catch(() => {});
         return pending;
     }
 
     private async openPanelTab(original: vscode.Uri, modified: vscode.Uri, title: string,
-        source: vscode.Uri, useNativeViewer: boolean): Promise<boolean> {
+        source: vscode.Uri, useNativeViewer: boolean): Promise<vscode.Tab | undefined> {
         await this.ready;
-        if (!this.enabled()) return false;
+        if (!this.enabled()) return undefined;
         const groups = vscode.window.tabGroups;
         const main = groups.activeTabGroup;
         const previousGroups = new Set(groups.all);
@@ -271,7 +274,7 @@ export class DiffOverlayController implements vscode.Disposable {
         } catch (error) {
             this.moving = false;
             console.warn("IntelliGit: could not open diff in overlay", error);
-            return false;
+            return undefined;
         }
         try {
             const tab = await waitForNewTab(new Set(), candidate =>
@@ -282,7 +285,7 @@ export class DiffOverlayController implements vscode.Disposable {
             this.modalInputs = [expected];
             this.handled.add(tab);
             this.panelSources.set(tab, source);
-            return true;
+            return tab;
         } finally {
             this.moving = false;
             this.schedule();

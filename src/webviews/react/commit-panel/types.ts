@@ -26,6 +26,7 @@ export type OutboundMessage =
     | { type: "commitAndPush"; message: string; amend: boolean }
     | { type: "getLastCommitMessage"; repoRoot?: string }
     | { type: "rollback"; targets: RepoPathRef[] }
+    | { type: "previewCheckedDiffs"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
     | { type: "showStageDiff"; target: RepoPathRef; staged: boolean }
     | { type: "showAllDiffs"; repoRoot: string }

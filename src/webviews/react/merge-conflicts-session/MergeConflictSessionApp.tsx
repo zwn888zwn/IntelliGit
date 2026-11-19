@@ -25,6 +25,8 @@ function fileName(filePath: string): string {
 function App() {
     const [sourceBranch, setSourceBranch] = useState("incoming branch");
     const [targetBranch, setTargetBranch] = useState("current branch");
+    const [rebase, setRebase] = useState(false);
+    const [replayedCommit, setReplayedCommit] = useState<string>();
     const [files, setFiles] = useState<MergeConflictSessionFile[]>([]);
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [simpleConflictsResolved, setSimpleConflictsResolved] = useState(false);
@@ -35,6 +37,8 @@ function App() {
         const handler = (event: MessageEvent<InboundMessage>) => {
             if (event.data.type === "setSessionData") {
                 const next = event.data.data;
+                setRebase(Boolean(next.rebase));
+                setReplayedCommit(next.replayedCommit);
                 setSourceBranch(next.sourceBranch);
                 setTargetBranch(next.targetBranch);
                 setFiles(next.files);
@@ -102,6 +106,9 @@ function App() {
         getVsCodeApi().postMessage({ type: "acceptAndFinish" });
     }, []);
 
+    const upstreamLabel = sourceBranch === "incoming branch" ? "Upstream" : `Upstream (${sourceBranch})`;
+    const localLabel = replayedCommit ? `Local commit (${replayedCommit})` : "Local commit";
+
     const renderRow = (file: MergeConflictSessionFile) => {
         const selected = selectedPath === file.path;
         const showCount = simpleConflictsResolved && file.totalConflictCount !== undefined;
@@ -143,12 +150,12 @@ function App() {
 
     return (
         <div className="session-root">
-            <div className="session-header"><LuGitMerge size={20} aria-hidden="true" />Merge conflicts</div>
-            <div className="session-subtitle">
+            <div className="session-header"><LuGitMerge size={20} aria-hidden="true" />{rebase ? "Rebase conflicts" : "Merge conflicts"}</div>
+            {!rebase && <div className="session-subtitle">
                 <span title={sourceBranch}><LuGitBranch size={14} aria-hidden="true" />{sourceBranch}</span>
                 <LuArrowRight size={16} aria-label="into" />
                 <span title={targetBranch}><LuGitBranch size={14} aria-hidden="true" />{targetBranch}</span>
-            </div>
+            </div>}
 
             <div className="session-toolbar">
                 <button
@@ -182,8 +189,8 @@ function App() {
                     <thead>
                         <tr>
                             <th>File</th>
-                            <th>Yours ({targetBranch})</th>
-                            <th>Theirs ({sourceBranch})</th>
+                            <th>{rebase ? upstreamLabel : `Yours (${targetBranch})`}</th>
+                            <th>{rebase ? localLabel : `Theirs (${sourceBranch})`}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -210,6 +217,10 @@ function App() {
             <div className="session-footer">
                 <span />
                 <div className="footer-actions">
+                    {rebase && selectedFile && !selectedFile.resolved && <>
+                        <button className="action-btn" onClick={() => getVsCodeApi().postMessage({ type: "keepUpstream", filePath: selectedFile.path, replayedCommit })}>Keep upstream version</button>
+                        <button className="action-btn" onClick={() => getVsCodeApi().postMessage({ type: "keepLocalCommit", filePath: selectedFile.path, replayedCommit })}>Keep local commit version</button>
+                    </>}
                     <button className="close-btn" onClick={close}>
                         Close
                     </button>

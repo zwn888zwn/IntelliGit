@@ -941,6 +941,25 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("keeps checked preview navigation within the original selection", async () => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        gitOps.getStatus.mockResolvedValue(["a.ts", "b.ts", "c.ts"].map(path => ({
+            repoRoot: "/repo", repoId: ".", path, status: "M", staged: false, additions: 1, deletions: 0,
+        })));
+        await provider.refresh();
+        const targets = ["a.ts", "c.ts"].map(path => ({ repoRoot: "/repo", path }));
+        await webview.send({ type: "previewCheckedDiffs", targets });
+        expect(await provider.getDiffNavigationState()).toMatchObject({ currentFile: 1, totalFiles: 2 });
+        await provider.navigateFile("next");
+        expect(executeCommand).toHaveBeenCalledWith("vscode.diff", expect.anything(), expect.anything(), "c.ts (HEAD ↔ Working Tree) · 2/2");
+        expect(await provider.getDiffNavigationState()).toMatchObject({ currentFile: 2, totalFiles: 2, hasNext: false });
+        await provider.navigateFile("previous");
+        expect(await provider.getDiffNavigationState()).toMatchObject({ currentFile: 1, hasPrevious: false });
+        await webview.send({ type: "showDiff", target: targets[0] });
+        expect(await provider.getDiffNavigationState()).toMatchObject({ totalFiles: 3 });
+        provider.dispose();
+    });
+
     it("CommitPanelViewProvider keeps collection diff scopes separate and rejects stale stash requests", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         gitOps.getStatus.mockResolvedValue([

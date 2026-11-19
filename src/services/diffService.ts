@@ -1059,7 +1059,8 @@ export async function openWorkingTreeFileDiff(
     file: WorkingFile,
     repoRoot: string,
     gitOps: GitOps,
-): Promise<void> {
+    title = `${file.path} (HEAD ↔ Working Tree)`,
+): Promise<vscode.Tab | undefined> {
     const safePath = assertRepoRelativePath(file.path);
     const leftPath = safePath;
     const isKnownBinary = isBinaryFilePath(safePath);
@@ -1069,13 +1070,11 @@ export async function openWorkingTreeFileDiff(
         (file.status === "?" || file.status === "A") &&
         (await fileExists(workingTreeUri))
     ) {
-        const title = `${safePath} (HEAD ↔ Working Tree)`;
-        await openCommitPanelDiff(
+        return openCommitPanelDiff(
             await createTransparentImagePlaceholderUri(safePath, "left"),
             workingTreeUri,
             title, workingTreeUri, true,
         );
-        return;
     }
     if (
         isPreviewableImageFilePath(safePath) &&
@@ -1084,13 +1083,11 @@ export async function openWorkingTreeFileDiff(
         file.status !== "D" &&
         (await fileExists(workingTreeUri))
     ) {
-        const title = `${safePath} (HEAD ↔ Working Tree)`;
-        await openCommitPanelDiff(
+        return openCommitPanelDiff(
             createGitResourceUri(workingTreeUri, "HEAD"),
             workingTreeUri,
             title, workingTreeUri, true,
         );
-        return;
     }
     const leftContent =
         file.status === "?" || file.status === "A"
@@ -1147,8 +1144,7 @@ export async function openWorkingTreeFileDiff(
                 : workingTreeUri;
         }
     }
-    const title = `${safePath} (HEAD ↔ Working Tree)`;
-    await openCommitPanelDiff(leftDoc.uri, rightUri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
+    return openCommitPanelDiff(leftDoc.uri, rightUri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
 }
 
 export async function openStageFileDiff(

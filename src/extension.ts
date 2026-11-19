@@ -1736,7 +1736,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     const resolveConflictRepository = (ctx: unknown): RepositoryEntry | null => {
         if (!ctx || typeof ctx !== "object") return getCurrentRepository();
-        const maybe = ctx as { uri?: unknown; repoRoot?: unknown };
+        const maybe = ctx as { uri?: unknown; resourceUri?: unknown; repoRoot?: unknown };
         const repoRoot = typeof maybe.repoRoot === "string" ? maybe.repoRoot : undefined;
         if (repoRoot) {
             const repository = repositoryService
@@ -1744,7 +1744,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 .find((entry) => entry.root === repoRoot);
             if (repository) return repository;
         }
-        const uri = getUriFromUnknown(maybe.uri);
+        const uri = getUriFromUnknown(maybe.uri ?? maybe.resourceUri);
         return repositoryService.getRepositoryForUri(uri ?? undefined) ?? getCurrentRepository();
     };
 
@@ -1908,44 +1908,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 );
             },
         ),
-        vscode.commands.registerCommand("intelligit.conflictAcceptYours", async (ctx: unknown) => {
+        ...([
+            ["intelligit.conflictAcceptYours", "ours", "current branch", false],
+            ["intelligit.conflictAcceptTheirs", "theirs", "incoming branch", false],
+            ["intelligit.conflictKeepUpstream", "ours", "upstream version", true],
+            ["intelligit.conflictKeepLocalCommit", "theirs", "local commit version", true],
+        ] as const).map(([command, side, label, rebase]) => vscode.commands.registerCommand(command, async (ctx: unknown) => {
             const filePath = resolveConflictPath(ctx);
-            if (!filePath) return;
             const repository = resolveConflictRepository(ctx);
-            if (!repository) return;
+            if (!filePath || !repository) return;
             try {
-                await runWithNotificationProgress(
-                    `Accepting yours for ${filePath}...`,
-                    async () => {
-                        await repository.gitOps.acceptConflictSide(filePath, "ours");
-                    },
-                );
-                vscode.window.showInformationMessage(`Accepted yours for ${filePath}`);
+                if (await repository.gitOps.isRebaseInProgress() !== rebase) {
+                    await refreshService.refreshConflictUi();
+                    return;
+                }
+                await runWithNotificationProgress(`Accepting ${label} for ${filePath}...`, () =>
+                    repository.gitOps.acceptConflictSide(filePath, side));
+                vscode.window.showInformationMessage(`Accepted ${label} for ${filePath}`);
                 await handleConflictStateChanged(repository, filePath);
             } catch (error) {
-                const message = getErrorMessage(error);
-                vscode.window.showErrorMessage(`Accept yours failed: ${message}`);
+                vscode.window.showErrorMessage(`Accept ${label} failed: ${getErrorMessage(error)}`);
             }
-        }),
-        vscode.commands.registerCommand("intelligit.conflictAcceptTheirs", async (ctx: unknown) => {
-            const filePath = resolveConflictPath(ctx);
-            if (!filePath) return;
-            const repository = resolveConflictRepository(ctx);
-            if (!repository) return;
-            try {
-                await runWithNotificationProgress(
-                    `Accepting theirs for ${filePath}...`,
-                    async () => {
-                        await repository.gitOps.acceptConflictSide(filePath, "theirs");
-                    },
-                );
-                vscode.window.showInformationMessage(`Accepted theirs for ${filePath}`);
-                await handleConflictStateChanged(repository, filePath);
-            } catch (error) {
-                const message = getErrorMessage(error);
-                vscode.window.showErrorMessage(`Accept theirs failed: ${message}`);
-            }
-        }),
+        })),
     );
 
     // --- Branch action commands ---

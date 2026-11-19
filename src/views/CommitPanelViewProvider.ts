@@ -34,7 +34,7 @@ import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
-type WorkingDiffTarget = RepoPathRef & { staged?: boolean };
+type WorkingDiffTarget = RepoPathRef & { staged?: boolean; previewFiles?: RepoPathRef[] };
 
 export interface DiffNavigationState {
     active: boolean;
@@ -56,6 +56,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private lastFileCount = 0;
     private committing = false;
     private shelfActionInProgress = false;
+    private readonly previewTabs = new WeakMap<vscode.Tab, WorkingDiffTarget>();
     private activeFile: WorkingDiffTarget | null = null;
     private themeChangeDisposables: vscode.Disposable[] = [];
     private readonly iconTheme: IconThemeService;
@@ -213,7 +214,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 iconFonts,
                 suggestedCommitMessage,
             });
-            this.postToWebview({ type: "setActiveFile", target: this.activeFile });
+            this.postActiveFile();
         } finally {
             this.postToWebview({ type: "refreshing", active: false });
             void Promise.resolve(
@@ -305,14 +306,20 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         if (
             this.activeFile?.repoRoot === target?.repoRoot &&
             this.activeFile?.path === target?.path &&
-            this.activeFile?.staged === target?.staged
+            this.activeFile?.staged === target?.staged &&
+            this.activeFile?.previewFiles === target?.previewFiles
         ) {
             this.updateNavigationContexts();
             return;
         }
         this.activeFile = target;
-        this.postToWebview({ type: "setActiveFile", target });
+        this.postActiveFile();
         this.updateNavigationContexts();
+    }
+
+    private postActiveFile(): void {
+        const file = this.activeFile;
+        this.postToWebview({ type: "setActiveFile", target: file && { path: file.path, repoRoot: file.repoRoot } });
     }
 
     private updateNavigationContexts(): void {
@@ -322,7 +329,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     async getDiffNavigationState(
         editor: vscode.TextEditor | null | undefined = undefined,
     ): Promise<DiffNavigationState> {
-        if (editor === null) {
+        const tab = vscode.window.tabGroups?.activeTabGroup?.activeTab;
+        const preview = tab && this.previewTabs.get(tab);
+        if (editor === null && !preview) {
             return {
                 active: false,
                 hasPrevious: false,
@@ -331,7 +340,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 totalFiles: 0,
             };
         }
-        const activeFile = editor ? this.getEditorTarget(editor) : this.activeFile;
+        const activeFile = editor ? this.getEditorTarget(editor) : preview ?? this.activeFile;
         const files = this.getVisibleWorkingFileTargets(activeFile);
         let currentIndex = activeFile
             ? files.findIndex(
@@ -367,7 +376,10 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         // Read the scope from the original snapshot belonging to this specific tab.
         const groups = vscode.window.tabGroups;
         const group = groups?.all.find(candidate => candidate.viewColumn === editor.viewColumn) ?? groups?.activeTabGroup;
-        const input = group?.activeTab?.input;
+        const tab = group?.activeTab;
+        const preview = tab && this.previewTabs.get(tab);
+        if (preview) return preview;
+        const input = tab?.input;
         if (uri.scheme === "file" && vscode.TabInputTextDiff && input instanceof vscode.TabInputTextDiff &&
             input.modified.toString() === uri.toString()) {
             const original = this.getCommitDiffTargetForUri(input.original);
@@ -453,6 +465,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     private getVisibleWorkingFileTargets(scope: WorkingDiffTarget | null): RepoPathRef[] {
+        if (scope?.previewFiles) return scope.previewFiles;
         const targets: RepoPathRef[] = [];
         const seen = new Set<string>();
         for (const repository of this.getRepositories()) {
@@ -488,10 +501,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    async openWorkingFileDiff(target: RepoPathRef): Promise<void> {
+    async openWorkingFileDiff(target: RepoPathRef, previewFiles?: RepoPathRef[]): Promise<void> {
         const repository = this.getRepositoryEntry(target.repoRoot);
         const safePath = assertRepoRelativePath(target.path);
-        this.setActiveFile({ repoRoot: repository.root, path: safePath });
+        const active = { repoRoot: repository.root, path: safePath, previewFiles };
+        this.setActiveFile(active);
         const file =
             this.files.find((item) => item.repoRoot === repository.root && item.path === safePath) ??
             ({
@@ -500,7 +514,15 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 status: "M",
                 staged: false,
             } as WorkingFile);
-        await openWorkingTreeFileDiff(file, repository.root, repository.gitOps);
+        const index = previewFiles?.findIndex(item => item.path === safePath && item.repoRoot === repository.root);
+        const title = previewFiles && index !== undefined
+            ? `${safePath} (HEAD ↔ Working Tree) · ${index + 1}/${previewFiles.length}` : undefined;
+        const tab = await openWorkingTreeFileDiff(file, repository.root, repository.gitOps, title);
+        if (tab) this.previewTabs.delete(tab);
+        if (previewFiles) {
+            if (tab) this.previewTabs.set(tab, active);
+            this.setActiveFile(active);
+        }
     }
 
     async openStageDiff(target: RepoPathRef, staged: boolean): Promise<void> {
@@ -518,11 +540,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     async navigateFile(direction: "next" | "previous", editor?: vscode.TextEditor): Promise<void> {
-        const active = editor ? this.getEditorTarget(editor) : this.activeFile;
+        const tab = vscode.window.tabGroups?.activeTabGroup?.activeTab;
+        const active = editor ? this.getEditorTarget(editor) : (tab && this.previewTabs.get(tab)) ?? this.activeFile;
         const target = this.getAdjacentWorkingFileTarget(direction, active);
         if (!target) return;
         if (active?.staged !== undefined) await this.openStageDiff(target, active.staged);
-        else await this.openWorkingFileDiff(target);
+        else await this.openWorkingFileDiff(target, active?.previewFiles);
     }
 
     private groupTargetsByRepository(targets: RepoPathRef[]): Map<string, string[]> {
@@ -796,6 +819,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 }
                 vscode.window.showInformationMessage("Changes rolled back.");
                 await this.refreshData();
+                break;
+            }
+
+            case "previewCheckedDiffs": {
+                const targets = this.getMessageTargets(msg).filter(file => this.hasWorkingFile(file));
+                if (targets.length) await this.openWorkingFileDiff(targets[0], targets);
                 break;
             }
 
