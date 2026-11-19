@@ -1,13 +1,13 @@
 # IntelliGit - Jetbrains Git for VS Code
 
-IntelliGit brings a JetBrains-style Git workflow into VS Code, so you can stage, commit, inspect history, and manage branches without bouncing between multiple tools.
+IntelliGit brings a JetBrains-style Git workflow into VS Code, so you can commit selected files, inspect history, and manage branches without bouncing between multiple tools.
 
 ![alt text](image.png)
 
 ## How Users Benefit 
 
 - Move faster on daily Git work with one focused UI for commit, history, and branch actions.
-- Reduce context switching by keeping staging, diffs, commit graph, and commit details in IntelliGit panels.
+- Reduce context switching by keeping file selection, diffs, commit graph, and commit details in IntelliGit panels.
 - Handle risky Git operations with guardrails (confirmations and action availability rules for pushed/merge commits).
 - Get familiar behavior if you are coming from IntelliJ/PyCharm Git tooling.
 
@@ -35,7 +35,7 @@ Opening a `.json` file defaults to **IntelliGit JSON 预览**, a readonly custom
 
 ### 1) Commit and Shelf Workflow (Sidebar)
 
-- Commit tab with file tree, selective staging checkboxes (section/folder/file), diff open on click, and commit message area
+- Commit tab with file tree, commit selection checkboxes (section/folder/file), diff open on click, and commit message area
 - Toolbar actions: Refresh, Rollback, Group by Directory, Shelve, Show Diff Preview, Expand All, Collapse All
 - Commit, Commit and Push, and Amend support
 - Shelf tab for stash-based "shelf" workflow: save full or partial changes, then Apply, Pop, or Delete
@@ -110,7 +110,7 @@ Why this helps:
 
 1. Open a Git repository in VS Code.
 2. Open IntelliGit from the activity bar.
-3. Use the `Commit` tab to stage files, write a message, and commit.
+3. Use the `Commit` tab to select files, write a message, and commit.
 4. Open the bottom IntelliGit panel to inspect graph history, filter by branch, and review commit details.
 5. Use branch or commit context menus for advanced operations.
 

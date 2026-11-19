@@ -19,8 +19,6 @@ import type {
 export type OutboundMessage =
     | { type: "ready" }
     | { type: "refresh" }
-    | { type: "stageFiles"; targets: RepoPathRef[] }
-    | { type: "unstageFiles"; targets: RepoPathRef[] }
     | { type: "commitSelected"; targets: RepoPathRef[]; message: string; amend: boolean; push: boolean }
     | { type: "commit"; message: string; amend: boolean }
     | { type: "commitAndPush"; message: string; amend: boolean }
@@ -28,9 +26,7 @@ export type OutboundMessage =
     | { type: "rollback"; targets: RepoPathRef[] }
     | { type: "previewCheckedDiffs"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
-    | { type: "showStageDiff"; target: RepoPathRef; staged: boolean }
     | { type: "showAllDiffs"; repoRoot: string }
-    | { type: "showAllStageDiff"; repoRoot: string; staged: boolean }
     | {
           type: "shelveSave";
           name?: string;

@@ -13,7 +13,6 @@ import theme from "../../src/webviews/react/commit-panel/theme";
 import { CommitInfoPane } from "../../src/webviews/react/commit-info/CommitInfoPane";
 import { FileTree } from "../../src/webviews/react/commit-panel/components/FileTree";
 import { ShelfTab } from "../../src/webviews/react/commit-panel/components/ShelfTab";
-import { StageTab } from "../../src/webviews/react/commit-panel/components/StageTab";
 import { flush, initReactDomTestEnvironment, mount } from "./utils/reactDomTestUtils";
 
 initReactDomTestEnvironment();
@@ -98,39 +97,6 @@ describe("multi-diff UI scopes", () => {
 
         expect(onOpenChanges).toHaveBeenCalledWith("/repo");
         expect(onSelectRepository).not.toHaveBeenCalled();
-    });
-
-    it("keeps staged and unstaged open-all actions in separate scopes", () => {
-        const repo = repository("/repo");
-        renderUi(
-            <StageTab
-                repositories={[repo]}
-                files={[workingFile("src/staged.ts", "/repo", true), workingFile("src/work.ts")]}
-                groupByDir={false}
-            />,
-        );
-
-        const stagedButton = document.querySelector('button[aria-label="Open Staged Changes"]');
-        const unstagedButton = document.querySelector('button[aria-label="Open Unstaged Changes"]');
-        expect(stagedButton).not.toBeNull();
-        expect(unstagedButton).not.toBeNull();
-
-        click(stagedButton);
-        click(unstagedButton);
-
-        expect(vscode.postMessage).toHaveBeenNthCalledWith(1, {
-            type: "showAllStageDiff",
-            repoRoot: "/repo",
-            staged: true,
-        });
-        expect(vscode.postMessage).toHaveBeenNthCalledWith(2, {
-            type: "showAllStageDiff",
-            repoRoot: "/repo",
-            staged: false,
-        });
-        expect(vscode.postMessage).not.toHaveBeenCalledWith(
-            expect.objectContaining({ type: "showStageDiff" }),
-        );
     });
 
     it("uses the stash row index for an unselected row and does not expand it", () => {
@@ -326,11 +292,4 @@ describe("multi-diff UI scopes", () => {
         ).toBe(true);
     });
 
-    it("shows an empty stage scope without an enabled open-all action", () => {
-        renderUi(<StageTab files={[]} repositories={[repository("/repo")]} groupByDir={false} />);
-
-        expect(document.body.textContent).toContain("No changes");
-        expect(document.querySelector('button[aria-label="Open Staged Changes"]')).toBeNull();
-        expect(document.querySelector('button[aria-label="Open Unstaged Changes"]')).toBeNull();
-    });
 });

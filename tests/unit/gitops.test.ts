@@ -693,8 +693,8 @@ describe("GitOps", () => {
             ]);
         });
 
-        it("emits two entries for files with both staged and unstaged changes", async () => {
-            const statusOutput = "MM src/both.ts\0";
+        it.each(["MM", "AM"])("retains both versions of externally staged files (%s)", async code => {
+            const statusOutput = code + " src/both.ts\0";
 
             const executor = {
                 run: vi.fn(async (args: string[]) => {
@@ -824,24 +824,6 @@ describe("GitOps", () => {
             const executor = createMockExecutor({});
             const ops = new GitOps(executor);
             await ops.stageFiles([]);
-            expect(executor.run).not.toHaveBeenCalled();
-        });
-    });
-
-    describe("unstageFiles", () => {
-        it("calls git reset HEAD with paths", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.unstageFiles(["src/a.ts"]);
-
-            const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["reset", "HEAD", "--", "src/a.ts"]);
-        });
-
-        it("skips empty paths array", async () => {
-            const executor = createMockExecutor({});
-            const ops = new GitOps(executor);
-            await ops.unstageFiles([]);
             expect(executor.run).not.toHaveBeenCalled();
         });
     });

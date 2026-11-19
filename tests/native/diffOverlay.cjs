@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { DiffOverlayController, showComparisonInOverlay } = require("../../src/services/DiffOverlayController");
-const { registerDiffContentProvider, openCommitFileDiff, openBranchComparisonFileDiff, openWorkingTreeFileDiff, openStageFileDiff } = require("../../src/services/diffService");
+const { registerDiffContentProvider, openCommitFileDiff, openBranchComparisonFileDiff, openWorkingTreeFileDiff } = require("../../src/services/diffService");
 
 const { CommitPanelViewProvider } = require("../../src/views/CommitPanelViewProvider");
 
@@ -65,17 +65,6 @@ exports.run = async () => {
             main.activeTab.input.uri.toString() === markdown.toString(), "single-file Markdown preview");
         console.log("PASS: untracked Markdown opens in a diff overlay and exits to the rendered file");
         await vscode.window.tabGroups.close(main.activeTab);
-        // The right side of a staged diff is an index snapshot. Source navigation
-        // must still open the working copy in its configured, single-file editor.
-        await openStageFileDiff({ path: "games.go", staged: true, status: "M" }, workspace, {
-            getFileContentAtRef: async (_, ref) => ref === ":0" ? "// staged" : "// committed",
-        });
-        assert.equal(main.tabs.length, 1);
-        assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.input.modified.scheme, "intelligit-diff");
-        await vscode.commands.executeCommand("intelligit.openOverlaySource");
-        await until(() => vscode.window.tabGroups.all.length === 1 &&
-            main.activeTab?.input.uri?.toString() === modified.toString(), "staged diff opens working copy");
-        await vscode.window.tabGroups.close(main.activeTab);
         const rootUri = vscode.Uri.file(workspace);
         const files = ["a.go", "b.go", "games.go"];
         for (const file of files.slice(0, 2)) await fs.writeFile(path.join(workspace, file), "// working tree\n");
@@ -85,41 +74,24 @@ exports.run = async () => {
             getFileContentAtRef: async (_, ref) => "// " + ref,
             listShelved: async () => [], getPendingCommitMessage: async () => "",
         };
-        const stagePanel = new CommitPanelViewProvider(rootUri, git, () => rootUri);
+        const commitPanel = new CommitPanelViewProvider(rootUri, git, () => rootUri);
         try {
-            stagePanel.setRepositoryContext({ root: workspace, name: "test", repoId: "." });
-            await stagePanel.refresh();
+            commitPanel.setRepositoryContext({ root: workspace, name: "test", repoId: "." });
+            await commitPanel.refresh();
             const checked = ["a.go", "games.go"].map(file => ({ repoRoot: workspace, path: file }));
-            await stagePanel.openWorkingFileDiff(checked[0], checked);
-            await stagePanel.navigateFile("next", vscode.window.activeTextEditor);
+            await commitPanel.openWorkingFileDiff(checked[0], checked);
+            await commitPanel.navigateFile("next", vscode.window.activeTextEditor);
             assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.label, "games.go (HEAD ↔ Working Tree) · 2/2");
-            const checkedState = await stagePanel.getDiffNavigationState(vscode.window.activeTextEditor);
+            const checkedState = await commitPanel.getDiffNavigationState(vscode.window.activeTextEditor);
             assert.equal(checkedState.hasNext, false);
             assert.equal(checkedState.totalFiles, 2);
-            await stagePanel.navigateFile("previous", vscode.window.activeTextEditor);
+            await commitPanel.navigateFile("previous", vscode.window.activeTextEditor);
             assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.label, "a.go (HEAD ↔ Working Tree) · 1/2");
             await vscode.commands.executeCommand("workbench.action.closeModalEditor");
             await until(() => vscode.window.tabGroups.all.length === 1, "close checked-file preview");
             console.log("PASS: checked-file preview skips unchecked files in both directions");
-            for (const staged of [true, false]) {
-                const label = staged ? "HEAD ↔ Index" : "Index ↔ Working Tree";
-                await stagePanel.openStageDiff({ repoRoot: workspace, path: "a.go" }, staged);
-                await until(() => vscode.window.activeTextEditor?.document.uri.toString() ===
-                    vscode.window.tabGroups.activeTabGroup.activeTab?.input.modified?.toString(), "Stage diff modified side");
-                await stagePanel.navigateFile("next", vscode.window.activeTextEditor);
-                const next = staged ? "games.go" : "b.go";
-                await until(() => vscode.window.tabGroups.activeTabGroup.activeTab?.label === `${next} (${label})`,
-                    "next diff in the same Stage section");
-                await until(() => vscode.window.activeTextEditor?.document.uri.toString() ===
-                    vscode.window.tabGroups.activeTabGroup.activeTab?.input.modified?.toString(), "next modified side");
-                await stagePanel.navigateFile("previous", vscode.window.activeTextEditor);
-                assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab.label, `a.go (${label})`);
-                await vscode.commands.executeCommand("workbench.action.closeModalEditor");
-                await until(() => vscode.window.tabGroups.all.length === 1, "close Stage section diff");
-            }
-            console.log("PASS: Stage previous and next preserve staged and unstaged ranges");
         } finally {
-            stagePanel.dispose();
+            commitPanel.dispose();
         }
         const document = await vscode.workspace.openTextDocument(modified);
         const edit = new vscode.WorkspaceEdit();

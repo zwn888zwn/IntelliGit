@@ -8,7 +8,6 @@ import { ChakraProvider, Box } from "@chakra-ui/react";
 import theme from "./theme";
 import { TabBar } from "./components/TabBar";
 import { CommitTab } from "./components/CommitTab";
-import { StageTab } from "./components/StageTab";
 import { ShelfTab } from "./components/ShelfTab";
 import { StashDialog } from "./components/StashDialog";
 import { useExtensionMessages } from "./hooks/useExtensionMessages";
@@ -27,6 +26,8 @@ function App(): React.ReactElement {
         for (const file of state.files) {
             const key = getCheckedFileKey(file);
             const current = byPath.get(key);
+            // An externally staged addition is still a new file after another edit.
+            if (current?.status === "A" && file.status === "M") continue;
             if (!current || !file.staged) byPath.set(key, file);
         }
         return Array.from(byPath.values());
@@ -92,7 +93,7 @@ function App(): React.ReactElement {
         [dispatch],
     );
 
-    const stageCheckedAndCommit = useCallback(
+    const commitCheckedFiles = useCallback(
         (push: boolean) => {
             vscode.postMessage({
                 type: "commitSelected",
@@ -106,12 +107,12 @@ function App(): React.ReactElement {
     );
 
     const handleCommit = useCallback(() => {
-        stageCheckedAndCommit(false);
-    }, [stageCheckedAndCommit]);
+        commitCheckedFiles(false);
+    }, [commitCheckedFiles]);
 
     const handleCommitAndPush = useCallback(() => {
-        stageCheckedAndCommit(true);
-    }, [stageCheckedAndCommit]);
+        commitCheckedFiles(true);
+    }, [commitCheckedFiles]);
 
     const handleOpenStashDialog = useCallback(() => {
         setStashRepoRoot(
@@ -158,16 +159,6 @@ function App(): React.ReactElement {
                 />
                 <TabBar
                     stashCount={state.stashes.length}
-                    stageContent={
-                        <StageTab
-                            files={state.files}
-                            repositories={repositories}
-                            folderIcon={state.folderIcon}
-                            folderExpandedIcon={state.folderExpandedIcon}
-                            folderIconsByName={state.folderIconsByName}
-                            groupByDir={groupByDir}
-                        />
-                    }
                     commitContent={
                         <CommitTab
                             files={commitFiles}

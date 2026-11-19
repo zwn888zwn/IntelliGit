@@ -7,7 +7,6 @@ import { Tabs, TabList, Tab, TabPanels, TabPanel } from "@chakra-ui/react";
 interface Props {
     stashCount: number;
     commitContent: React.ReactNode;
-    stageContent: React.ReactNode;
     shelfContent: React.ReactNode;
 }
 
@@ -30,12 +29,10 @@ const sharedTabStyles = {
 export function TabBar({
     stashCount,
     commitContent,
-    stageContent,
     shelfContent,
 }: Props): React.ReactElement {
     const tabs: Array<{ key: string; label: string; content: React.ReactNode }> = [
         { key: "commit", label: "Commit", content: commitContent },
-        { key: "stage", label: "Stage", content: stageContent },
         {
             key: "shelf",
             label: `Stash${stashCount > 0 ? ` (${stashCount})` : ""}`,

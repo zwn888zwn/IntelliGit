@@ -41,7 +41,6 @@ import {
     openBranchComparisonChanges,
     openCommitChanges,
     openShelvedChanges,
-    openStageChanges,
     openWorkingTreeChanges,
 } from "../../src/services/multiDiffService";
 import { GitExecutor } from "../../src/git/executor";
@@ -131,28 +130,6 @@ describe("multi diff resources", () => {
         expect(resources).toHaveLength(1);
         expect(resources[0][0].fsPath).toBe("/repo/new.txt");
         expect(query(resources[0][1]!)).toMatchObject({ path: "/repo/old.txt", ref: head });
-        expect(resources[0][2]!.scheme).toBe("file");
-    });
-
-    it("uses an empty ref for the index in staged and unstaged native tuples", async () => {
-        const head = hash("b");
-        const executor = makeExecutor((args) => {
-            if (args[0] === "rev-parse") return `${head}\n`;
-            if (args[0] === "diff" && args.includes("--cached")) return "M\0staged.txt\0";
-            if (args[0] === "diff") return "M\0unstaged.txt\0";
-            if (args[0] === "ls-files") return "";
-            throw new Error(`unexpected git args: ${args.join(" ")}`);
-        });
-        await openStageChanges([workingFile("staged.txt", true)], repoRoot, executor, true);
-        let [, rawResources] = lastChangesCall();
-        let resources = rawResources as TestResource[];
-        expect(query(resources[0][1]!).ref).toBe(head);
-        expect(query(resources[0][2]!).ref).toBe("");
-        executeCommand.mockClear();
-        await openStageChanges([workingFile("unstaged.txt")], repoRoot, executor, false);
-        [, rawResources] = lastChangesCall();
-        resources = rawResources as TestResource[];
-        expect(query(resources[0][1]!).ref).toBe("");
         expect(resources[0][2]!.scheme).toBe("file");
     });
 
@@ -280,7 +257,7 @@ describe("multi diff resources", () => {
 });
 
 describe("multi diff against real Git repositories", () => {
-    it("keeps HEAD, index, and working tree bytes distinct for a partial staged edit", async () => {
+    it("compares HEAD with the working file even when another version is staged", async () => {
         const cwd = makeGitFixture();
         try {
             fs.writeFileSync(path.join(cwd, "partial.txt"), "head\n");
@@ -291,17 +268,10 @@ describe("multi diff against real Git repositories", () => {
             git(cwd, "add", "partial.txt");
             fs.writeFileSync(path.join(cwd, "partial.txt"), "working\n");
             const executor = new GitExecutor(cwd);
-            await openStageChanges([workingFile("partial.txt", true)], cwd, executor, true);
-            let [original, modified] = getResourceTuples()[0].slice(1) as [MockUri, MockUri];
+            await openWorkingTreeChanges([workingFile("partial.txt")], cwd, executor);
+            const [original, modified] = getResourceTuples()[0].slice(1) as [MockUri, MockUri];
             expect(query(original).ref).toBe(head);
             expect(gitContent(cwd, original).toString()).toBe("head\n");
-            expect(query(modified).ref).toBe("");
-            expect(gitContent(cwd, modified).toString()).toBe("index\n");
-            executeCommand.mockClear();
-            await openStageChanges([workingFile("partial.txt")], cwd, executor, false);
-            [original, modified] = getResourceTuples()[0].slice(1) as [MockUri, MockUri];
-            expect(query(original).ref).toBe("");
-            expect(gitContent(cwd, original).toString()).toBe("index\n");
             expect(modified.scheme).toBe("file");
             expect(fs.readFileSync(modified.fsPath).toString()).toBe("working\n");
         } finally {

@@ -21,12 +21,10 @@ import {
     getDiffOriginalFilePathFromUri,
     getRepoRelativeFilePathFromUri,
     openShelvedFileDiff,
-    openStageFileDiff,
     openWorkingTreeFileDiff,
 } from "../services/diffService";
 import {
     openShelvedChanges,
-    openStageChanges,
     openWorkingTreeChanges,
 } from "../services/multiDiffService";
 import { buildFileTree, type TreeEntry } from "../webviews/react/shared/fileTree";
@@ -34,7 +32,7 @@ import type { InboundMessage } from "../webviews/react/commit-panel/types";
 import { IconThemeService } from "./shared";
 import { registerThemeChangeListeners, disposeAll } from "./shared/themeListeners";
 import type { RepositoryEntry } from "../services/RepositoryContextService";
-type WorkingDiffTarget = RepoPathRef & { staged?: boolean; previewFiles?: RepoPathRef[] };
+type WorkingDiffTarget = RepoPathRef & { previewFiles?: RepoPathRef[] };
 
 export interface DiffNavigationState {
     active: boolean;
@@ -306,7 +304,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         if (
             this.activeFile?.repoRoot === target?.repoRoot &&
             this.activeFile?.path === target?.path &&
-            this.activeFile?.staged === target?.staged &&
             this.activeFile?.previewFiles === target?.previewFiles
         ) {
             this.updateNavigationContexts();
@@ -348,7 +345,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                       file.repoRoot === activeFile.repoRoot && file.path === activeFile.path,
               )
             : -1;
-        if (!activeFile || (activeFile.staged !== undefined && currentIndex < 0)) {
+        if (!activeFile) {
             return {
                 active: false,
                 hasPrevious: false,
@@ -372,19 +369,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
     private getEditorTarget(editor: vscode.TextEditor): WorkingDiffTarget | null {
         const uri = editor.document.uri;
-        // The editable side of an unstaged diff shares its URI with the ordinary file editor.
-        // Read the scope from the original snapshot belonging to this specific tab.
         const groups = vscode.window.tabGroups;
         const group = groups?.all.find(candidate => candidate.viewColumn === editor.viewColumn) ?? groups?.activeTabGroup;
         const tab = group?.activeTab;
         const preview = tab && this.previewTabs.get(tab);
         if (preview) return preview;
-        const input = tab?.input;
-        if (uri.scheme === "file" && vscode.TabInputTextDiff && input instanceof vscode.TabInputTextDiff &&
-            input.modified.toString() === uri.toString()) {
-            const original = this.getCommitDiffTargetForUri(input.original);
-            if (original?.staged !== undefined) return original;
-        }
         return this.getTargetForUri(uri);
     }
 
@@ -406,18 +395,10 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             return null;
         }
         const query = new URLSearchParams(uri.query);
-        const scope = query.get("stageScope");
         const ref = query.get("ref");
-        if (!scope && ref !== "HEAD" && ref !== "working-tree") return null;
+        if (ref !== "HEAD" && ref !== "working-tree") return null;
         const filePath = getDiffOriginalFilePathFromUri(uri);
         if (!filePath) return null;
-        if (scope === "staged" || scope === "unstaged") {
-            const source = query.get("sourceFsPath");
-            if (!source) return null;
-            const file = vscode.Uri.file(source);
-            const repository = this.getRepositories().find(repo => getRepoRelativeFilePathFromUri(file, repo.root) === filePath);
-            return repository ? { repoRoot: repository.root, path: filePath, staged: scope === "staged" } : null;
-        }
         if (this.activeFile?.path === filePath) return { repoRoot: this.activeFile.repoRoot, path: filePath };
         for (const repository of this.getRepositories()) {
             const target = { repoRoot: repository.root, path: filePath };
@@ -470,12 +451,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         const seen = new Set<string>();
         for (const repository of this.getRepositories()) {
             const repoFiles = this.files.filter((file) => file.repoRoot === repository.root);
-            if (scope?.staged !== undefined) {
-                if (repository.root === scope.repoRoot) {
-                    this.pushVisibleTreeTargets(targets, seen, buildFileTree(repoFiles.filter(file => file.staged === scope.staged)));
-                }
-                continue;
-            }
             const tracked = repoFiles.filter((file) => file.status !== "?");
             const unversioned = repoFiles.filter((file) => file.status === "?");
             this.pushVisibleTreeTargets(targets, seen, buildFileTree(tracked));
@@ -525,27 +500,11 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    async openStageDiff(target: RepoPathRef, staged: boolean): Promise<void> {
-        const repository = this.getRepositoryEntry(target.repoRoot);
-        const safePath = assertRepoRelativePath(target.path);
-        this.setActiveFile({ repoRoot: repository.root, path: safePath, staged });
-        const file = this.files.find(
-            (item) =>
-                item.repoRoot === repository.root &&
-                item.path === safePath &&
-                item.staged === staged,
-        );
-        if (!file) throw new Error(`File status is no longer available: ${safePath}`);
-        await openStageFileDiff(file, repository.root, repository.gitOps);
-    }
-
     async navigateFile(direction: "next" | "previous", editor?: vscode.TextEditor): Promise<void> {
         const tab = vscode.window.tabGroups?.activeTabGroup?.activeTab;
         const active = editor ? this.getEditorTarget(editor) : (tab && this.previewTabs.get(tab)) ?? this.activeFile;
         const target = this.getAdjacentWorkingFileTarget(direction, active);
-        if (!target) return;
-        if (active?.staged !== undefined) await this.openStageDiff(target, active.staged);
-        else await this.openWorkingFileDiff(target, active?.previewFiles);
+        if (target) await this.openWorkingFileDiff(target, active?.previewFiles);
     }
 
     private groupTargetsByRepository(targets: RepoPathRef[]): Map<string, string[]> {
@@ -753,24 +712,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 await this.refreshData();
                 break;
 
-            case "stageFiles": {
-                const targets = this.getMessageTargets(msg);
-                await this.runGroupedTargets(targets, async (repository, paths) => {
-                    await repository.gitOps.stageFiles(paths);
-                });
-                await this.refreshData();
-                break;
-            }
-
-            case "unstageFiles": {
-                const targets = this.getMessageTargets(msg);
-                await this.runGroupedTargets(targets, async (repository, paths) => {
-                    await repository.gitOps.unstageFiles(paths);
-                });
-                await this.refreshData();
-                break;
-            }
-
             case "commitSelected":
             case "commit":
             case "commitAndPush": {
@@ -834,31 +775,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 break;
             }
 
-            case "showStageDiff": {
-                const target = this.getMessageTarget(msg);
-                await this.openStageDiff(target, msg.staged === true);
-                break;
-            }
-
             case "showAllDiffs": {
                 const repoRoot = this.assertString(msg.repoRoot, "repoRoot");
                 const repository = this.getRepositoryEntry(repoRoot);
                 const files = this.files.filter((file) => file.repoRoot === repository.root);
                 if (files.length > 0) {
                     await openWorkingTreeChanges(files, repository.root, repository.executor);
-                }
-                break;
-            }
-
-            case "showAllStageDiff": {
-                const repoRoot = this.assertString(msg.repoRoot, "repoRoot");
-                const staged = msg.staged === true;
-                const repository = this.getRepositoryEntry(repoRoot);
-                const files = this.files.filter(
-                    (file) => file.repoRoot === repository.root && file.staged === staged,
-                );
-                if (files.length > 0) {
-                    await openStageChanges(files, repository.root, repository.executor, staged);
                 }
                 break;
             }

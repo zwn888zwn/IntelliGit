@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const multiDiffMocks = vi.hoisted(() => ({
     openWorkingTreeChanges: vi.fn(async () => undefined),
-    openStageChanges: vi.fn(async () => undefined),
     openShelvedChanges: vi.fn(async () => undefined),
 }));
 vi.mock("../../src/services/multiDiffService", () => multiDiffMocks);
@@ -297,7 +296,6 @@ function makeGitOpsMock() {
             { path: "src/a.ts", status: "M", staged: false, additions: 2, deletions: 1 },
         ]),
         stageFiles: vi.fn(async () => undefined),
-        unstageFiles: vi.fn(async () => undefined),
         commit: vi.fn(async () => "ok"),
         push: vi.fn(async () => "ok"),
         getPushHead: vi.fn(async () => "abcdef123456\nrefs/heads/main"),
@@ -1002,13 +1000,6 @@ describe("view providers integration", () => {
                 expect.objectContaining({ path: "same.ts", staged: true, repoRoot: "/repo" }),
             ]), "/repo", expect.anything(),
         );
-        for (const staged of [false, true]) {
-            await webview.send({ type: "showAllStageDiff", repoRoot: "/repo", staged });
-            expect(multiDiffMocks.openStageChanges).toHaveBeenLastCalledWith(
-                [expect.objectContaining({ path: "same.ts", staged, repoRoot: "/repo" })],
-                "/repo", expect.anything(), staged,
-            );
-        }
         await webview.send({ type: "showAllShelfDiff", repoRoot: "/repo", index: 0, hash: "stashhash" });
         expect(multiDiffMocks.openShelvedChanges).toHaveBeenCalledWith(
             0, "/repo", expect.anything(), "stashhash",
@@ -1175,18 +1166,6 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
-    it("CommitPanelViewProvider handles staging and unstaging", async () => {
-        const { provider, gitOps, webview } = await setupCommitPanelProvider();
-        expect(gitOps.getStatus).toHaveBeenCalled();
-        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "update" }));
-
-        await webview.send({ type: "stageFiles", paths: ["src/a.ts"] });
-        await webview.send({ type: "unstageFiles", paths: ["src/a.ts"] });
-        expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
-        expect(gitOps.unstageFiles).toHaveBeenCalledWith(["src/a.ts"]);
-        provider.dispose();
-    });
-
     it("CommitPanelViewProvider handles commit flows", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         await webview.send({ type: "commit", message: "", amend: false });
@@ -1332,7 +1311,7 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
-    it("CommitPanelViewProvider warns for partially staged files and opens stage-specific diffs", async () => {
+    it("CommitPanelViewProvider warns before committing newer edits to externally staged files", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         gitOps.getStatus.mockResolvedValue([
             {
@@ -1381,26 +1360,6 @@ describe("view providers integration", () => {
         });
         expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
 
-        await webview.send({
-            type: "showStageDiff",
-            target: { repoRoot: "/repo", path: "src/a.ts" },
-            staged: true,
-        });
-        const stageDiffDocuments = openTextDocument.mock.calls
-            .map(([uri]) => uri)
-            .filter((uri) => uri?.scheme === "intelligit-diff");
-        expect(stageDiffDocuments).toHaveLength(2);
-        for (const uri of stageDiffDocuments) {
-            expect(uri.query).toContain("intelligitCommitDiff=1");
-            expect(uri.query).toContain("originalPath=src%2Fa.ts");
-            expect(uri.query).toContain("sourceFsPath=%2Frepo%2Fsrc%2Fa.ts");
-        }
-        expect(executeCommand).toHaveBeenCalledWith(
-            "vscode.diff",
-            expect.anything(),
-            expect.anything(),
-            "src/a.ts (HEAD ↔ Index)",
-        );
         provider.dispose();
     });
 
@@ -2228,27 +2187,6 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
-    it.each([true, false])("keeps Stage navigation in its original section (staged=%s)", async staged => {
-        const { provider, gitOps, webview } = await setupCommitPanelProvider();
-        const row = (path: string, staged: boolean) => ({ repoRoot: "/repo", path, status: "M", staged, additions: 1, deletions: 0 });
-        gitOps.getStatus.mockResolvedValue([row("a.go", true), row("a.go", false), row("b.go", !staged), row("c.go", staged)]);
-        await webview.send({ type: "refresh" });
-        await webview.send({ type: "showStageDiff", target: { repoRoot: "/repo", path: "a.go" }, staged });
-        const firstTab = executeCommand.mock.calls.filter(([command]) => command === "vscode.diff").at(-1)!;
-        const editor = { document: { uri: firstTab[1] } } as never;
-        expect(await provider.getDiffNavigationState(editor)).toMatchObject({ totalFiles: 2, currentFile: 1, hasNext: true });
-        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: "b.go" });
-        // Returning to an older diff must use its own scope, even when the same file appears in both sections.
-        await provider.navigateFile("next", editor);
-        const nextTab = executeCommand.mock.calls.filter(([command]) => command === "vscode.diff").at(-1)!;
-        const label = staged ? "HEAD ↔ Index" : "Index ↔ Working Tree";
-        expect(nextTab[3]).toBe(`c.go (${label})`);
-        expect(await provider.getDiffNavigationState()).toMatchObject({ currentFile: 2, hasNext: false, hasPrevious: true });
-        await provider.navigateFile("previous");
-        expect(executeCommand.mock.calls.filter(([c]) => c === "vscode.diff").at(-1)![3]).toBe(`a.go (${label})`);
-        provider.dispose();
-    });
-
     it("CommitPanelViewProvider handles shelf operations", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         await webview.send({
@@ -2325,10 +2263,10 @@ describe("view providers integration", () => {
     it("CommitPanelViewProvider rejects malformed array payloads strictly", async () => {
         const { provider, webview } = await setupCommitPanelProvider();
         // Mixed array with non-string elements should fail, not silently filter
-        await webview.send({ type: "stageFiles", paths: ["src/a.ts", 42] });
+        await webview.send({ type: "previewCheckedDiffs", paths: ["src/a.ts", 42] });
         expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("all elements"));
         // Non-array should also fail
-        await webview.send({ type: "unstageFiles", paths: "not-an-array" });
+        await webview.send({ type: "previewCheckedDiffs", paths: "not-an-array" });
         expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Expected string[]"));
         provider.dispose();
     });
@@ -2346,10 +2284,10 @@ describe("view providers integration", () => {
 
     it("CommitPanelViewProvider surfaces operation errors", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
-        gitOps.stageFiles.mockRejectedValueOnce(new Error("stage failed"));
-        await webview.send({ type: "stageFiles", paths: ["src/a.ts"] });
-        expect(showErrorMessage).toHaveBeenCalledWith("stage failed");
-        expect(postMessageSpy).toHaveBeenCalledWith({ type: "error", message: "stage failed" });
+        gitOps.shelveSave.mockRejectedValueOnce(new Error("stash failed"));
+        await webview.send({ type: "shelveSave", paths: ["src/a.ts"] });
+        expect(showErrorMessage).toHaveBeenCalledWith("stash failed");
+        expect(postMessageSpy).toHaveBeenCalledWith({ type: "error", message: "stash failed" });
         provider.dispose();
     });
 

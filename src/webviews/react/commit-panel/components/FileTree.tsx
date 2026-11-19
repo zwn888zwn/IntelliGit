@@ -384,7 +384,7 @@ function TreeEntries({
                 if (entry.type === "file") {
                     return (
                         <FileRow
-                            key={`${entry.file.repoRoot}:${entry.file.path}:${entry.file.staged ? "staged" : "unstaged"}`}
+                            key={`${entry.file.repoRoot}:${entry.file.path}`}
                             file={entry.file}
                             depth={depth}
                             isChecked={checkedPaths.has(getCheckedFileKey(entry.file))}

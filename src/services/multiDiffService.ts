@@ -20,10 +20,6 @@ interface DiffEntry {
 
 type ResourceTuple = [vscode.Uri, vscode.Uri | undefined, vscode.Uri | undefined];
 
-// VS Code's Git file-system provider treats an empty ref as the index. A
-// literal ":" would be interpolated as `::path` by the provider.
-const INDEX_REF = "";
-
 function workingTreeUri(repoRoot: string, filePath: string): vscode.Uri {
     return vscode.Uri.file(path.join(repoRoot, filePath));
 }
@@ -210,17 +206,6 @@ async function workingEntries(executor: GitExecutor, headHash: string | null): P
         );
 }
 
-async function stageEntries(
-    executor: GitExecutor,
-    headHash: string | null,
-    staged: boolean,
-): Promise<DiffEntry[]> {
-    if (staged) {
-        return diffEntries(executor, headHash ? ["--cached", headHash] : ["--cached"]);
-    }
-    return mergeEntries(await diffEntries(executor, []), await untrackedEntries(executor));
-}
-
 function stashIndexRef(index: number): string {
     if (!Number.isInteger(index) || index < 0) throw new Error(`Invalid stash index: ${index}`);
     return `stash@{${index}}`;
@@ -237,27 +222,6 @@ export async function openWorkingTreeChanges(
         "Working Tree Changes",
         toResources(entries, repoRoot, headHash ?? EMPTY_TREE_HASH, undefined, true),
         "No working tree changes to show.",
-    );
-}
-
-export async function openStageChanges(
-    files: WorkingFile[],
-    repoRoot: string,
-    executor: GitExecutor,
-    staged: boolean,
-): Promise<void> {
-    const headHash = await resolveCommitRef("HEAD", "HEAD", executor);
-    const entries = selectedEntries(await stageEntries(executor, headHash, staged), files);
-    await openResources(
-        staged ? "Staged Changes" : "Unstaged Changes",
-        toResources(
-            entries,
-            repoRoot,
-            staged ? headHash ?? EMPTY_TREE_HASH : INDEX_REF,
-            staged ? INDEX_REF : undefined,
-            !staged,
-        ),
-        staged ? "No staged changes to show." : "No unstaged changes to show.",
     );
 }
 

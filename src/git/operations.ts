@@ -512,58 +512,20 @@ export class GitOps {
                 if (index === "R" || worktree === "R") renamedFrom = normalizeGitOutputPath(source);
             }
 
-            if (hasStaged && hasUnstaged) {
-                if (stagedStatus) {
-                    files.push({
-                        repoId: this.repoMetadata?.repoId ?? ".",
-                        repoRoot: this.repoMetadata?.repoRoot ?? "",
-                        path,
-                        ...(renamedFrom ? { renamedFrom } : {}),
-                        status: stagedStatus,
-                        staged: true,
-                        additions: 0,
-                        deletions: 0,
-                    });
-                }
-                // Skip only unstaged "M" for newly added files (index === 'A').
-                // A new file edited after staging is still just a new file —
-                // the duplicate "M" row is misleading. Other unstaged statuses
-                // (e.g. "D" for a staged-add then deleted) must still be shown.
-                if (unstagedStatus && !(index === "A" && unstagedStatus === "M")) {
-                    files.push({
-                        repoId: this.repoMetadata?.repoId ?? ".",
-                        repoRoot: this.repoMetadata?.repoRoot ?? "",
-                        path,
-                        ...(renamedFrom ? { renamedFrom } : {}),
-                        status: unstagedStatus,
-                        staged: false,
-                        additions: 0,
-                        deletions: 0,
-                    });
-                }
-            } else if (hasStaged && stagedStatus) {
-                files.push({
+            const addStatus = (status: WorkingFile["status"] | null, staged: boolean) => {
+                if (status) files.push({
                     repoId: this.repoMetadata?.repoId ?? ".",
                     repoRoot: this.repoMetadata?.repoRoot ?? "",
                     path,
                     ...(renamedFrom ? { renamedFrom } : {}),
-                    status: stagedStatus,
-                    staged: true,
+                    status,
+                    staged,
                     additions: 0,
                     deletions: 0,
                 });
-            } else if (hasUnstaged && unstagedStatus) {
-                files.push({
-                    repoId: this.repoMetadata?.repoId ?? ".",
-                    repoRoot: this.repoMetadata?.repoRoot ?? "",
-                    path,
-                    ...(renamedFrom ? { renamedFrom } : {}),
-                    status: unstagedStatus,
-                    staged: false,
-                    additions: 0,
-                    deletions: 0,
-                });
-            }
+            };
+            if (hasStaged) addStatus(stagedStatus, true);
+            if (hasUnstaged) addStatus(unstagedStatus, false);
         }
 
         // Build keyed lookups for O(1) numstat matching (both value and index)
@@ -832,11 +794,6 @@ export class GitOps {
     async stageFiles(paths: string[]): Promise<void> {
         if (paths.length === 0) return;
         await this.executor.run(["--literal-pathspecs", "add", "--", ...paths]);
-    }
-
-    async unstageFiles(paths: string[]): Promise<void> {
-        if (paths.length === 0) return;
-        await this.executor.run(["reset", "HEAD", "--", ...paths]);
     }
 
     async commit(message: string, amend: boolean = false, paths?: string[]): Promise<string> {

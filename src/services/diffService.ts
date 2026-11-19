@@ -73,7 +73,6 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
             originalPath?: string;
             sourceFsPath?: string;
             sourceLine?: number;
-            stageScope?: "staged" | "unstaged";
             projectComparisonId?: string;
         } = {},
     ): vscode.Uri {
@@ -95,7 +94,6 @@ class IntelliGitDiffContentProvider implements vscode.TextDocumentContentProvide
         if (options.sourceFsPath) {
             query.set("sourceFsPath", options.sourceFsPath);
         }
-        if (options.stageScope) query.set("stageScope", options.stageScope);
         if (options.sourceLine) query.set("sourceLine", String(options.sourceLine));
         const uri = vscode.Uri.from({
             scheme: DIFF_DOCUMENT_SCHEME,
@@ -1145,74 +1143,6 @@ export async function openWorkingTreeFileDiff(
         }
     }
     return openCommitPanelDiff(leftDoc.uri, rightUri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
-}
-
-export async function openStageFileDiff(
-    file: WorkingFile,
-    repoRoot: string,
-    gitOps: GitOps,
-): Promise<void> {
-    const safePath = assertRepoRelativePath(file.path);
-    const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
-    const isKnownBinary = isBinaryFilePath(safePath);
-    const readRef = async (ref: "HEAD" | ":0", missing: boolean): Promise<string> => {
-        if (missing) return "";
-        if (isKnownBinary) return binaryPlaceholder(safePath, ref === "HEAD" ? "HEAD" : "index");
-        return gitOps.getFileContentAtRef(safePath, ref).catch(() => "");
-    };
-
-    const stageScope = file.staged ? "staged" : "unstaged";
-    const leftLabel = file.staged ? "HEAD" : "index";
-    const rightLabel = file.staged ? "index" : "working tree";
-    const leftContent = file.staged
-        ? await readRef("HEAD", file.status === "A" || file.status === "?")
-        : await readRef(":0", file.status === "?");
-    const leftSnapshot = makeTextDiffSnapshot(safePath, leftContent, leftLabel);
-    const diffProvider = getDiffContentProvider();
-    const leftDoc = await vscode.workspace.openTextDocument(
-        diffProvider.createUri(safePath, leftLabel, leftSnapshot.content, {
-            forcePlainTextUri: leftSnapshot.forcePlainTextUri,
-            markAsCommitDiff: true,
-            originalPath: safePath,
-            sourceFsPath: workingTreeUri.fsPath,
-            stageScope,
-        }),
-    );
-
-    let rightUri: vscode.Uri;
-    if (file.staged) {
-        const rightContent = await readRef(":0", file.status === "D");
-        const rightSnapshot = makeTextDiffSnapshot(safePath, rightContent, rightLabel);
-        const rightDoc = await vscode.workspace.openTextDocument(
-            diffProvider.createUri(safePath, rightLabel, rightSnapshot.content, {
-                forcePlainTextUri: rightSnapshot.forcePlainTextUri,
-                markAsCommitDiff: true,
-                originalPath: safePath,
-                sourceFsPath: workingTreeUri.fsPath,
-                stageScope,
-            }),
-        );
-        rightUri = rightDoc.uri;
-    } else if (file.status !== "D" && !isKnownBinary && (await fileExists(workingTreeUri))) {
-        rightUri = workingTreeUri;
-    } else {
-        const rightContent =
-            file.status === "D" ? "" : await readWorkingTreeTextSnapshot(workingTreeUri);
-        const rightSnapshot = makeTextDiffSnapshot(safePath, rightContent, rightLabel);
-        const rightDoc = await vscode.workspace.openTextDocument(
-            diffProvider.createUri(safePath, rightLabel, rightSnapshot.content, {
-                forcePlainTextUri: rightSnapshot.forcePlainTextUri,
-                markAsCommitDiff: true,
-                originalPath: safePath,
-                sourceFsPath: workingTreeUri.fsPath,
-                stageScope,
-            }),
-        );
-        rightUri = rightDoc.uri;
-    }
-
-    const title = `${safePath} (${file.staged ? "HEAD ↔ Index" : "Index ↔ Working Tree"})`;
-    await openCommitPanelDiff(leftDoc.uri, rightUri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
 }
 
 async function fileExists(uri: vscode.Uri): Promise<boolean> {

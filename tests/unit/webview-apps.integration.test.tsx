@@ -201,6 +201,8 @@ describe("CommitPanelApp integration", () => {
         });
         await flush();
 
+        expect(Array.from(document.querySelectorAll('[role="tab"]'), tab => tab.textContent)).toEqual(["Commit", "Stash"]);
+
         fireClick(document.querySelector('button[aria-label="Shelve Changes"]'));
         await flush();
 
