@@ -267,6 +267,7 @@
             {
                 "command": "intelligit.fileRollback",
                 "title": "Rollback",
+                "enablement": "!intelligitMerging",
                 "category": "IntelliGit"
             },
             {

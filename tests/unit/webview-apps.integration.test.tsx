@@ -161,12 +161,17 @@ describe("CommitPanelApp integration", () => {
         await flush();
         const button = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('button:not([role="tab"])'))
             .find(b => b.textContent?.trim() === label)!;
+        const rollback = document.querySelector<HTMLButtonElement>('button[aria-label="Rollback"]')!;
+        expect(rollback.disabled).toBe(true);
+        fireClick(rollback);
+        expect(api.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "rollback" }));
         expect(button("Commit").disabled).toBe(true);
         expect(button("Commit and Push...").disabled).toBe(true);
         fireClick(button("Open Merge Conflicts to finish merge"));
         expect(api.postMessage).toHaveBeenCalledWith({ type: "openMergeSession", repoRoot: repo.root });
         update([]);
         await flush();
+        expect(rollback.disabled).toBe(false);
         expect(button("Commit").disabled).toBe(false);
         expect(button("Commit and Push...").disabled).toBe(false);
     });

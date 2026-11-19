@@ -28,6 +28,7 @@ interface Props {
     commitMessage: string;
     isAmend: boolean;
     canAmend: boolean;
+    mergingRoots: string[];
     onOpenMerge?: () => void;
     isRefreshing: boolean;
     checkedPaths: Set<string>;
@@ -57,6 +58,7 @@ export function CommitTab({
     commitMessage,
     isAmend,
     canAmend,
+    mergingRoots,
     onOpenMerge,
     isRefreshing,
     checkedPaths,
@@ -120,7 +122,7 @@ export function CommitTab({
             <Toolbar
                 onRefresh={handleRefresh}
                 isRefreshing={isRefreshing}
-                onRollback={handleRollback}
+                onRollback={onOpenMerge ? undefined : handleRollback}
                 onToggleGroupBy={onToggleGroupBy}
                 onShelve={onCreateStash}
                 onShowDiff={handleShowDiff}
@@ -130,6 +132,7 @@ export function CommitTab({
 
             <Box flex="1 1 auto" overflowY="auto" minH="40px">
                 <FileTree
+                    mergingRoots={mergingRoots}
                     repositories={repositories}
                     currentRepository={currentRepository}
                     activeFile={activeFile}

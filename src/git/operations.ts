@@ -947,9 +947,17 @@ export class GitOps {
         }
     }
 
+    private async assertRollbackAllowed(): Promise<void> {
+        if (await this.isMergeInProgress()) {
+            throw new Error("A merge is in progress. Use the Merge Conflicts panel to finish or abort it.");
+        }
+    }
+
     async rollbackFiles(paths: string[]): Promise<void> {
         const safePaths = Array.from(new Set(paths.map((filePath) => assertGitRelativePath(filePath))));
         if (safePaths.length === 0) return;
+
+        await this.assertRollbackAllowed();
 
         // A staged deletion is absent from the index but still tracked in HEAD.
         const [indexPaths, changes] = await Promise.all([
@@ -994,6 +1002,7 @@ export class GitOps {
     }
 
     async rollbackAll(): Promise<void> {
+        await this.assertRollbackAllowed();
         await this.executor.run(["reset", "--hard", "HEAD"]);
         // Also clean untracked files
         await this.executor.run(["clean", "-fd"]);

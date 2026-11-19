@@ -75,7 +75,7 @@ export function BranchTrackingTooltip({ branch, repoRoot, anchor, fallback, dism
                 <CommitSubjects label="Outgoing" count={branch.ahead} subjects={preview.outgoing} />
             </div>
             {branch.isCurrent && branch.behind > 0 && <div style={{ marginTop: 3, color: "var(--vscode-descriptionForeground)" }}>
-                {branch.ahead > 0 ? "Update would rebase local commits onto the upstream." : "Update would fast-forward this branch."}
+                {branch.ahead > 0 ? "Update will offer Merge or Rebase." : "Update would fast-forward this branch."}
             </div>}
             <div style={{ ...singleLine, color: "var(--vscode-descriptionForeground)" }}>{branch.upstream} · Last fetched state</div>
         </> : fallback}

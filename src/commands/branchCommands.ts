@@ -5,6 +5,7 @@
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps, UpstreamPushDeclinedError } from "../git/operations";
+import type { RepositoryEntry } from "../services/RepositoryContextService";
 import type { Branch } from "../types";
 import { getErrorMessage, isBranchNotFullyMergedError } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
@@ -21,11 +22,13 @@ import {
 } from "../services/gitHelpers";
 
 export interface BranchCommandDeps {
+    requireCurrentRepository: () => RepositoryEntry;
     executor: GitExecutor;
     gitOps: GitOps;
     getCurrentBranchName: () => string | undefined;
     getCurrentBranches: () => Branch[];
     openConflictSession: (labels?: {
+        repository?: RepositoryEntry;
         sourceBranch?: string;
         targetBranch?: string;
     }) => Promise<void>;
@@ -220,67 +223,63 @@ export function createBranchCommands(deps: BranchCommandDeps): BranchCommandEntr
                 const name = branch?.name;
                 if (!name || branch?.isRemote) return;
                 try {
-                    let openedConflictSession = false;
-                    await runWithNotificationProgress(`Updating ${name}...`, async () => {
-                        const branchSnapshot = getCurrentBranches();
-                        const branchesForTracking =
-                            branchSnapshot.length > 0 ? branchSnapshot : await gitOps.getBranches();
-                        const tracked = resolveTrackedRemoteBranch(branch, branchesForTracking);
-                        if (branch.isCurrent) {
-                            if (!tracked) {
-                                throw new Error(`No tracked remote branch configured for '${name}'.`);
-                            }
-                            await executor.run([
-                                "fetch",
-                                tracked.remote,
-                                tracked.remoteBranch,
-                                "--recurse-submodules=no",
-                                "--progress",
-                                "--prune",
-                            ]);
-                            try {
-                                await executor.run(["merge", "--ff-only", "FETCH_HEAD"]);
-                            } catch {
-                                try {
-                                    await executor.run(["rebase", "--autostash", "FETCH_HEAD"]);
-                                } catch (err) {
-                                    try {
-                                        const conflicts = await gitOps.getConflictFilesDetailed();
-                                        if (conflicts.length > 0) {
-                                            await openConflictSession({
-                                                sourceBranch: `${tracked.remote}/${tracked.remoteBranch}`,
-                                                targetBranch: getCurrentBranchName() || undefined,
-                                            });
-                                            await refreshConflictUi();
-                                            vscode.window.showWarningMessage(
-                                                `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
-                                            );
-                                            openedConflictSession = true;
-                                            return;
-                                        }
-                                    } catch {
-                                        // Fall back to the update error if conflict inspection/session launch fails.
-                                    }
-                                    throw err;
-                                }
-                            }
-                            return;
-                        }
-
-                        if (!tracked) {
-                            throw new Error(`No tracked remote branch configured for '${name}'.`);
-                        }
-
+                    const repository = deps.requireCurrentRepository();
+                    const { executor, gitOps } = repository;
+                    const updated = await runWithNotificationProgress(`Updating ${name}...`, async () => {
+                        const branches = getCurrentBranches();
+                        const tracked = resolveTrackedRemoteBranch(branch, branches.length ? branches : await gitOps.getBranches());
+                        if (!tracked) throw new Error(`No tracked remote branch configured for '${name}'.`);
                         await executor.run([
-                            "fetch",
-                            tracked.remote,
-                            `${tracked.remoteBranch}:${name}`,
-                            "--recurse-submodules=no",
-                            "--progress",
-                            "--prune",
+                            "fetch", tracked.remote,
+                            branch.isCurrent ? tracked.remoteBranch : `${tracked.remoteBranch}:${name}`,
+                            "--recurse-submodules=no", "--progress", "--prune",
                         ]);
+                        if (!branch.isCurrent) return true;
+
+                        const currentBranch = async () => (await executor.run(["branch", "--show-current"])).trim();
+                        if (await currentBranch() !== name) throw new Error("The checked-out branch changed. Run Update again.");
+                        const incoming = (await executor.run(["rev-parse", "--verify", "FETCH_HEAD"])).trim();
+                        let head: string;
+                        let ahead: number;
+                        let behind: number;
+                        try {
+                            await executor.runWithStderr(["merge", "--ff-only", incoming]);
+                            return true;
+                        } catch (ffError) {
+                            if (await gitOps.isMergeInProgress() || await gitOps.isRebaseInProgress()) throw ffError;
+                            head = (await executor.run(["rev-parse", "HEAD"])).trim();
+                            const counts = await executor.run(["rev-list", "--left-right", "--count", `${head}...${incoming}`]);
+                            [ahead, behind] = counts.trim().split(/\s+/).map(Number);
+                            if (!(ahead > 0 && behind > 0)) throw ffError;
+                        }
+
+                        const upstream = `${tracked.remote}/${tracked.remoteBranch}`;
+                        const choice = await vscode.window.showQuickPick([
+                            { label: "Merge", description: "Keep your local commits and create a merge commit" },
+                            { label: "Rebase", description: "Replay your local commits onto the incoming changes" },
+                        ], { title: `Update ${name} from ${upstream} · ${ahead} outgoing, ${behind} incoming` });
+                        if (!choice) return false;
+                        if (await currentBranch() !== name || (await executor.run(["rev-parse", "HEAD"])).trim() !== head) {
+                            throw new Error("The branch or commit changed. Run Update again.");
+                        }
+                        try {
+                            // Merge can report conflicts only on stdout. Honor its exit code.
+                            await executor.runWithStderr(choice.label === "Merge"
+                                ? ["merge", "--no-ff", "-m", `Merge ${upstream} into ${name}`, incoming]
+                                : ["rebase", "--autostash", incoming]);
+                        } catch (err) {
+                            const conflicts = await gitOps.getConflictFilesDetailed();
+                            if (!conflicts.length) throw err;
+                            await openConflictSession({ repository, sourceBranch: upstream, targetBranch: name });
+                            await refreshConflictUi();
+                            vscode.window.showWarningMessage(
+                                `Update produced ${conflicts.length} unresolved conflict file${conflicts.length === 1 ? "" : "s"}. Opened Conflicts session.`,
+                            );
+                            return false;
+                        }
+                        return true;
                     });
-                    if (openedConflictSession) return;
+                    if (!updated) return;
                     vscode.window.showInformationMessage(`Updated ${name}`);
                     await vscode.commands.executeCommand("intelligit.refresh");
                 } catch (err) {

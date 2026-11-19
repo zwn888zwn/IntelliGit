@@ -198,6 +198,8 @@ class MockEventEmitter<T> {
 }
 
 const defaultExecutorRunImpl = async (args: string[]) => {
+    if (args.join(" ") === "branch --show-current") return "main";
+    if (args.join(" ") === "rev-parse --verify FETCH_HEAD") return "cab12345";
     if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return "main";
     if (args[0] === "rev-parse" && args[1] === "--short") return args[2]?.slice(0, 7) ?? "feed123";
     if (args[0] === "rev-parse" && args[1] === "HEAD") return "feed1234";
@@ -1647,12 +1649,12 @@ describe("extension integration", () => {
             "--progress",
             "--prune",
         ]);
-        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "FETCH_HEAD"]);
-        expect(executorRun).not.toHaveBeenCalledWith(["rebase", "--autostash", "FETCH_HEAD"]);
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "cab12345"]);
+        expect(executorRun).not.toHaveBeenCalledWith(["rebase", "--autostash", "cab12345"]);
         expect(executorRun).not.toHaveBeenCalledWith(["pull", "--ff-only"]);
     });
 
-    it("falls back to rebase when current branch update cannot fast-forward", async () => {
+    it.each(["Merge", "Rebase", "Cancel", "Dirty", "Branch switched"])("handles %s when Update cannot fast-forward", async scenario => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -1660,23 +1662,38 @@ describe("extension integration", () => {
         } as unknown as MockExtensionContext;
         await activate(context);
 
+        let current = "main";
         executorRun.mockImplementation(async (args: string[]) => {
-            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD") {
+            if (args.join(" ") === "branch --show-current") return current;
+            if (args[0] === "rev-list" && args[1] === "--left-right") return scenario === "Dirty" ? "0  1" : "1  1";
+            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "cab12345") {
                 throw new Error("not possible to fast-forward");
             }
             return defaultExecutorRunImpl(args);
         });
 
+        showQuickPick.mockImplementationOnce(async items => {
+            expect(items.map(item => item.label)).toEqual(["Merge", "Rebase"]);
+            if (scenario === "Branch switched") current = "other";
+            return scenario === "Cancel" ? undefined : items[scenario === "Rebase" ? 1 : 0];
+        });
         await registeredCommands.get("intelligit.updateBranch")?.({
             branch: { name: "main", isRemote: false, isCurrent: true },
         });
 
-        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "FETCH_HEAD"]);
-        expect(executorRun).toHaveBeenCalledWith(["rebase", "--autostash", "FETCH_HEAD"]);
-        expect(showInformationMessage).toHaveBeenCalledWith("Updated main");
+        expect(executorRun).toHaveBeenCalledWith(["merge", "--ff-only", "cab12345"]);
+        const merge = ["merge", "--no-ff", "-m", "Merge origin/main into main", "cab12345"];
+        const rebase = ["rebase", "--autostash", "cab12345"];
+        if (scenario === "Merge") expect(executorRun).toHaveBeenCalledWith(merge);
+        else expect(executorRun).not.toHaveBeenCalledWith(merge);
+        if (scenario === "Rebase") expect(executorRun).toHaveBeenCalledWith(rebase);
+        else expect(executorRun).not.toHaveBeenCalledWith(rebase);
+        if (scenario === "Merge" || scenario === "Rebase") expect(showInformationMessage).toHaveBeenCalledWith("Updated main");
+        else expect(showInformationMessage).not.toHaveBeenCalledWith("Updated main");
+        if (scenario === "Dirty") expect(showQuickPick).not.toHaveBeenCalled();
     });
 
-    it("opens conflict session when current branch update rebase has conflicts", async () => {
+    it.each(["Merge", "Rebase"])("opens the conflict session for Update with %s", async strategy => {
         const { activate } = await import("../../src/extension");
         const context = {
             extensionUri: { fsPath: "/ext", path: "/ext" },
@@ -1685,14 +1702,16 @@ describe("extension integration", () => {
         await activate(context);
 
         executorRun.mockImplementation(async (args: string[]) => {
-            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "FETCH_HEAD") {
+            if (args[0] === "merge" && args[1] === "--ff-only" && args[2] === "cab12345") {
                 throw new Error("not possible to fast-forward");
             }
-            if (args[0] === "rebase" && args[1] === "--autostash" && args[2] === "FETCH_HEAD") {
+            if (args[0] === "rev-list" && args[1] === "--left-right") return "1  1";
+            if (args[0] === "rebase" || (args[0] === "merge" && args[1] === "--no-ff")) {
                 throw new Error("rebase conflict");
             }
             return defaultExecutorRunImpl(args);
         });
+        showQuickPick.mockImplementationOnce(async items => items.find(item => item.label === strategy));
         gitOpsState.getConflictFilesDetailed.mockResolvedValue([
             {
                 path: "src/conflicted.ts",

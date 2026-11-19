@@ -760,24 +760,26 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
 
             case "rollback": {
                 const targets = this.getMessageTargets(msg);
-                if (targets.length === 0) {
-                    const confirm = await vscode.window.showWarningMessage(
-                        "Rollback all changes?",
-                        { modal: true },
-                        "Rollback",
-                    );
-                    if (confirm !== "Rollback") return;
-                    await this.gitOps.rollbackAll();
+                const grouped = this.groupTargetsByRepository(targets);
+                if (!grouped.size) grouped.set(this.getRepositoryRoot().fsPath, []);
+                const repositories = Array.from(grouped.keys(), root => this.getRepositoryEntry(root));
+                const confirm = await vscode.window.showWarningMessage(
+                    targets.length ? `Rollback ${targets.length} file(s)?` : "Rollback all changes?",
+                    { modal: true }, "Rollback",
+                );
+                if (confirm !== "Rollback") return;
+                // Check all selected repositories before changing any of them.
+                for (const repository of repositories) {
+                    if (await repository.gitOps.isMergeInProgress()) {
+                        void vscode.window.showWarningMessage(`${repository.info.name}: Use the Merge Conflicts panel to finish or abort the merge.`);
+                        await this.refreshData();
+                        return;
+                    }
+                }
+                if (!targets.length) {
+                    await repositories[0].gitOps.rollbackAll();
                 } else {
-                    const confirm = await vscode.window.showWarningMessage(
-                        `Rollback ${targets.length} file(s)?`,
-                        { modal: true },
-                        "Rollback",
-                    );
-                    if (confirm !== "Rollback") return;
-                    await this.runGroupedTargets(targets, async (repository, paths) => {
-                        await repository.gitOps.rollbackFiles(paths);
-                    });
+                    await this.runGroupedTargets(targets, (repository, paths) => repository.gitOps.rollbackFiles(paths));
                 }
                 vscode.window.showInformationMessage("Changes rolled back.");
                 await this.refreshData();

@@ -1936,6 +1936,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // --- Branch action commands ---
 
     const branchCommands = createBranchCommands({
+        requireCurrentRepository,
         executor,
         gitOps,
         getCurrentBranchName: () => currentBranches.find((b) => b.isCurrent)?.name,

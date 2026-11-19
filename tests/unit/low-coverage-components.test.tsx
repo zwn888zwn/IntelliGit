@@ -1548,7 +1548,7 @@ describe("low coverage components", () => {
             const tooltip = document.querySelector('[role="tooltip"]')!;
             expect(tooltip.textContent).toContain("Incoming · 48thirdsecondfirst+45 more");
             expect(tooltip.textContent).toContain("Outgoing · 1my change");
-            expect(tooltip.textContent).toContain("rebase");
+            expect(tooltip.textContent).toContain("Merge or Rebase");
             leave();
             expect(document.querySelector('[role="tooltip"]')).toBeNull();
         } finally {

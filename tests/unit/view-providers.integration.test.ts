@@ -1176,6 +1176,12 @@ describe("view providers integration", () => {
         for (const push of [false, true]) {
             await webview.send({ type: "commitSelected", paths: ["src/a.ts"], message: "only A", push });
         }
+        for (const paths of [[], ["src/a.ts"]]) {
+            showWarningMessage.mockResolvedValueOnce("Rollback");
+            await webview.send({ type: "rollback", paths });
+        }
+        expect(gitOps.rollbackAll).not.toHaveBeenCalled();
+        expect(gitOps.rollbackFiles).not.toHaveBeenCalled();
         expect(gitOps.stageFiles).not.toHaveBeenCalled();
         expect(gitOps.commit).not.toHaveBeenCalled();
         expect(gitOps.push).not.toHaveBeenCalled();

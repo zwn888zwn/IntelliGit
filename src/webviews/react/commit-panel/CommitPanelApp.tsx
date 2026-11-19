@@ -178,6 +178,7 @@ function App(): React.ReactElement {
                             commitMessage={commitMessage}
                             isAmend={isAmend}
                             canAmend={canAmend}
+                            mergingRoots={state.mergingRoots}
                             onOpenMerge={mergingRoot ? () => vscode.postMessage({ type: "openMergeSession", repoRoot: mergingRoot }) : undefined}
                             isRefreshing={state.isRefreshing}
                             checkedPaths={checkedPaths}

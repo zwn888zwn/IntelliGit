@@ -7,7 +7,7 @@ import { Flex, Box, IconButton, Tooltip } from "@chakra-ui/react";
 interface Props {
     onRefresh: () => void;
     isRefreshing: boolean;
-    onRollback: () => void;
+    onRollback?: () => void;
     onToggleGroupBy: () => void;
     onShelve: () => void;
     onShowDiff: () => void;
@@ -50,7 +50,7 @@ export function Toolbar({
                     d="M13.451 5.609l-.579-.939-1.068.812-.076.094c.335.57.528 1.236.528 1.949a4.093 4.093 0 0 1-4.09 4.09 4.093 4.093 0 0 1-4.09-4.09 4.088 4.088 0 0 1 3.354-4.027v1.938l4.308-2.906L7.43.002v1.906a5.593 5.593 0 0 0-4.856 5.617A5.594 5.594 0 0 0 8.166 13.1a5.594 5.594 0 0 0 5.592-5.575c0-1.755-.461-2.381-1.307-3.416l1-.5z"
                 />
             </ToolbarButton>
-            <ToolbarButton label="Rollback" onClick={onRollback} color="#b8adff">
+            <ToolbarButton label="Rollback" onClick={onRollback} disabled={!onRollback} color="#b8adff">
                 <path
                     fill="currentColor"
                     d="M2.5 2l3.068 3.069L4.856 5.78l.707-.707L3.594 3.1H7A4.505 4.505 0 0 1 11.5 7.609 4.505 4.505 0 0 1 7 12.109H3.5v1H7a5.506 5.506 0 0 0 5.5-5.5A5.506 5.506 0 0 0 7 2.109H3.594l1.97-1.97-.708-.707L1.788 2.5z"
@@ -102,7 +102,7 @@ function ToolbarButton({
     children,
 }: {
     label: string;
-    onClick: () => void;
+    onClick?: () => void;
     color?: string;
     spin?: boolean;
     disabled?: boolean;
