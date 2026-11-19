@@ -832,7 +832,7 @@ export async function openCommitFileDiff(
                       originalPath: safePath,
                   })
                 : await createTransparentImagePlaceholderUri(safePath, "right");
-            await vscode.commands.executeCommand("vscode.diff", leftUri, rightUri, title);
+            await openCommitPanelDiff(leftUri, rightUri, title, workingTreeUri, true);
             return { parentRef, parentDisplayHash, leftUri, rightUri };
         }
     }
@@ -873,7 +873,7 @@ export async function openCommitFileDiff(
     const shortParent = parentDisplayHash.slice(0, 8);
     const shortCommit = commitHash.slice(0, 8);
     const title = `${safePath} (${shortParent} ↔ ${shortCommit})`;
-    await vscode.commands.executeCommand("vscode.diff", leftDoc.uri, rightDoc.uri, title);
+    await openCommitPanelDiff(leftDoc.uri, rightDoc.uri, title, workingTreeUri, /\.ipynb$/i.test(safePath));
     return { parentRef, parentDisplayHash, leftUri: leftDoc.uri, rightUri: rightDoc.uri };
 }
 

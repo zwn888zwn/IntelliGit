@@ -239,8 +239,9 @@ export class DiffOverlayController implements vscode.Disposable {
     }
 
     private updatePanelSourceContext(): void {
-        const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
-        const visible = !!tab && tab.group === this.modalGroup && this.panelSources.has(tab);
+        const group = this.modalGroup;
+        const tab = group && vscode.window.tabGroups.all.includes(group) ? group.activeTab : undefined;
+        const visible = !!tab && this.panelSources.has(tab);
         if (visible !== this.panelSourceVisible) {
             this.panelSourceVisible = visible;
             void vscode.commands.executeCommand("setContext", "intelligit.panelDiffHasSource", visible);
@@ -345,7 +346,11 @@ export class DiffOverlayController implements vscode.Disposable {
 
     private async openSource(): Promise<void> {
         const groups = vscode.window.tabGroups;
-        const tab = groups.activeTabGroup.activeTab;
+        // A modal title action belongs to the modal even if VS Code still
+        // reports the editor behind it as the globally active group.
+        const group = this.modalGroup && groups.all.includes(this.modalGroup)
+            ? this.modalGroup : groups.activeTabGroup;
+        const tab = group.activeTab;
         if (!tab) return;
         const panelSource = this.panelSources.get(tab);
         const input = tab.input instanceof vscode.TabInputTextDiff ? tab.input : undefined;
@@ -363,7 +368,7 @@ export class DiffOverlayController implements vscode.Disposable {
         try {
             await vscode.workspace.fs.stat(source);
             const document = panelSource ? undefined : await vscode.workspace.openTextDocument(source);
-            if (this.disposed || groups.activeTabGroup.activeTab !== tab) return;
+            if (this.disposed || !groups.all.includes(group) || group.activeTab !== tab) return;
             const session = [...this.comparisons.values()].find((value) => value.right === tab.group);
             const destination = this.mainGroup && groups.all.includes(this.mainGroup)
                 ? this.mainGroup : groups.all.find((group) => group !== tab.group);

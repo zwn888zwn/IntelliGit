@@ -26,6 +26,7 @@ vi.mock("vscode", () => {
         TabInputTextDiff: Diff,
         TabInputNotebookDiff: class extends Diff {},
         window: {
+            visibleTextEditors: [],
             tabGroups: {
                 get all() { return state.groups; },
                 get activeTabGroup() { return state.active; },
@@ -35,6 +36,7 @@ vi.mock("vscode", () => {
             },
         },
         workspace: {
+            fs: { stat: vi.fn().mockResolvedValue({}) },
             onDidChangeConfiguration: () => ({ dispose() {} }),
             getConfiguration: (section: string) => ({
                 get: () => section === "intelligit" ? state.enabled : state.modal,
@@ -120,6 +122,25 @@ describe("DiffOverlayController", () => {
         emit();
         await flush();
         expect(state.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens the modal's source on the first click when the main editor still has focus", async () => {
+        const main = group();
+        const source = uri("file:/games.go");
+        const input = diff("games.go");
+        state.execute.mockImplementation(async (command, original, modified, label) => {
+            if (command === "_workbench.diff") {
+                group(new vscode.TabInputTextDiff(original, modified), label);
+                state.active = main;
+            }
+        });
+        controller = new DiffOverlayController();
+        await controller.openPanelDiff(input.original, input.modified, "games.go", source, false);
+        expect(state.execute).toHaveBeenCalledWith("setContext", "intelligit.panelDiffHasSource", true);
+        await state.handlers.get("intelligit.openOverlaySource")!();
+        expect(state.execute).toHaveBeenCalledWith("workbench.action.closeModalEditor");
+        expect(state.execute).toHaveBeenCalledWith("vscode.open", source,
+            expect.objectContaining({ viewColumn: main.viewColumn, preserveFocus: false }));
     });
 
     it.each(["disabled", "modal off", "unsupported"])("keeps native tabs when %s", async (mode) => {

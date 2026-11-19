@@ -3,7 +3,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const vscode = require("vscode");
 const { DiffOverlayController, showComparisonInOverlay } = require("../../src/services/DiffOverlayController");
-const { registerDiffContentProvider, openBranchComparisonFileDiff, openWorkingTreeFileDiff, openStageFileDiff } = require("../../src/services/diffService");
+const { registerDiffContentProvider, openCommitFileDiff, openBranchComparisonFileDiff, openWorkingTreeFileDiff, openStageFileDiff } = require("../../src/services/diffService");
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function until(predicate, label) {
@@ -30,6 +30,25 @@ exports.run = async () => {
     try {
         await vscode.window.showTextDocument(anchor, { preview: false });
         const main = vscode.window.tabGroups.activeTabGroup;
+        // Changed Files in the commit graph compares two snapshots. Its toolbar
+        // should return to the existing working file even before the diff is clicked.
+        await vscode.window.showTextDocument(modified, { preview: false });
+        const intermediateDiffs = [];
+        const observer = vscode.window.tabGroups.onDidChangeTabs(({ opened }) => {
+            intermediateDiffs.push(...opened.filter(tab => tab.group === main && tab.input instanceof vscode.TabInputTextDiff));
+        });
+        const snapshots = await openCommitFileDiff("faf6aded", "games.go", workspace,
+            { getFileContentAtRef: async (_, ref) => `package main\n// ${ref}\n` }, {},
+            { parentRef: "b4c20c4f" });
+        await until(() => vscode.window.tabGroups.all.some(group => group !== main &&
+            group.activeTab?.input?.modified?.toString() === snapshots.rightUri.toString()),
+        "commit graph Changed Files overlay");
+        observer.dispose();
+        assert.equal(intermediateDiffs.length, 0, "history diff should only open in the modal");
+        await vscode.commands.executeCommand("intelligit.openOverlaySource");
+        await until(() => vscode.window.tabGroups.all.length === 1 &&
+            main.activeTab?.input?.uri?.toString() === modified.toString(), "history toolbar returns to open Go file");
+        await vscode.window.tabGroups.close(main.activeTab);
         const markdown = vscode.Uri.file(path.join(workspace, "notes.md"));
         await fs.writeFile(markdown.fsPath, "# Review notes\n");
         await openWorkingTreeFileDiff({ path: "notes.md", status: "?" }, workspace, {});
