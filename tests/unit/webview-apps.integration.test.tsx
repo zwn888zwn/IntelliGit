@@ -371,6 +371,36 @@ describe("CommitPanelApp integration", () => {
 });
 
 describe("CommitGraphApp integration", () => {
+    it.each(["squash", "reword"])("previews %s and sends edits only after confirmation", async operation => {
+        vi.resetModules();
+        const api = installVsCodeMock();
+        createRootHost();
+        await import("../../src/webviews/react/CommitGraphApp");
+        await flush();
+        const open = async (id: number) => {
+            act(() => window.dispatchEvent(new MessageEvent("message", { data: {
+                type: "editHistory", id, prompt: {
+                    operation, branch: "refs/heads/feature/local", message: "Old subject\n\nBody",
+                    commits: [{ hash: "aaa11111", subject: "Old subject" }, { hash: "bbb22222", subject: "Follow-up" }],
+                },
+            } })));
+            await flush();
+        };
+        const button = (label: string) => Array.from(document.querySelectorAll('[role="dialog"] button'))
+            .find(el => el.textContent?.trim() === label) ?? null;
+        await open(1);
+        expect(document.querySelector('[role="dialog"]')?.textContent).toContain("bbb22222 Follow-up");
+        fireClick(button("Cancel"));
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "finishHistoryEdit", id: 1, message: undefined });
+        await open(2);
+        const textarea = document.querySelector('textarea[aria-label="Commit message"]') as HTMLTextAreaElement;
+        expect(textarea.value).toBe("Old subject\n\nBody");
+        const updated = "Updated subject\n\nUpdated body";
+        fireInput(textarea, updated);
+        fireClick(button(operation === "squash" ? "Squash commits" : "Save message"));
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "finishHistoryEdit", id: 2, message: updated });
+    });
+
     it("keeps cached CI visible during refresh and repository switches until updated or reset", async () => {
         vi.resetModules();
         installVsCodeMock();

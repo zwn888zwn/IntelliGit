@@ -20,6 +20,7 @@ import type {
     CommitAction,
     CommitGraphOutbound,
     CommitGraphInbound,
+    EditHistoryPrompt,
     CreateWorktreePayload,
     OpenWorktreeDialogPayload,
     WorktreePathPayload,
@@ -48,6 +49,8 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     private pendingRevealHash: string | null = null;
     private pendingBranchPopup = false;
     private requestSeq = 0;
+    private historyDialogId = 0;
+    private resolveHistoryDialog?: (message?: string) => void;
     private readonly PAGE_SIZE = 500;
     private repository: RepositoryContextInfo | null = null;
 
@@ -164,11 +167,13 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         this.themeChangeDisposables.push(webviewView.onDidChangeVisibility(() => {
             this.stopPipelines();
             if (webviewView.visible) this.refreshPipelines();
+            else this.closeHistoryDialog();
         }));
 
         webviewView.onDidDispose(() => {
             if (this.view === webviewView) {
                 this.stopPipelines();
+                this.closeHistoryDialog();
                 this.view = undefined;
                 this.webviewReady = false;
                 this.iconTheme.dispose();
@@ -181,6 +186,9 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (msg: CommitGraphOutbound) => {
             try {
                 switch (msg.type) {
+                    case "finishHistoryEdit":
+                        if (msg.id === this.historyDialogId) this.closeHistoryDialog(typeof msg.message === "string" ? msg.message : undefined);
+                        break;
                     case "getTrackingPreview": {
                         if (msg.repoRoot !== this.repository?.root) break;
                         const snapshot = this.branchSnapshotsByRoot[msg.repoRoot] ?? [];
@@ -207,6 +215,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
                         break;
                     }
                     case "ready":
+                        this.closeHistoryDialog();
                         this.webviewReady = true;
                         await this.iconTheme.initIconThemeData();
                         await this.sendBranches();
@@ -378,7 +387,32 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
         );
     }
 
+    async editHistoryMessage(prompt: EditHistoryPrompt): Promise<string | undefined> {
+        const view = this.view;
+        if (!this.webviewReady || !view?.visible) return;
+        this.closeHistoryDialog();
+        const id = ++this.historyDialogId;
+        const response = new Promise<string | undefined>(resolve => { this.resolveHistoryDialog = resolve; });
+        try {
+            if (!await view.webview.postMessage({ type: "editHistory", id, prompt }) && id === this.historyDialogId) {
+                this.closeHistoryDialog();
+            }
+        } catch (error) {
+            if (id === this.historyDialogId) this.closeHistoryDialog();
+            throw error;
+        }
+        return response;
+    }
+
+    private closeHistoryDialog(message?: string): void {
+        if (!this.resolveHistoryDialog) return;
+        this.resolveHistoryDialog(message);
+        this.resolveHistoryDialog = undefined;
+        this.postToWebview({ type: "closeHistoryEdit" });
+    }
+
     setRepositoryContext(repository: RepositoryContextInfo | null): void {
+        if (this.repository?.root !== repository?.root) this.closeHistoryDialog();
         this.repository = repository;
         this.postToWebview({ type: "setRepositoryContext", repository });
         if (!repository) {
@@ -1070,6 +1104,7 @@ export class CommitGraphViewProvider implements vscode.WebviewViewProvider {
     }
 
     dispose(): void {
+        this.closeHistoryDialog();
         this.stopPipelines();
         this.iconTheme.dispose();
         this.disposeThemeChangeDisposables();

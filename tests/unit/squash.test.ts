@@ -1,9 +1,10 @@
 import { execFileSync } from "child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applySquash, prepareSquash } from "../../src/git/squash";
+import { GitExecutor } from "../../src/git/executor";
+import { applySquash, prepareSquash, applyReword, prepareReword, undoRewrite } from "../../src/git/squash";
 
 let root: string;
 const git = (...args: string[]) =>
@@ -23,6 +24,8 @@ function commit(file: string, content: string, subject: string): string {
 beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "intelligit-squash-"));
     git("init", "-q", "-b", "main");
+    git("config", "commit.gpgsign", "false");
+    git("config", "core.hooksPath", join(root, ".git", "hooks-disabled"));
     git("config", "user.name", "Test");
     git("config", "user.email", "test@example.invalid");
     commit("file.txt", "base\n", "Create base");
@@ -108,6 +111,103 @@ describe("squash selected commits", () => {
         await expect(applySquash(failing, plan, "test: ✅ Squash")).rejects.toThrow(
             "signing failed",
         );
+        expect(git("rev-parse", "HEAD")).toBe(b);
+        expect(git("write-tree")).toBe(index);
+    });
+});
+
+describe("edit unpublished history", () => {
+    it.each(["HEAD", "middle", "root"])("rewords %s and restores exact original history on Undo", async which => {
+        const ops = new GitExecutor(root);
+        const initial = git("rev-parse", "HEAD");
+        const middle = commit("a", "one", "Middle subject");
+        git("config", "user.name", "Another author");
+        const head = commit("b", "two", "Later subject");
+        const target = which === "root" ? initial : which === "middle" ? middle : head;
+        writeFileSync(join(root, "a"), "already staged");
+        git("add", "a");
+        writeFileSync(join(root, "a"), "more local edits");
+        writeFileSync(join(root, "new"), "untracked");
+        const status = git("status", "--porcelain");
+        const index = git("write-tree");
+        const snapshots = () => git("log", "--format=%T %an %ae %ai");
+        const before = snapshots();
+        const plan = await prepareReword(ops, target);
+        const receipt = await applyReword(ops, plan, "New subject\n\nDetailed body\n\nSigned-off-by: Test");
+        expect(snapshots()).toBe(before);
+        expect(git("log", "-1", "--format=%B", receipt.firstRewritten)).toBe("New subject\n\nDetailed body\n\nSigned-off-by: Test");
+        if (which !== "HEAD") expect(git("log", "-1", "--format=%B")).toBe(git("log", "-1", "--format=%B", head));
+        expect(git("status", "--porcelain")).toBe(status);
+        expect(git("write-tree")).toBe(index);
+        expect(readFileSync(join(root, "a"), "utf8")).toBe("more local edits");
+        await undoRewrite(ops, receipt);
+        expect(git("rev-parse", "HEAD")).toBe(head);
+        expect(git("write-tree")).toBe(index);
+    });
+
+    it("rechecks publication and branch movement before applying or undoing", async () => {
+        const ops = new GitExecutor(root);
+        const a = commit("a", "a", "First");
+        const b = commit("b", "b", "Second");
+        const plan = await prepareReword(ops, a);
+        git("update-ref", "refs/remotes/origin/main", a);
+        await expect(applyReword(ops, plan, "new title")).rejects.toThrow("remote-tracking");
+        expect(git("rev-parse", "HEAD")).toBe(b);
+        git("update-ref", "-d", "refs/remotes/origin/main");
+        git("checkout", "-qb", "other");
+        await expect(applyReword(ops, plan, "new title")).rejects.toThrow("branch changed");
+        git("checkout", "-q", "main");
+        const receipt = await applyReword(ops, plan, "new title");
+        git("update-ref", "refs/remotes/origin/main", receipt.firstRewritten);
+        await expect(undoRewrite(ops, receipt)).rejects.toThrow("remote-tracking");
+        git("update-ref", "-d", "refs/remotes/origin/main");
+        const c = commit("c", "c", "Later");
+        await expect(undoRewrite(ops, receipt)).rejects.toThrow();
+        expect(git("rev-parse", "HEAD")).toBe(c);
+    });
+
+    it("leaves the branch and staged content intact if the commit-msg hook rejects the new text", async () => {
+        const ops = new GitExecutor(root);
+        const a = commit("a", "a", "First");
+        const b = commit("b", "b", "Second");
+        const squash = await prepareSquash(ops, a);
+        const reword = await prepareReword(ops, a);
+        const hooks = join(root, ".git", "hooks-disabled");
+        mkdirSync(hooks);
+        writeFileSync(join(hooks, "commit-msg"), "#!/bin/sh\necho rejected-message >&2\nexit 1\n", { mode: 0o755 });
+        writeFileSync(join(root, "extra"), "for later");
+        git("add", "extra");
+        const index = git("write-tree");
+        await expect(applySquash(ops, squash, "bad")).rejects.toThrow("rejected-message");
+        await expect(applyReword(ops, reword, "bad")).rejects.toThrow("rejected-message");
+        expect(git("rev-parse", "HEAD")).toBe(b);
+        expect(git("write-tree")).toBe(index);
+    });
+
+    it("does not flatten an intervening merge when editing an older commit", async () => {
+        const a = commit("a", "a", "Before merge");
+        git("checkout", "-qb", "side");
+        commit("side-file", "side", "Side");
+        git("checkout", "main");
+        commit("main-file", "main", "Main");
+        git("merge", "-q", "--no-ff", "side", "-m", "Merge side");
+        const head = git("rev-parse", "HEAD");
+        await expect(prepareReword(new GitExecutor(root), a)).rejects.toThrow("merge");
+        await expect(prepareSquash(executor, a)).rejects.toThrow();
+        expect(git("rev-parse", "HEAD")).toBe(head);
+    });
+
+    it("lists squash subjects oldest first and can undo the combined commit with a dirty index", async () => {
+        const a = commit("a", "a", "First");
+        const b = commit("b", "b", "Second");
+        const plan = await prepareSquash(executor, [b, a]);
+        expect((await prepareSquash(executor, a)).hashes).toEqual([b, a]);
+        expect(plan.commits.map(c => c.subject)).toEqual(["test: ✅ First", "test: ✅ Second"]);
+        const after = await applySquash(executor, plan, "One commit\n\nWith a body");
+        writeFileSync(join(root, "extra"), "staged after squash");
+        git("add", "extra");
+        const index = git("write-tree");
+        await undoRewrite(executor, { branch: plan.branch, before: b, after, firstRewritten: after });
         expect(git("rev-parse", "HEAD")).toBe(b);
         expect(git("write-tree")).toBe(index);
     });

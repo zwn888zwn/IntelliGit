@@ -93,8 +93,17 @@ export function isCommitAction(value: string): value is CommitAction {
     return COMMIT_ACTION_VALUES.includes(value as CommitAction);
 }
 
+export interface EditHistoryPrompt {
+    operation: "squash" | "reword";
+    repository: string;
+    branch: string;
+    commits: { hash: string; subject: string }[];
+    message: string;
+}
+
 /** Messages sent FROM the webview TO the extension host. */
 export type CommitGraphOutbound =
+    | { type: "finishHistoryEdit"; id: number; message?: string }
     | { type: "getTrackingPreview"; repoRoot: string; branchName: string; requestId: number }
     | { type: "setPipelineCommits"; commits: Array<{ repoRoot: string; hash: string }> }
     | { type: "openPipeline"; repoRoot: string; hash: string }
@@ -129,6 +138,8 @@ export type CommitGraphOutbound =
 
 /** Messages sent FROM the extension host TO the webview. */
 export type CommitGraphInbound =
+    | { type: "editHistory"; id: number; prompt: EditHistoryPrompt }
+    | { type: "closeHistoryEdit" }
     | { type: "trackingPreview"; requestId: number; preview: BranchTrackingPreview }
     | {
           type: "setPipelineStatuses";

@@ -624,6 +624,34 @@ describe("view providers integration", () => {
         }
     });
 
+    it("accepts only the current history preview and cancels it when the graph closes", async () => {
+        const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
+        const provider = new CommitGraphViewProvider({ fsPath: "/ext", path: "/ext" } as never, makeGitOpsMock() as never);
+        provider.setRepositoryContext(testRepository);
+        const webview = createWebviewView();
+        provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+        await webview.send({ type: "ready" });
+        const prompt = { operation: "reword" as const, repository: "repo", branch: "refs/heads/main",
+            commits: [{ hash: "abc1234", subject: "A" }], message: "A" };
+        postMessageSpy.mockReturnValue(true);
+        try {
+            const first = provider.editHistoryMessage(prompt);
+            const firstId = postMessageSpy.mock.lastCall![0].id;
+            const second = provider.editHistoryMessage(prompt);
+            const secondId = postMessageSpy.mock.lastCall![0].id;
+            await expect(first).resolves.toBeUndefined();
+            await webview.send({ type: "finishHistoryEdit", id: firstId, message: "stale" });
+            await webview.send({ type: "finishHistoryEdit", id: secondId, message: "B" });
+            await expect(second).resolves.toBe("B");
+            const closed = provider.editHistoryMessage(prompt);
+            webview.dispose();
+            await expect(closed).resolves.toBeUndefined();
+        } finally {
+            postMessageSpy.mockReset();
+            provider.dispose();
+        }
+    });
+
     it("loads the hovered branch's configured upstream from the displayed repository", async () => {
         const { CommitGraphViewProvider } = await import("../../src/views/CommitGraphViewProvider");
         const preview = { incoming: ["new upstream commit"], outgoing: ["local fix"] };

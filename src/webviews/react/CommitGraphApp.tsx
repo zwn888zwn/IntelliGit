@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { createRoot } from "react-dom/client";
 import { ChakraProvider } from "@chakra-ui/react";
 import { BranchColumn } from "./BranchColumn";
+import { EditHistoryDialog } from "./commit-list/EditHistoryDialog";
 import { CommitList } from "./CommitList";
 import { fitGraphPaneWidths } from "./commit-list/panelLayout";
 import type {
@@ -149,6 +150,7 @@ function App(): React.ReactElement {
     const [branchFolderIconsByName, setBranchFolderIconsByName] = useState<
         ThemeFolderIconMap | undefined
     >(undefined);
+    const [historyEdit, setHistoryEdit] = useState<Extract<CommitGraphInbound, { type: "editHistory" }>>();
     const [branchPopupRequest, setBranchPopupRequest] = useState<{ seq: number } | null>(null);
     const [worktreeDialog, setWorktreeDialog] = useState<OpenWorktreeDialogPayload | null>(null);
     const [worktreesDialogScope, setWorktreesDialogScope] = useState<{ repoRoot?: string } | null>(
@@ -253,6 +255,12 @@ function App(): React.ReactElement {
         const handler = (event: MessageEvent<CommitGraphInbound>) => {
             const data = event.data;
             switch (data.type) {
+                case "editHistory":
+                    setHistoryEdit(data);
+                    break;
+                case "closeHistoryEdit":
+                    setHistoryEdit(undefined);
+                    break;
                 case "setPipelineStatuses": {
                     setPipelineStatuses((previous) => {
                         const next = data.reset ? {} : { ...previous };
@@ -564,6 +572,10 @@ function App(): React.ReactElement {
 
     return (
         <>
+            {historyEdit && <EditHistoryDialog key={historyEdit.id} prompt={historyEdit.prompt} finish={message => {
+                vscode.postMessage({ type: "finishHistoryEdit", id: historyEdit.id, message });
+                setHistoryEdit(undefined);
+            }} />}
             <ThemeIconFontFaces fonts={iconFonts} />
             <style>{GRAPH_PANEL_CSS}</style>
             <div ref={panelRef} className="intelligit-graph-panel" style={{ display: "flex", height: "100%", overflow: "hidden", minHeight: 0 }}>

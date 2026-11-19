@@ -45,6 +45,23 @@ export class GitExecutor {
         });
     }
 
+    /** Build a commit from an existing tree without reading or modifying the index. */
+    writeCommit(tree: string, parent: string | undefined, message: string,
+        author: { name: string; email: string; date: string }, sign: boolean): Promise<string> {
+        const args = ["-c", "i18n.commitEncoding=UTF-8", "commit-tree", tree];
+        if (parent) args.push("-p", parent);
+        if (sign) args.push("-S");
+        args.push("-F", "-");
+        return new Promise((resolve, reject) => {
+            const child = execFile("git", args, {
+                cwd: this.repoRoot, encoding: "utf8",
+                env: { ...process.env, GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_AUTHOR_DATE: author.date },
+            }, (error, stdout) => error ? reject(error) : resolve(stdout.trim()));
+            child.stdin?.on("error", reject);
+            child.stdin?.end(message.endsWith("\n") ? message : message + "\n");
+        });
+    }
+
     /** Read against an editor snapshot without saving it or changing the index. */
     runWithInput(args: string[], input: string, signal?: AbortSignal): Promise<string> {
         return new Promise((resolve, reject) => {

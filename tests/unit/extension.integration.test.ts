@@ -2934,7 +2934,7 @@ describe("extension integration", () => {
     it("defaults reset to mixed and only hard-resets after explicit confirmation", async () => {
         const { handleCommitContextAction } = await import("../../src/commands/commitCommands");
         const reset = () => handleCommitContextAction({
-            action: "resetCurrentToHere", hash: "abcd1234", executor: { run: executorRun } as never,
+            editHistoryMessage: vi.fn(), action: "resetCurrentToHere", hash: "abcd1234", executor: { run: executorRun } as never,
             gitOps: gitOpsState as never, repoRoot: "/repo-a", currentBranches: [], refreshAll: async () => {},
         });
         await reset();
@@ -4199,7 +4199,7 @@ describe("extension integration", () => {
         expect(showErrorMessage).toHaveBeenCalledWith(
             "Interactive Rebase from Here is available only for unpushed commits.",
         );
-        expect(createTerminal).toHaveBeenCalled();
+        expect(createTerminal).not.toHaveBeenCalled();
     });
 
     it("covers branch/file command failure and fallback branches", async () => {

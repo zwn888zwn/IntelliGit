@@ -343,7 +343,7 @@ export function CommitList({
             onCommitAction(
                 action,
                 contextMenu.commit.hash,
-                action === "squashCommits"
+                action === "squashCommits" && selectedCommits.length > 1
                     ? selectedCommits.map((commit) => commit.hash)
                     : undefined,
             );
@@ -908,6 +908,8 @@ export function CommitList({
                             : getCommitMenuItems(
                                   contextMenu.commit,
                                   isUnpushedCommit(contextMenu.commit.hash),
+                                  currentCommitRefs.some(ref => ref.repoRoot === contextMenu.commit.repoRoot &&
+                                      (ref.hash === contextMenu.commit.hash || ref.hash === contextMenu.commit.shortHash)),
                               )
                     }
                     onSelect={handleContextMenuAction}

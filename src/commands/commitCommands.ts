@@ -6,8 +6,8 @@ import * as path from "path";
 import * as vscode from "vscode";
 import { GitExecutor } from "../git/executor";
 import { GitOps } from "../git/operations";
-import { prepareSquash, applySquash } from "../git/squash";
-import type { CommitAction } from "../webviews/react/commitGraphTypes";
+import { prepareSquash, applySquash, prepareReword, applyReword, undoRewrite, type RewriteReceipt } from "../git/squash";
+import type { CommitAction, EditHistoryPrompt } from "../webviews/react/commitGraphTypes";
 import { getErrorMessage } from "../utils/errors";
 import { runWithNotificationProgress } from "../utils/notifications";
 import { showPushSuccessWithRequestLink } from "../utils/pushMergeRequest";
@@ -15,7 +15,6 @@ import {
     isValidGitHash,
     isValidBranchName,
     isValidTagName,
-    isHashMatch,
     isCommitUnpushed,
     isMergeCommitHash,
     getCommitParentHashes,
@@ -40,6 +39,7 @@ export async function handleCommitContextAction(params: {
     repoRoot: string;
     currentBranches: Branch[];
     refreshAll: () => Promise<void>;
+    editHistoryMessage: (prompt: EditHistoryPrompt) => Promise<string | undefined>;
 }): Promise<void> {
     const { action, hash, executor, gitOps, repoRoot, currentBranches, refreshAll } = params;
     const validatedHash = hash.trim();
@@ -50,27 +50,26 @@ export async function handleCommitContextAction(params: {
     }
     const short = validatedHash.slice(0, 8);
 
+    async function finishRewrite(receipt: RewriteReceipt, status: string): Promise<void> {
+        await refreshAll();
+        const undo = await vscode.window.showInformationMessage(status, "Undo");
+        if (undo !== "Undo") return;
+        await runWithNotificationProgress("Restoring original commits...", () => undoRewrite(executor, receipt));
+        await refreshAll();
+        void vscode.window.showInformationMessage("Restored the original commits.");
+    }
+
     switch (action) {
         case "squashCommits": {
-            const plan = await prepareSquash(executor, params.hashes ?? []);
-            const message = await vscode.window.showInputBox({
-                title: `Squash ${plan.hashes.length} commits`,
-                prompt: "Commit message (staged and working-tree changes will be preserved)",
-                value: plan.message,
-                validateInput: (value) => (value.trim() ? undefined : "Enter a commit message."),
+            const plan = await prepareSquash(executor, params.hashes ?? validatedHash);
+            const message = await params.editHistoryMessage({
+                operation: "squash", repository: path.basename(repoRoot), branch: plan.branch,
+                commits: plan.commits, message: plan.message,
             });
             if (!message?.trim()) return;
-            const confirm = await vscode.window.showWarningMessage(
-                `Combine ${plan.hashes.length} unpushed commits into one on ${plan.branch.replace(/^refs\/heads\//, "")}?`,
-                { modal: true },
-                "Squash",
-            );
-            if (confirm !== "Squash") return;
-            await runWithNotificationProgress("Squashing commits...", () =>
-                applySquash(executor, plan, message),
-            );
-            vscode.window.showInformationMessage(`Squashed ${plan.hashes.length} commits.`);
-            await refreshAll();
+            const after = await runWithNotificationProgress("Squashing commits...", () => applySquash(executor, plan, message));
+            await finishRewrite({ branch: plan.branch, before: plan.head, after, firstRewritten: after },
+                `Squashed ${plan.hashes.length} commits into ${after.slice(0, 8)}.`);
             return;
         }
         case "copyRevision": {
@@ -523,44 +522,14 @@ export async function handleCommitContextAction(params: {
                 return;
             }
 
-            const headHash = (await executor.run(["rev-parse", "HEAD"])).trim();
-            if (isHashMatch(validatedHash, headHash)) {
-                const currentMessage = (await executor.run(["log", "-1", "--format=%B"])).trim();
-                const nextMessage = await vscode.window.showInputBox({
-                    prompt: "Edit commit message",
-                    value: currentMessage,
-                });
-                if (!nextMessage) return;
-                await executor.run(["commit", "--amend", "-m", nextMessage]);
-                vscode.window.showInformationMessage("Commit message updated.");
-                await refreshAll();
-                return;
-            }
-
-            try {
-                await executor.run(["merge-base", "--is-ancestor", validatedHash, "HEAD"]);
-            } catch {
-                vscode.window.showErrorMessage(
-                    `Commit ${short} is not in the current branch history.`,
-                );
-                return;
-            }
-            const rewordParents = await getCommitParentHashes(validatedHash, executor);
-            if (rewordParents.length === 0) {
-                vscode.window.showErrorMessage(
-                    "Edit Commit Message is not available for the initial commit.",
-                );
-                return;
-            }
-            const terminal = vscode.window.createTerminal({
-                name: "IntelliGit Reword Commit",
-                cwd: repoRoot,
+            const plan = await prepareReword(executor, validatedHash);
+            const message = await params.editHistoryMessage({
+                operation: "reword", repository: path.basename(repoRoot), branch: plan.branch,
+                commits: plan.commits.map(({ hash, subject }) => ({ hash, subject })), message: plan.message,
             });
-            terminal.show();
-            terminal.sendText(`git rebase -i "${validatedHash}^"`, true);
-            vscode.window.showInformationMessage(
-                "Interactive rebase opened. Mark the commit as 'reword' in the todo list.",
-            );
+            if (!message?.trim() || message === plan.message) return;
+            const receipt = await runWithNotificationProgress("Editing commit message...", () => applyReword(executor, plan, message));
+            await finishRewrite(receipt, `Updated commit message (${receipt.firstRewritten.slice(0, 8)}).`);
             return;
         }
         case "dropCommit": {

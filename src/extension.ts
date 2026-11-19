@@ -895,7 +895,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const hash = payload.hash;
             const repoRoot = "repoRoot" in payload ? payload.repoRoot : requireCurrentRepository().root;
             try {
-                if (action === "squashCommits" && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
+                if ((action === "squashCommits" || action === "editCommitMessage") && !repositoryService.listRepositories().some((entry) => entry.root === repoRoot)) {
                     throw new Error("The selected repository is no longer available.");
                 }
                 const repository =
@@ -905,6 +905,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     action,
                     hash,
                     hashes: payload.hashes,
+                    editHistoryMessage: prompt => commitGraph.editHistoryMessage(prompt),
                     executor: repository.executor,
                     gitOps: repository.gitOps,
                     repoRoot: repository.root,

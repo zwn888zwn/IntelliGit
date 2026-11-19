@@ -6,7 +6,7 @@ import type { MenuItem } from "../shared/components/ContextMenu";
 type SeparatorAction = `sep-${string}`;
 type CommitMenuItem = Omit<MenuItem, "action"> & { action: CommitAction | SeparatorAction };
 
-export function getCommitMenuItems(commit: Commit, isUnpushed: boolean): CommitMenuItem[] {
+export function getCommitMenuItems(commit: Commit, isUnpushed: boolean, isHead = false): CommitMenuItem[] {
     const isPushed = !isUnpushed;
     const isMergeCommit = commit.parentHashes.length > 1;
 
@@ -44,6 +44,9 @@ export function getCommitMenuItems(commit: Commit, isUnpushed: boolean): CommitM
         action: "editCommitMessage",
         disabled: isPushed || isMergeCommit,
     });
+    if (isUnpushed && !isHead && commit.parentHashes.length === 1) {
+        items.push({ label: "Squash from Here to HEAD...", action: "squashCommits" });
+    }
     items.push({
         label: "Drop Commit",
         action: "dropCommit",
