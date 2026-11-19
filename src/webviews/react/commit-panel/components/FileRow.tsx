@@ -77,6 +77,7 @@ function FileRowInner({
                 title={file.path}
                 data-tooltip-overflow-only
                 flex={1}
+                minW={0}
                 overflow="hidden"
                 textOverflow="ellipsis"
                 whiteSpace="nowrap"
@@ -86,7 +87,19 @@ function FileRowInner({
                 {fileName}
             </Box>
             {!groupByDir && dir && (
-                <Box as="span" color="var(--vscode-descriptionForeground)" fontSize="11px" ml="3px">
+                <Box
+                    as="span"
+                    title={dir}
+                    data-tooltip-overflow-only
+                    minW={0}
+                    maxW="40%"
+                    overflow="hidden"
+                    textOverflow="ellipsis"
+                    whiteSpace="nowrap"
+                    color="var(--vscode-descriptionForeground)"
+                    fontSize="11px"
+                    ml="3px"
+                >
                     {dir}
                 </Box>
             )}

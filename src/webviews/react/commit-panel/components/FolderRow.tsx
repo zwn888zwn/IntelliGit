@@ -76,7 +76,6 @@ function FolderRowInner({
                 if ((e.target as HTMLElement).tagName === "INPUT") return;
                 onToggleExpand(dirPath);
             }}
-            title={dirPath}
         >
             <IndentGuides treeDepth={depth} />
             <Box
@@ -98,7 +97,17 @@ function FolderRowInner({
                 onChange={() => onToggleCheck(dirPath)}
             />
             <TreeFolderIcon isExpanded={isExpanded} icon={resolvedIcon} />
-            <Box as="span" flex={1} minW={0} whiteSpace="nowrap" opacity={0.85}>
+            <Box
+                as="span"
+                title={dirPath}
+                data-tooltip-overflow-only
+                flex={1}
+                minW={0}
+                overflow="hidden"
+                textOverflow="ellipsis"
+                whiteSpace="nowrap"
+                opacity={0.85}
+            >
                 {name}
             </Box>
             <Box
