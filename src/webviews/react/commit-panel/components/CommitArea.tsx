@@ -9,6 +9,7 @@ import { SYSTEM_FONT_STACK } from "../../../../utils/constants";
 interface Props {
     commitMessage: string;
     isAmend: boolean;
+    onOpenMerge?: () => void;
     onMessageChange: (message: string) => void;
     onAmendChange: (isAmend: boolean) => void;
     onCommit: () => void;
@@ -18,6 +19,7 @@ interface Props {
 export function CommitArea({
     commitMessage,
     isAmend,
+    onOpenMerge,
     onMessageChange,
     onAmendChange,
     onCommit,
@@ -26,7 +28,11 @@ export function CommitArea({
     const amendCheckboxId = "commit-area-amend-checkbox";
     return (
         <Flex direction="column" overflow="hidden" flex={1}>
-            <Flex
+            {onOpenMerge ? (
+                <Button size="xs" variant="link" alignSelf="flex-start" mx="7px" minH="24px" onClick={onOpenMerge}>
+                    Open Merge Conflicts to finish merge
+                </Button>
+            ) : <Flex
                 as="label"
                 htmlFor={amendCheckboxId}
                 align="center"
@@ -46,9 +52,10 @@ export function CommitArea({
                 <Box as="span" color="var(--vscode-foreground)" opacity={0.9}>
                     Amend
                 </Box>
-            </Flex>
+            </Flex>}
             <Box px="7px" flex={1} overflow="hidden">
                 <Textarea
+                    isReadOnly={Boolean(onOpenMerge)}
                     value={commitMessage}
                     onChange={(e) => onMessageChange(e.target.value)}
                     placeholder="Commit Message"
@@ -71,6 +78,7 @@ export function CommitArea({
                 <Button
                     variant="primary"
                     size="sm"
+                    isDisabled={Boolean(onOpenMerge)}
                     onClick={onCommit}
                     fontSize="12px"
                     fontFamily={SYSTEM_FONT_STACK}
@@ -80,6 +88,7 @@ export function CommitArea({
                 <Button
                     variant="secondary"
                     size="sm"
+                    isDisabled={Boolean(onOpenMerge)}
                     onClick={onCommitAndPush}
                     fontSize="12px"
                     fontFamily={SYSTEM_FONT_STACK}

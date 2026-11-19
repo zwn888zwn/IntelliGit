@@ -142,6 +142,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             this.postToWebview({
                 type: "update",
                 repositories: this.getRepositories().map((entry) => entry.info),
+                mergingRoots: [],
                 files: [],
                 stashes: [],
                 shelfFiles: [],
@@ -162,13 +163,14 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         try {
             await this.iconTheme.initIconThemeData();
             const repositories = this.getRepositories();
-            const files = (
-                await Promise.all(
-                    repositories.map(async (entry) =>
-                        this.iconTheme.decorateWorkingFiles(await entry.gitOps.getStatus()),
-                    ),
-                )
-            ).flat();
+            const statuses = await Promise.all(repositories.map(async entry => {
+                const [files, merging] = await Promise.all([
+                    entry.gitOps.getStatus().then(files => this.iconTheme.decorateWorkingFiles(files)),
+                    entry.gitOps.isMergeInProgress(),
+                ]);
+                return { root: entry.root, files, merging };
+            }));
+            const files = statuses.flatMap(status => status.files);
             const stashes = await this.gitOps.listShelved();
             const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
 
@@ -202,6 +204,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             this.postToWebview({
                 type: "update",
                 repositories: repositories.map((entry) => entry.info),
+                mergingRoots: statuses.filter(status => status.merging).map(status => status.root),
                 files,
                 stashes,
                 shelfFiles,
@@ -587,6 +590,16 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             return;
         }
         if (!grouped.size) grouped.set(this.getRepositoryRoot().fsPath, []);
+        // Preflight every selected repository before staging or committing in any of them.
+        for (const root of grouped.keys()) {
+            const repository = this.getRepositoryEntry(root);
+            if (await repository.gitOps.isMergeInProgress()) {
+                void vscode.window.showWarningMessage(`${repository.info.name}: Finish the merge in the Merge Conflicts panel.`);
+                await this.refreshData();
+                return;
+            }
+        }
+
         if (this.hasPartiallyStagedTarget(targets)) {
             const answer = await vscode.window.showWarningMessage(
                 "该文件还有未暂存的新修改，继续提交会将最新工作区版本一并暂存和提交。",
@@ -760,6 +773,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 }
                 vscode.window.showInformationMessage("Changes rolled back.");
                 await this.refreshData();
+                break;
+            }
+
+            case "openMergeSession": {
+                const root = this.assertString(msg.repoRoot, "repoRoot");
+                await vscode.commands.executeCommand("intelligit.openConflictSession", this.getRepositoryEntry(root).root);
                 break;
             }
 

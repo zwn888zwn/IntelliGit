@@ -801,7 +801,7 @@ export class GitOps {
         if (amend) args.push("--amend");
         if (amend && paths?.length === 0) {
             args.push("--only"); // Message-only amend preserves the index.
-        } else if (paths && paths.length > 0 && (amend || !(await this.isMergeInProgress()))) {
+        } else if (paths && paths.length > 0) {
             args.unshift("--literal-pathspecs");
             args.push("--only", "--", ...paths);
         }
@@ -943,12 +943,31 @@ export class GitOps {
         if (safePaths.length === 0) return;
 
         // A staged deletion is absent from the index but still tracked in HEAD.
-        const [indexPaths, deletedPaths] = await Promise.all([
+        const [indexPaths, changes] = await Promise.all([
             this.executor.run(["--literal-pathspecs", "ls-files", "--cached", "-z", "--", ...safePaths]),
-            this.executor.run(["--literal-pathspecs", "diff", "--cached", "--no-renames", "--diff-filter=D", "--name-only", "-z", "--", ...safePaths]),
+            // Both sides of a rename are needed, even when only its new name was selected.
+            this.executor.run(["diff", "--cached", "--name-status", "--find-renames", "--diff-filter=DR", "-z", "--"]),
         ]);
+        const selected = new Set(safePaths);
+        const renameSources = new Set<string>();
+        const trackedEntries = indexPaths.split("\0");
+        const fields = changes.split("\0");
+        for (let i = 0; i < fields.length && fields[i];) {
+            const status = fields[i++];
+            const oldPath = fields[i++];
+            trackedEntries.push(oldPath);
+            if (status.startsWith("R")) {
+                const newPath = fields[i++];
+                if (selected.has(newPath) && !selected.has(oldPath)) renameSources.add(oldPath);
+            }
+        }
+        if (renameSources.size) {
+            const occupied = await this.executor.run(["--literal-pathspecs", "ls-files", "--others", "-z", "--", ...renameSources]);
+            if (occupied) throw new Error(`Cannot restore the original name: ${occupied.split("\0")[0]} already exists. Move it first.`);
+            safePaths.push(...renameSources);
+        }
         const tracked = new Set<string>();
-        for (const entry of [...indexPaths.split("\0"), ...deletedPaths.split("\0")]) {
+        for (const entry of trackedEntries) {
             let name = entry;
             while (name && !tracked.has(name)) {
                 tracked.add(name);

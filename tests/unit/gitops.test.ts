@@ -865,7 +865,7 @@ describe("GitOps", () => {
             ]);
         });
 
-        it("does not create a partial commit while a merge is in progress", async () => {
+        it("never widens a path-limited commit to include the whole merge", async () => {
             const repoRoot = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-merge-"));
             await fs.promises.mkdir(path.join(repoRoot, ".git"));
             await fs.promises.writeFile(path.join(repoRoot, ".git", "MERGE_HEAD"), "abc123\n");
@@ -875,7 +875,7 @@ describe("GitOps", () => {
             await ops.commit("merge message", false, ["src/a.ts", "src/b.ts"]);
 
             const call = (executor.run as ReturnType<typeof vi.fn>).mock.calls[0][0];
-            expect(call).toEqual(["commit", "-m", "merge message"]);
+            expect(call).toEqual(["--literal-pathspecs", "commit", "-m", "merge message", "--only", "--", "src/a.ts", "src/b.ts"]);
         });
     });
 
@@ -1091,6 +1091,29 @@ describe("GitOps", () => {
                 expect(await fs.promises.readFile(path.join(root, "file[1]"), "utf8")).toBe("base");
                 expect(await fs.promises.readFile(path.join(root, "modified"), "utf8")).toBe("base");
                 expect((await git.run(["status", "--short"])).trim()).toBe("D  file1");
+            } finally {
+                await fs.promises.rm(root, { recursive: true, force: true });
+            }
+        });
+
+        it("rolls back both names and preserves a file recreated at the original path", async () => {
+            const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "intelligit-rename-"));
+            const git = new GitExecutor(root);
+            const ops = new GitOps(git, undefined, { repoRoot: root });
+            try {
+                await git.run(["init", "-q"]);
+                await git.run(["config", "core.hooksPath", path.join(root, ".git", "no-hooks")]);
+                await fs.promises.writeFile(path.join(root, "original.go"), "original");
+                await git.run(["add", "."]);
+                await git.run(["-c", "user.name=Test", "-c", "user.email=test@example.org", "-c", "commit.gpgSign=false", "commit", "-qm", "base"]);
+                await git.run(["mv", "original.go", "renamed.go"]);
+                await fs.promises.writeFile(path.join(root, "original.go"), "independent work");
+                await expect(ops.rollbackFiles(["renamed.go"])).rejects.toThrow("original.go already exists");
+                expect(await fs.promises.readFile(path.join(root, "original.go"), "utf8")).toBe("independent work");
+                await fs.promises.rename(path.join(root, "original.go"), path.join(root, "saved.go"));
+                await ops.rollbackFiles(["renamed.go"]);
+                expect(await fs.promises.readFile(path.join(root, "original.go"), "utf8")).toBe("original");
+                expect((await git.run(["status", "--short"])).trim()).toBe("?? saved.go");
             } finally {
                 await fs.promises.rm(root, { recursive: true, force: true });
             }

@@ -300,6 +300,7 @@ function makeGitOpsMock() {
         push: vi.fn(async () => "ok"),
         getPushHead: vi.fn(async () => "abcdef123456\nrefs/heads/main"),
         commitAndPush: vi.fn(async () => "ok"),
+        isMergeInProgress: vi.fn(async () => false),
         getPendingCommitMessage: vi.fn(async () => ""),
         getLastCommitMessage: vi.fn(async () => "last message"),
         rollbackAll: vi.fn(async () => undefined),
@@ -1163,6 +1164,39 @@ describe("view providers integration", () => {
         await webview.send({ type: "loadMore" });
         expect(lastCommitMessage().commits.map((commit) => commit.hash)).toEqual(expectedHashes.slice(502));
         expect(lastCommitMessage().hasMore).toBe(false);
+        provider.dispose();
+    });
+
+    it("blocks ordinary commits before staging during a merge and routes Finish to the target repository", async () => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        gitOps.isMergeInProgress.mockResolvedValue(true);
+        await provider.refresh();
+        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "update", mergingRoots: ["/repo"] }));
+        for (const push of [false, true]) {
+            await webview.send({ type: "commitSelected", paths: ["src/a.ts"], message: "only A", push });
+        }
+        expect(gitOps.stageFiles).not.toHaveBeenCalled();
+        expect(gitOps.commit).not.toHaveBeenCalled();
+        expect(gitOps.push).not.toHaveBeenCalled();
+        await webview.send({ type: "openMergeSession", repoRoot: "/repo" });
+        expect(executeCommand).toHaveBeenCalledWith("intelligit.openConflictSession", "/repo");
+        gitOps.isMergeInProgress.mockResolvedValue(false);
+        await webview.send({ type: "commitSelected", paths: ["src/a.ts"], message: "only A" });
+        expect(gitOps.commit).toHaveBeenCalledWith("only A", false, ["src/a.ts"]);
+        provider.dispose();
+    });
+
+    it.each(["go", "png"])("reads the old name from HEAD and opens the new working path for a renamed %s file", async ext => {
+        const { provider, gitOps } = await setupCommitPanelProvider();
+        const old = "old." + ext;
+        const name = "new." + ext;
+        gitOps.getStatus.mockResolvedValue([{ repoRoot: "/repo", path: name, renamedFrom: old, status: "R", staged: true, additions: 1, deletions: 1 }] as never);
+        await provider.refresh();
+        await provider.openWorkingFileDiff({ repoRoot: "/repo", path: name });
+        const call = executeCommand.mock.calls.find(([c]) => c === "vscode.diff")!;
+        expect(call[2].fsPath).toBe("/repo/" + name);
+        if (ext === "png") expect(JSON.parse(call[1].query)).toMatchObject({ path: "/repo/" + old, ref: "HEAD" });
+        else expect(gitOps.getFileContentAtRef).toHaveBeenCalledWith(old, "HEAD");
         provider.dispose();
     });
 

@@ -69,6 +69,7 @@ exports.run = async () => {
         const files = ["a.go", "b.go", "games.go"];
         for (const file of files.slice(0, 2)) await fs.writeFile(path.join(workspace, file), "// working tree\n");
         const git = {
+            isMergeInProgress: async () => false,
             getStatus: async () => files.flatMap((file, i) => (i === 1 ? [false] : [true, false]).map(staged =>
                 ({ repoRoot: workspace, path: file, staged, status: "M", additions: 1, deletions: 1 }))),
             getFileContentAtRef: async (_, ref) => "// " + ref,

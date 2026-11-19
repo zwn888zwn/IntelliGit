@@ -1867,8 +1867,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
             },
         ),
-        vscode.commands.registerCommand("intelligit.openConflictSession", async () => {
-            const repository = getCurrentRepository();
+        vscode.commands.registerCommand("intelligit.openConflictSession", async (root?: string) => {
+            const repository = typeof root === "string" ? repositoryService.listRepositories().find(entry => entry.root === root) : getCurrentRepository();
             if (!repository) {
                 vscode.window.showInformationMessage("No unresolved merge conflicts found.");
                 return;

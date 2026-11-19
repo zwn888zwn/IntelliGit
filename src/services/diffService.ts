@@ -1060,7 +1060,7 @@ export async function openWorkingTreeFileDiff(
     title = `${file.path} (HEAD ↔ Working Tree)`,
 ): Promise<vscode.Tab | undefined> {
     const safePath = assertRepoRelativePath(file.path);
-    const leftPath = safePath;
+    const leftPath = file.renamedFrom ? assertRepoRelativePath(file.renamedFrom) : safePath;
     const isKnownBinary = isBinaryFilePath(safePath);
     const workingTreeUri = vscode.Uri.file(path.join(repoRoot, safePath));
     if (
@@ -1082,7 +1082,7 @@ export async function openWorkingTreeFileDiff(
         (await fileExists(workingTreeUri))
     ) {
         return openCommitPanelDiff(
-            createGitResourceUri(workingTreeUri, "HEAD"),
+            createGitResourceUri(vscode.Uri.file(path.join(repoRoot, leftPath)), "HEAD"),
             workingTreeUri,
             title, workingTreeUri, true,
         );
@@ -1097,7 +1097,7 @@ export async function openWorkingTreeFileDiff(
 
     const diffProvider = getDiffContentProvider();
     const leftDoc = await vscode.workspace.openTextDocument(
-        diffProvider.createUri(leftPath, "HEAD", leftSnapshot.content, {
+        diffProvider.createUri(safePath, "HEAD", leftSnapshot.content, {
             forcePlainTextUri: leftSnapshot.forcePlainTextUri,
         }),
     );

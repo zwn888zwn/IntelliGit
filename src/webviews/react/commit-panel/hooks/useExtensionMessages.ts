@@ -7,6 +7,7 @@ import type { CommitPanelState, CommitPanelAction, InboundMessage } from "../typ
 
 const initialState: CommitPanelState = {
     repositories: [],
+    mergingRoots: [],
     files: [],
     stashes: [],
     shelfFiles: [],
@@ -36,6 +37,7 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
             return {
                 ...state,
                 repositories: action.repositories,
+                mergingRoots: action.mergingRoots ?? state.mergingRoots,
                 files: action.files,
                 stashes: action.stashes,
                 shelfFiles: action.shelfFiles,
@@ -86,6 +88,7 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                     dispatch({
                         type: "SET_FILES_AND_STASHES",
                         repositories: msg.repositories ?? [],
+                        mergingRoots: msg.mergingRoots,
                         files: msg.files ?? [],
                         stashes: msg.stashes ?? [],
                         shelfFiles: msg.shelfFiles ?? [],

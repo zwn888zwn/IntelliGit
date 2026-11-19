@@ -24,6 +24,7 @@ export type OutboundMessage =
     | { type: "commitAndPush"; message: string; amend: boolean }
     | { type: "getLastCommitMessage"; repoRoot?: string }
     | { type: "rollback"; targets: RepoPathRef[] }
+    | { type: "openMergeSession"; repoRoot: string }
     | { type: "previewCheckedDiffs"; targets: RepoPathRef[] }
     | { type: "showDiff"; target: RepoPathRef }
     | { type: "showAllDiffs"; repoRoot: string }
@@ -59,6 +60,7 @@ export type InboundMessage =
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
+          mergingRoots?: string[];
       }
     | { type: "amendMessage"; repoRoot: string; message: string }
     | { type: "lastCommitMessage"; message: string }
@@ -71,6 +73,7 @@ export type InboundMessage =
 /** Reducer state for the commit panel app. */
 export interface CommitPanelState {
     repositories: RepositoryContextInfo[];
+    mergingRoots: string[];
     files: WorkingFile[];
     stashes: StashEntry[];
     shelfFiles: WorkingFile[];
@@ -103,6 +106,7 @@ export type CommitPanelAction =
           folderIconsByName?: ThemeFolderIconMap;
           iconFonts?: ThemeIconFont[];
           suggestedCommitMessage?: string;
+          mergingRoots?: string[];
       }
     | { type: "SET_AMEND_MESSAGE"; repoRoot: string; message: string; initial?: boolean }
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }

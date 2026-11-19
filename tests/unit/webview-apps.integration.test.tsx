@@ -146,6 +146,31 @@ afterEach(() => {
 });
 
 describe("CommitPanelApp integration", () => {
+    it("disables both commit buttons during a merge and opens the existing merge panel", async () => {
+        vi.resetModules();
+        const api = installVsCodeMock();
+        createRootHost();
+        await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+        await flush();
+        const repo = { root: "/repo", name: "repo", repoId: ".", color: "#888" };
+        const send = (data: unknown) => act(() => window.dispatchEvent(new MessageEvent("message", { data })));
+        const update = (mergingRoots: string[]) => send({ type: "update", repositories: [repo], mergingRoots,
+            files: [], stashes: [], shelfFiles: [], selectedShelfIndex: null });
+        send({ type: "setRepositoryContext", repository: repo });
+        update([repo.root]);
+        await flush();
+        const button = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('button:not([role="tab"])'))
+            .find(b => b.textContent?.trim() === label)!;
+        expect(button("Commit").disabled).toBe(true);
+        expect(button("Commit and Push...").disabled).toBe(true);
+        fireClick(button("Open Merge Conflicts to finish merge"));
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "openMergeSession", repoRoot: repo.root });
+        update([]);
+        await flush();
+        expect(button("Commit").disabled).toBe(false);
+        expect(button("Commit and Push...").disabled).toBe(false);
+    });
+
     it("creates a stash from the toolbar dialog", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock({ checked: [] });
