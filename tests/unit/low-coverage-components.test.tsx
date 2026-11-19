@@ -107,21 +107,8 @@ describe("low coverage components", () => {
             row.textContent?.includes("/repos/xnmdwaterWeb-feature"),
         ) as HTMLElement;
         expect(webRow).toBeTruthy();
-        const worktreeName = webRow.querySelector(
-            '[data-worktree-field="name"]',
-        ) as HTMLElement;
-        Object.defineProperties(worktreeName, {
-            clientWidth: { configurable: true, value: 100 },
-            scrollWidth: { configurable: true, value: 200 },
-        });
-        act(() => {
-            worktreeName.dispatchEvent(new MouseEvent("pointerover", { bubbles: true }));
-        });
-        await flush();
-        await act(async () => { await new Promise(resolve => setTimeout(resolve, 420)); });
-        expect(document.querySelector('[role="tooltip"]')?.textContent).toBe(
-            "xnmdwaterWeb-feature",
-        );
+        expect(webRow.querySelector('[data-worktree-field="branch"]')?.textContent).toBe("feature/demo");
+        expect(webRow.querySelector('[data-worktree-field="path"]')?.textContent).toBe("/repos/xnmdwaterWeb-feature");
 
         const rowButtons = Array.from(webRow.querySelectorAll("button"));
         act(() => {

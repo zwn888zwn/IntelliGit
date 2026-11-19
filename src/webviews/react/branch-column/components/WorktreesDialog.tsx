@@ -1,4 +1,3 @@
-import { TooltipSurface, useTooltipDelay } from "../../shared/TooltipSurface";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { GitWorktree, RepositoryContextInfo } from "../../../../types";
@@ -45,13 +44,6 @@ interface RowMenuState {
     item: WorktreeDialogItem;
 }
 
-interface HoverTooltipState {
-    text: string;
-    left: number;
-    top: number;
-    placement: "above" | "below";
-}
-
 const MENU_ITEMS: MenuItem[] = [
     { label: "Open", action: "open" },
     { label: "Delete...", action: "delete" },
@@ -74,9 +66,6 @@ export function WorktreesDialog({
     const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
     const [requestedCreateRepoRoot, setRequestedCreateRepoRoot] = useState("");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const tooltipDelay = useTooltipDelay();
-    const hideHoverTooltip = () => { tooltipDelay.cancel(); setHoverTooltip(null); };
-    const [hoverTooltip, setHoverTooltip] = useState<HoverTooltipState | null>(null);
     const [query, setQuery] = useState("");
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const listRef = useRef<HTMLDivElement>(null);
@@ -143,7 +132,6 @@ export function WorktreesDialog({
             }),
         [allRepositories, items],
     );
-    const showRepositoryColumn = allRepositories;
     const searchTerms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const visibleItems = sortedItems.filter((item) => {
         const text = `${item.repositoryName} ${item.worktree.branch ?? "Detached HEAD"} ${item.worktree.path}`.toLowerCase();
@@ -198,26 +186,6 @@ export function WorktreesDialog({
         }
     };
 
-    const showOverflowTooltip = (
-        event: React.PointerEvent<HTMLElement>,
-        text: string,
-    ): void => {
-        const target = event.currentTarget;
-        if (target.scrollWidth <= target.clientWidth) {
-            hideHoverTooltip();
-            return;
-        }
-        const rect = target.getBoundingClientRect();
-        const maxWidth = Math.min(520, window.innerWidth - 16);
-        const placement = rect.top >= 72 ? "above" : "below";
-        tooltipDelay.show(() => setHoverTooltip({
-            text,
-            left: Math.max(8, Math.min(rect.left, window.innerWidth - maxWidth - 8)),
-            top: placement === "above" ? rect.top - 6 : rect.bottom + 6,
-            placement,
-        }));
-    };
-
     return createPortal(
         <div style={BACKDROP_STYLE} role="presentation" onMouseDown={onClose}>
             <section
@@ -232,10 +200,29 @@ export function WorktreesDialog({
                 style={DIALOG_STYLE}
             >
                 <div style={HEADER_STYLE}>
-                    <div>
-                        <div style={TITLE_STYLE}>Worktrees</div>
-                        <div style={SUBTITLE_STYLE}>{subtitle}</div>
-                    </div>
+                    <strong style={TITLE_STYLE}>Worktrees</strong>
+                    <span style={SUBTITLE_STYLE} title={subtitle}>{subtitle}</span>
+                    <input
+                        autoFocus
+                        aria-label="Search worktrees"
+                        placeholder="Search repository, branch, or path..."
+                        value={query}
+                        onChange={(event) => {
+                            setQuery(event.target.value);
+                            setSelectedKey(null);
+                            setRowMenu(null);
+                        }}
+                        onKeyDown={handleListKeyDown}
+                        style={{
+                            flex: "1 1 160px",
+                            minWidth: 90,
+                            height: 26,
+                            padding: "2px 7px",
+                            color: "var(--vscode-input-foreground)",
+                            background: "var(--vscode-input-background)",
+                            border: "1px solid var(--vscode-input-border, transparent)",
+                        }}
+                    />
                     <div style={HEADER_ACTIONS_STYLE}>
                         {allRepositories && createRepositories.length > 1 && (
                             <select
@@ -266,26 +253,6 @@ export function WorktreesDialog({
                     </div>
                 </div>
 
-                <input
-                    autoFocus
-                    aria-label="Search worktrees"
-                    placeholder="Search repository, branch, or path..."
-                    value={query}
-                    onChange={(event) => {
-                        setQuery(event.target.value);
-                        setSelectedKey(null);
-                        setHoverTooltip(null);
-                        setRowMenu(null);
-                    }}
-                    onKeyDown={handleListKeyDown}
-                    style={{
-                        margin: "0 16px 12px",
-                        padding: "6px 8px",
-                        color: "var(--vscode-input-foreground)",
-                        background: "var(--vscode-input-background)",
-                        border: "1px solid var(--vscode-input-border, transparent)",
-                    }}
-                />
                 <div ref={listRef} role="grid" aria-label="Worktree list" style={LIST_STYLE} onKeyDown={handleListKeyDown}>
                     {visibleItems.length === 0 ? (
                         <div style={EMPTY_STYLE}>{query.trim() ? "No matching worktrees." : "No worktrees found."}</div>
@@ -293,7 +260,6 @@ export function WorktreesDialog({
                         visibleItems.map((item) => {
                             const { worktree } = item;
                             const current = isCurrentWorktree(item.repositoryRoot, worktree.path);
-                            const worktreeName = getWorktreeName(worktree.path);
                             const branchName = worktree.branch ?? "Detached HEAD";
                             return (
                                 <div
@@ -315,77 +281,26 @@ export function WorktreesDialog({
                                         });
                                     }}
                                     style={{
-                                        ...(showRepositoryColumn
-                                            ? ROW_WITH_REPOSITORY_STYLE
-                                            : ROW_STYLE),
+                                        ...ROW_STYLE,
                                         background: getWorktreeKey(item) === activeKey
                                             ? "var(--vscode-list-inactiveSelectionBackground)"
                                             : undefined,
                                     }}
                                 >
-                                    <span style={CURRENT_MARK_STYLE}>
-                                        {current ? "Current" : ""}
-                                    </span>
-                                    {showRepositoryColumn && (
-                                        <span style={REPOSITORY_STYLE}>
-                                            <span
-                                                style={{
+                                    <div style={IDENTITY_STYLE}>
+                                        {allRepositories && (
+                                            <span style={REPOSITORY_STYLE}>
+                                                <span style={{
                                                     ...REPOSITORY_SWATCH_STYLE,
-                                                    background:
-                                                        item.repositoryColor ??
-                                                        "var(--vscode-charts-blue, #58a6ff)",
-                                                }}
-                                            />
-                                            <span
-                                                data-worktree-field="repository"
-                                                onPointerEnter={(event) =>
-                                                    showOverflowTooltip(event, item.repositoryName)
-                                                }
-                                                onPointerLeave={hideHoverTooltip}
-                                        onPointerDown={hideHoverTooltip}
-                                        onContextMenu={hideHoverTooltip}
-                                                style={REPOSITORY_NAME_STYLE}
-                                            >
+                                                    background: item.repositoryColor ?? "var(--vscode-charts-blue, #58a6ff)",
+                                                }} />
                                                 {item.repositoryName}
                                             </span>
-                                        </span>
-                                    )}
-                                    <span
-                                        data-worktree-field="name"
-                                        onPointerEnter={(event) =>
-                                            showOverflowTooltip(event, worktreeName)
-                                        }
-                                        onPointerLeave={hideHoverTooltip}
-                                        onPointerDown={hideHoverTooltip}
-                                        onContextMenu={hideHoverTooltip}
-                                        style={NAME_STYLE}
-                                    >
-                                        {worktreeName}
-                                    </span>
-                                    <span
-                                        data-worktree-field="branch"
-                                        onPointerEnter={(event) =>
-                                            showOverflowTooltip(event, branchName)
-                                        }
-                                        onPointerLeave={hideHoverTooltip}
-                                        onPointerDown={hideHoverTooltip}
-                                        onContextMenu={hideHoverTooltip}
-                                        style={BRANCH_STYLE}
-                                    >
-                                        {branchName}
-                                    </span>
-                                    <span
-                                        data-worktree-field="path"
-                                        onPointerEnter={(event) =>
-                                            showOverflowTooltip(event, worktree.path)
-                                        }
-                                        onPointerLeave={hideHoverTooltip}
-                                        onPointerDown={hideHoverTooltip}
-                                        onContextMenu={hideHoverTooltip}
-                                        style={PATH_STYLE}
-                                    >
-                                        {worktree.path}
-                                    </span>
+                                        )}
+                                        <strong data-worktree-field="branch">{branchName}</strong>
+                                        {current && <span style={CURRENT_MARK_STYLE}>Current</span>}
+                                        <span data-worktree-field="path" style={PATH_STYLE}>{worktree.path}</span>
+                                    </div>
                                     <span style={ACTION_CELL_STYLE}>
                                         <button
                                             type="button"
@@ -426,25 +341,6 @@ export function WorktreesDialog({
                         })
                     )}
                 </div>
-
-                {hoverTooltip &&
-                    createPortal(
-                        <TooltipSurface
-
-                            style={{
-                                ...HOVER_TOOLTIP_STYLE,
-                                left: hoverTooltip.left,
-                                top: hoverTooltip.top,
-                                transform:
-                                    hoverTooltip.placement === "above"
-                                        ? "translateY(-100%)"
-                                        : undefined,
-                            }}
-                        >
-                            {hoverTooltip.text}
-                        </TooltipSurface>,
-                        document.body,
-                    )}
 
                 {errorMessage && <div style={ERROR_STYLE}>{errorMessage}</div>}
 
@@ -550,7 +446,7 @@ const BACKDROP_STYLE: React.CSSProperties = {
 
 const DIALOG_STYLE: React.CSSProperties = {
     width: "min(960px, calc(100vw - 36px))",
-    maxHeight: "min(460px, calc(100vh - 40px))",
+    maxHeight: "min(460px, calc(100vh - 12px))",
     display: "flex",
     flexDirection: "column",
     position: "relative",
@@ -565,9 +461,9 @@ const DIALOG_STYLE: React.CSSProperties = {
 const HEADER_STYLE: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: "14px 18px 10px",
+    flexWrap: "wrap",
+    gap: 6,
+    padding: "5px 8px",
     borderBottom: "1px solid var(--vscode-panel-border, rgba(255,255,255,0.1))",
 };
 
@@ -575,48 +471,49 @@ const HEADER_ACTIONS_STYLE: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: 8,
+    flexWrap: "wrap",
+    gap: 6,
     minWidth: 0,
 };
 
 const TITLE_STYLE: React.CSSProperties = {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: 650,
 };
 
 const SUBTITLE_STYLE: React.CSSProperties = {
-    marginTop: 2,
+    maxWidth: "22%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     fontSize: 12,
     color: "var(--vscode-descriptionForeground, #8d929b)",
 };
 
 const LIST_STYLE: React.CSSProperties = {
     overflow: "auto",
-    padding: "8px 12px 12px",
+    padding: "3px 6px",
 };
 
 const ROW_STYLE: React.CSSProperties = {
     display: "grid",
     gridTemplateColumns:
-        "56px minmax(100px, 150px) minmax(120px, 170px) minmax(180px, 1fr) 132px",
+        "minmax(0, 1fr) auto",
     alignItems: "center",
-    minHeight: 32,
-    gap: 10,
-    padding: "4px 8px",
+    minHeight: 26,
+    gap: 8,
+    padding: "1px 4px",
     borderRadius: 5,
     cursor: "default",
 };
 
-const ROW_WITH_REPOSITORY_STYLE: React.CSSProperties = {
-    ...ROW_STYLE,
-    gridTemplateColumns: [
-        "56px",
-        "minmax(100px, 150px)",
-        "minmax(100px, 140px)",
-        "minmax(120px, 160px)",
-        "minmax(180px, 1fr)",
-        "132px",
-    ].join(" "),
+const IDENTITY_STYLE: React.CSSProperties = {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    gap: "2px 8px",
+    overflowWrap: "anywhere",
+    whiteSpace: "normal",
 };
 
 const CURRENT_MARK_STYLE: React.CSSProperties = {
@@ -630,7 +527,7 @@ const REPOSITORY_STYLE: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     gap: 7,
-    overflow: "hidden",
+    color: "var(--vscode-descriptionForeground)",
 };
 
 const REPOSITORY_SWATCH_STYLE: React.CSSProperties = {
@@ -640,52 +537,12 @@ const REPOSITORY_SWATCH_STYLE: React.CSSProperties = {
     flexShrink: 0,
 };
 
-const REPOSITORY_NAME_STYLE: React.CSSProperties = {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-};
-
-const NAME_STYLE: React.CSSProperties = {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    fontWeight: 600,
-};
-
-const BRANCH_STYLE: React.CSSProperties = {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: "var(--vscode-foreground, #d7d7d7)",
-};
-
 const PATH_STYLE: React.CSSProperties = {
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: "var(--vscode-descriptionForeground, #8d929b)",
-};
-
-const HOVER_TOOLTIP_STYLE: React.CSSProperties = {
-    position: "fixed",
-    boxSizing: "border-box",
-    maxWidth: "min(520px, calc(100vw - 16px))",
-    padding: "5px 8px",
-    border: "1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.14))",
-    borderRadius: 4,
-    background: "var(--vscode-editorHoverWidget-background, #2f3646)",
-    color: "var(--vscode-editorHoverWidget-foreground, #d8dbe2)",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.35)",
+    maxWidth: "100%",
     fontSize: 12,
-    lineHeight: "17px",
     overflowWrap: "anywhere",
-    pointerEvents: "none",
-    zIndex: 10001,
+    whiteSpace: "normal",
+    color: "var(--vscode-descriptionForeground, #8d929b)",
 };
 
 const ACTION_CELL_STYLE: React.CSSProperties = {
@@ -698,7 +555,7 @@ const ACTION_CELL_STYLE: React.CSSProperties = {
 const REPOSITORY_SELECT_STYLE: React.CSSProperties = {
     minWidth: 130,
     maxWidth: 210,
-    height: 30,
+    height: 26,
     borderRadius: 5,
     padding: "0 8px",
     border: "1px solid var(--vscode-input-border, rgba(255,255,255,0.18))",
@@ -727,7 +584,7 @@ const ROW_OPEN_BUTTON_STYLE: React.CSSProperties = {
 };
 
 const NEW_BUTTON_STYLE: React.CSSProperties = {
-    height: 30,
+    height: 26,
     borderRadius: 5,
     padding: "0 10px",
     border: "1px solid var(--vscode-button-background, #3478f6)",
@@ -758,7 +615,7 @@ const ERROR_STYLE: React.CSSProperties = {
 };
 
 const CLOSE_BUTTON_STYLE: React.CSSProperties = {
-    height: 30,
+    height: 26,
     borderRadius: 6,
     padding: "0 12px",
     border: "1px solid var(--vscode-button-secondaryBorder, rgba(255,255,255,0.18))",
