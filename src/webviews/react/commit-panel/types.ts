@@ -19,7 +19,7 @@ import type {
 export type OutboundMessage =
     | { type: "ready" }
     | { type: "refresh" }
-    | { type: "commitSelected"; targets: RepoPathRef[]; message: string; amend: boolean; push: boolean }
+    | { type: "commitSelected"; targets: RepoPathRef[]; message: string; draftRevision: number; amend: boolean; push: boolean }
     | { type: "commit"; message: string; amend: boolean }
     | { type: "commitAndPush"; message: string; amend: boolean }
     | { type: "getLastCommitMessage"; repoRoot?: string }
@@ -65,7 +65,7 @@ export type InboundMessage =
       }
     | { type: "amendMessage"; repoRoot: string; message: string }
     | { type: "lastCommitMessage"; message: string }
-    | { type: "committed" }
+    | { type: "committed"; draftRevision?: number; message: string; amend: boolean }
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "setActiveFile"; target: RepoPathRef | null }
     | { type: "refreshing"; active: boolean }
@@ -87,6 +87,7 @@ export interface CommitPanelState {
     repository: RepositoryContextInfo | null;
     activeFile: RepoPathRef | null;
     commitMessage: string;
+    draftRevision: number;
     suggestedCommitMessage: string;
     amendMessages: Record<string, string>;
     isAmend: boolean;
@@ -113,7 +114,7 @@ export type CommitPanelAction =
       }
     | { type: "SET_AMEND_MESSAGE"; repoRoot: string; message: string; initial?: boolean }
     | { type: "SET_LAST_COMMIT_MESSAGE"; message: string }
-    | { type: "COMMITTED" }
+    | { type: "COMMITTED"; draftRevision?: number; message: string; amend: boolean }
     | { type: "SET_REPOSITORY_CONTEXT"; repository: RepositoryContextInfo | null }
     | { type: "SET_ACTIVE_FILE"; target: RepoPathRef | null }
     | { type: "SET_REFRESHING"; active: boolean }

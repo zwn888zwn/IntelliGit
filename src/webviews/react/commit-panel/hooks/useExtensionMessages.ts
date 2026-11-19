@@ -20,6 +20,7 @@ const initialState: CommitPanelState = {
     repository: null,
     activeFile: null,
     commitMessage: "",
+    draftRevision: 0,
     suggestedCommitMessage: "",
     isAmend: false,
     amendMessages: {},
@@ -59,11 +60,22 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
             return { ...state, isRefreshing: action.active };
         case "SET_AMEND_MESSAGE":
             if (!state.isAmend || (action.initial && state.amendMessages[action.repoRoot] !== undefined)) return state;
-            return { ...state, amendMessages: { ...state.amendMessages, [action.repoRoot]: action.message } };
+            return {
+                ...state,
+                amendMessages: { ...state.amendMessages, [action.repoRoot]: action.message },
+                draftRevision: action.initial ? state.draftRevision : state.draftRevision + 1,
+            };
         case "SET_LAST_COMMIT_MESSAGE":
             return { ...state, commitMessage: action.message };
         case "COMMITTED":
-            return { ...state, commitMessage: "", isAmend: false, amendMessages: {} };
+            if (action.draftRevision !== undefined && action.draftRevision !== state.draftRevision) return state;
+            return {
+                ...state,
+                commitMessage: action.amend && state.commitMessage ? state.commitMessage : action.message,
+                draftRevision: state.draftRevision + 1,
+                isAmend: false,
+                amendMessages: {},
+            };
         case "SET_REPOSITORY_CONTEXT":
             return { ...state, repository: action.repository };
         case "SET_ACTIVE_FILE":
@@ -71,16 +83,20 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
         case "SET_ERROR":
             return { ...state, error: action.message };
         case "SET_COMMIT_MESSAGE":
-            return { ...state, commitMessage: action.message };
+            return { ...state, commitMessage: action.message, draftRevision: state.draftRevision + 1 };
         case "SET_AMEND":
-            return { ...state, isAmend: action.isAmend, amendMessages: {} };
+            return { ...state, isAmend: action.isAmend, amendMessages: {}, draftRevision: state.draftRevision + 1 };
     }
 }
 
 export function useExtensionMessages(): [CommitPanelState, React.Dispatch<CommitPanelAction>] {
     const [state, dispatch] = useReducer(reducer, initialState, initial => {
-        const draft = getVsCodeApi().getState()?.commitDraft;
-        return { ...initial, commitMessage: typeof draft === "string" ? draft : "" };
+        const saved = getVsCodeApi().getState();
+        return {
+            ...initial,
+            commitMessage: typeof saved?.commitDraft === "string" ? saved.commitDraft : "",
+            draftRevision: typeof saved?.draftRevision === "number" ? saved.draftRevision : 0,
+        };
     });
 
     useEffect(() => {
@@ -88,8 +104,10 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
         const saved = vscode.getState() ?? {};
         // The host supplies automatic merge messages again on refresh.
         const draft = state.commitMessage === state.suggestedCommitMessage ? "" : state.commitMessage;
-        if ((saved.commitDraft ?? "") !== draft) vscode.setState({ ...saved, commitDraft: draft });
-    }, [state.commitMessage, state.suggestedCommitMessage]);
+        if ((saved.commitDraft ?? "") !== draft || saved.draftRevision !== state.draftRevision) {
+            vscode.setState({ ...saved, commitDraft: draft, draftRevision: state.draftRevision });
+        }
+    }, [state.commitMessage, state.suggestedCommitMessage, state.draftRevision]);
 
     useEffect(() => {
         const vscode = getVsCodeApi();
@@ -121,7 +139,7 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                     dispatch({ type: "SET_LAST_COMMIT_MESSAGE", message: msg.message });
                     break;
                 case "committed":
-                    dispatch({ type: "COMMITTED" });
+                    dispatch({ type: "COMMITTED", draftRevision: msg.draftRevision, message: msg.message, amend: msg.amend });
                     break;
                 case "setRepositoryContext":
                     dispatch({ type: "SET_REPOSITORY_CONTEXT", repository: msg.repository });

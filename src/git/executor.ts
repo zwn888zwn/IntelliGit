@@ -43,7 +43,7 @@ export class GitExecutor {
                     resolve(output);
                     return;
                 }
-                reject(new Error(output.trim() || `git ${args[0]} failed with exit code ${code}`));
+                reject(new Error(output.trim() || `Git command failed with exit code ${code}`));
             });
         });
     }

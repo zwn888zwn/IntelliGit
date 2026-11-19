@@ -816,7 +816,7 @@ export class GitOps {
             args.unshift("--literal-pathspecs");
             args.push("--only", "--", ...paths);
         }
-        return this.executor.run(args);
+        return this.executor.runWithStderr(args);
     }
 
     // A rename source is a deletion, even when a new, unchecked file now occupies that path.

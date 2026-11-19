@@ -653,7 +653,10 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 }
             }
         });
-        if (!commitErrors.length) this.postCommitCompleted(message);
+        if (!commitErrors.length) {
+            const draftRevision = typeof msg.draftRevision === "number" ? msg.draftRevision : undefined;
+            this.postCommitCompleted(message, amend, draftRevision);
+        }
         await this.refreshData();
         if (pushed.length) {
             void showPushSuccessWithRequestLink(
@@ -975,14 +978,16 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
         this.view?.webview.postMessage(msg);
     }
 
-    private postCommitCompleted(message: string): void {
-        this.postToWebview({ type: "committed" });
+    private postCommitCompleted(message: string, amend: boolean, draftRevision?: number): void {
         const clearCommitMessage = vscode.workspace
             .getConfiguration("intelligit")
             .get<boolean>("clearLastCommit", true);
-        if (!clearCommitMessage) {
-            this.postToWebview({ type: "lastCommitMessage", message });
-        }
+        this.postToWebview({
+            type: "committed",
+            draftRevision,
+            amend,
+            message: clearCommitMessage ? "" : message,
+        });
     }
 
     private getRepositoryRoot(): vscode.Uri {

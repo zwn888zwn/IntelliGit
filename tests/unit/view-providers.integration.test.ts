@@ -1249,12 +1249,13 @@ describe("view providers integration", () => {
         workspaceState.clearLastCommit = false;
         const { provider, webview } = await setupCommitPanelProvider();
 
-        await webview.send({ type: "commit", message: "feat: retain", amend: false });
+        await webview.send({ type: "commitSelected", paths: ["src/a.ts"], message: "feat: retain", draftRevision: 3, amend: false });
 
-        expect(postMessageSpy).toHaveBeenCalledWith({ type: "committed" });
         expect(postMessageSpy).toHaveBeenCalledWith({
-            type: "lastCommitMessage",
+            type: "committed",
+            draftRevision: 3,
             message: "feat: retain",
+            amend: false,
         });
         provider.dispose();
     });
@@ -1273,6 +1274,54 @@ describe("view providers integration", () => {
         expect(gitOps.stageFiles).toHaveBeenCalledWith(["src/a.ts"]);
         expect(gitOps.commit).toHaveBeenCalledWith("feat: selected only", false, ["src/a.ts"]);
         provider.dispose();
+    });
+
+    it("reports a silent commit hook rejection and allows the same selection to be retried", async () => {
+        const fs = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const { join } = await import("node:path");
+        const { GitExecutor } = await import("../../src/git/executor");
+        const { GitOps } = await import("../../src/git/operations");
+        const { CommitPanelViewProvider } = await import("../../src/views/CommitPanelViewProvider");
+        const root = await fs.mkdtemp(join(tmpdir(), "intelligit-commit-hook-"));
+        const executor = new GitExecutor(root);
+        const git = (...args: string[]) => executor.runWithStderr(args);
+        const ops = new GitOps(executor, undefined, { repoId: ".", repoRoot: root });
+        const uri = { fsPath: root, path: root };
+        const provider = new CommitPanelViewProvider(uri as never, ops, () => uri as never);
+        try {
+            await git("init", "-q");
+            await git("config", "user.name", "Test");
+            await git("config", "user.email", "test@example.org");
+            await git("config", "commit.gpgsign", "false");
+            const hooks = join(root, ".git", "test-hooks");
+            await fs.mkdir(hooks);
+            await git("config", "core.hooksPath", hooks);
+            await git("commit", "--allow-empty", "-qm", "base");
+            const head = await git("rev-parse", "HEAD");
+            const hook = join(hooks, "commit-msg");
+            await fs.writeFile(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+            await fs.writeFile(join(root, "new.go"), "new contents");
+            provider.setRepositoryContext({ ...testRepository, root });
+            const webview = createWebviewView();
+            provider.resolveWebviewView(webview.view as never, {} as never, {} as never);
+            await webview.send({ type: "ready" });
+
+            const request = { type: "commitSelected", paths: ["new.go"], message: "add file", draftRevision: 2 };
+            await webview.send(request);
+            expect(await git("rev-parse", "HEAD")).toBe(head);
+            expect(showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Git command failed with exit code 1"));
+            expect(showInformationMessage).not.toHaveBeenCalledWith(expect.stringContaining("Committed successfully"));
+            expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "committed" }));
+
+            await fs.writeFile(hook, "#!/bin/sh\nexit 0\n");
+            await webview.send(request);
+            expect((await git("show", "HEAD:new.go")).trim()).toBe("new contents");
+            expect(postMessageSpy).toHaveBeenCalledWith({ type: "committed", draftRevision: 2, amend: false, message: "" });
+        } finally {
+            provider.dispose();
+            await fs.rm(root, { recursive: true, force: true });
+        }
     });
 
     it.each([
@@ -1402,7 +1451,7 @@ describe("view providers integration", () => {
         expect(showErrorMessage).toHaveBeenCalledWith(expect.stringMatching(/Committed locally.*abcdef12.*non-fast-forward/), "Retry Push");
         expect(gitOps.commit).toHaveBeenCalledTimes(1);
         expect(gitOps.push).toHaveBeenCalledTimes(switched ? 1 : 2);
-        expect(postMessageSpy).toHaveBeenCalledWith({ type: "committed" });
+        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "committed", message: "" }));
         provider.dispose();
     });
 

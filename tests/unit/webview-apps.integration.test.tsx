@@ -237,11 +237,34 @@ describe("CommitPanelApp integration", () => {
         expect(api.postMessage).toHaveBeenCalledWith(expect.objectContaining({
             type: "commitSelected", message: "draft before reload", targets: [{ repoRoot: repo.root, path: "one.go" }],
         }));
-        send({ type: "committed" });
+        const { draftRevision } = api.postMessage.mock.lastCall![0];
+        send({ type: "committed", draftRevision, amend: false, message: "" });
         update([]);
         expect(saved.checked).toEqual([]);
         expect(saved.commitDraft).toBe("");
         expect(saved.groupByDir).toBe(false);
+    });
+
+    it.each(["", "commit A"])("preserves a draft edited during push when completion would replace it with %j", async completedMessage => {
+        vi.resetModules();
+        const api = installVsCodeMock();
+        createRootHost();
+        await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+        await flush();
+        const field = document.querySelector("textarea")!;
+        fireInput(field, "commit A");
+        fireClick(Array.from(document.querySelectorAll("button")).find(button => button.textContent?.trim() === "Commit and Push...")!);
+        const request = api.postMessage.mock.lastCall![0];
+        expect(request).toMatchObject({ type: "commitSelected", push: true, message: "commit A" });
+        fireInput(field, "draft for B");
+
+        act(() => {
+            window.dispatchEvent(new MessageEvent("message", { data: {
+                type: "committed", draftRevision: request.draftRevision, amend: false, message: completedMessage,
+            } }));
+        });
+        expect(field.value).toBe("draft for B");
+        expect(api.setState).toHaveBeenLastCalledWith(expect.objectContaining({ commitDraft: "draft for B" }));
     });
 
     it("creates a stash from the toolbar dialog", async () => {
@@ -429,12 +452,13 @@ describe("CommitPanelApp integration", () => {
 
         fireClick(Array.from(document.querySelectorAll("button")).find(b => b.textContent?.trim() === "Commit and Push...")!);
         expect(vscode.postMessage).toHaveBeenCalledWith({
-            type: "commitSelected", amend: true, message: "last commit body", push: true,
+            type: "commitSelected", amend: true, message: "last commit body", draftRevision: expect.any(Number), push: true,
             targets: [{ repoRoot: "/repo", path: "package.json" }],
         });
 
         act(() => {
-            window.dispatchEvent(new MessageEvent("message", { data: { type: "committed" } }));
+            const { draftRevision } = vscode.postMessage.mock.lastCall![0];
+            window.dispatchEvent(new MessageEvent("message", { data: { type: "committed", draftRevision, amend: true, message: "" } }));
         });
         await flush();
 

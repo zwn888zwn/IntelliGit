@@ -109,11 +109,12 @@ function App(): React.ReactElement {
                 type: "commitSelected",
                 targets: checkedTargets,
                 message: commitMessage.trim(),
+                draftRevision: state.draftRevision,
                 amend: isAmend,
                 push,
             });
         },
-        [vscode, commitMessage, isAmend, checkedTargets],
+        [vscode, commitMessage, state.draftRevision, isAmend, checkedTargets],
     );
 
     const handleCommit = useCallback(() => {
