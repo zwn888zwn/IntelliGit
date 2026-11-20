@@ -267,6 +267,58 @@ describe("CommitPanelApp integration", () => {
         expect(api.setState).toHaveBeenLastCalledWith(expect.objectContaining({ commitDraft: "draft for B" }));
     });
 
+    it("loads a second stash, recovers from a preview error, and applies the selected stash", async () => {
+        vi.resetModules();
+        const api = installVsCodeMock();
+        createRootHost();
+        await act(async () => {
+            await import("../../src/webviews/react/commit-panel/CommitPanelApp");
+        });
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "ready" });
+
+        const repository = { repoId: ".", name: "repo", root: "/repo", color: "#4CAF50" };
+        const stashes = [
+            { index: 0, hash: "first", message: "On main: first stash", date: "" },
+            { index: 1, hash: "second", message: "On main: second stash", date: "" },
+        ];
+        const send = (data: object) => act(() => {
+            window.dispatchEvent(new MessageEvent("message", { data }));
+        });
+        const update = (selectedShelfIndex: number, path: string) => send({
+            type: "update", repositories: [repository], files: [], stashes, selectedShelfIndex,
+            shelfFiles: [{
+                repoId: ".", repoRoot: "/repo", path, status: "M",
+                staged: false, additions: 1, deletions: 0,
+            }],
+        });
+        send({ type: "setRepositoryContext", repository });
+        update(0, "first.ts");
+        fireClick(Array.from(document.querySelectorAll('[role="tab"]')).find(tab => tab.textContent?.includes("Stash"))!);
+
+        const apply = Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Apply")!;
+        expect(apply.disabled).toBe(false);
+        fireClick(apply);
+        expect(api.postMessage).toHaveBeenCalledWith({ type: "shelfApply", repoRoot: "/repo", hash: "first" });
+
+        const second = document.querySelector('[title="On main: second stash"]');
+        const selection = { repoRoot: "/repo", hash: "second" };
+        fireClick(second);
+        expect(api.postMessage).toHaveBeenLastCalledWith({ type: "shelfSelect", ...selection });
+        expect(document.body.textContent).toContain("Loading...");
+        expect(apply.disabled).toBe(true);
+        send({ type: "error", message: "Preview failed", shelfSelection: selection });
+        expect(document.body.textContent).not.toContain("Loading...");
+
+        fireClick(second);
+        expect(document.body.textContent).toContain("Loading...");
+        update(1, "second.ts");
+        expect(document.body.textContent).toContain("second.ts");
+        expect(document.body.textContent).not.toContain("Loading...");
+        expect(apply.disabled).toBe(false);
+        fireClick(apply);
+        expect(api.postMessage).toHaveBeenLastCalledWith({ type: "shelfApply", ...selection });
+    });
+
     it("creates a stash from the toolbar dialog", async () => {
         vi.resetModules();
         const vscode = installVsCodeMock({ checked: [] });

@@ -50,6 +50,7 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private stashes: StashEntry[] = [];
     private selectedShelfIndex: number | null = null;
     private shelfFiles: WorkingFile[] = [];
+    private shelfSelectionRequest = 0;
     private folderIconsByName: ThemeFolderIconMap = {};
     private lastFileCount = 0;
     private committing = false;
@@ -108,14 +109,18 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             } catch (err) {
                 const message = getErrorMessage(err);
                 vscode.window.showErrorMessage(message);
-                this.postToWebview({ type: "error", message });
+                const shelfSelection = msg.type === "shelfSelect"
+                    && typeof msg.repoRoot === "string" && typeof msg.hash === "string"
+                    ? { repoRoot: msg.repoRoot, hash: msg.hash } : undefined;
+                this.postToWebview(shelfSelection
+                    ? { type: "error", message, shelfSelection }
+                    : { type: "error", message });
             } finally {
                 if (writesShelf) this.shelfActionInProgress = false;
             }
         });
 
         webviewView.webview.html = this.getHtml(webviewView.webview);
-        this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
         this.updateViewCount(this.lastFileCount);
         this.refreshDataWithErrorHandling();
     }
@@ -125,6 +130,12 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     setRepositoryContext(repository: RepositoryContextInfo | null): void {
+        if (this.repository?.root !== repository?.root) {
+            this.shelfSelectionRequest++;
+            this.stashes = [];
+            this.selectedShelfIndex = null;
+            this.shelfFiles = [];
+        }
         this.repository = repository;
         this.postToWebview({ type: "setRepositoryContext", repository });
         if (!repository) {
@@ -132,9 +143,6 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 vscode.commands.executeCommand("setContext", "intelligit.commitPanel.refreshing", false),
             ).catch(() => {});
             this.files = [];
-            this.stashes = [];
-            this.selectedShelfIndex = null;
-            this.shelfFiles = [];
             this.folderIconsByName = {};
             this.setActiveFile(null);
             this._onDidChangeFileCount.fire(0);
@@ -153,7 +161,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     }
 
     private async refreshData(): Promise<void> {
-        if (!this.repository) {
+        const root = this.repository?.root;
+        if (!root) {
             this.setRepositoryContext(null);
             return;
         }
@@ -173,7 +182,9 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
                 return { root: entry.root, files, operation, canAmend };
             }));
             const files = statuses.flatMap(status => status.files);
-            const stashes = await this.gitOps.listShelved();
+            if (this.repository?.root !== root) return;
+            const gitOps = this.getRepositoryEntry(root).gitOps;
+            const stashes = await gitOps.listShelved();
             const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
 
             const previous = this.stashes.find(entry => entry.index === this.selectedShelfIndex);
@@ -182,15 +193,17 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             const shelfFiles =
                 selectedShelfIndex !== null
                     ? await this.iconTheme.decorateWorkingFiles(
-                          await this.gitOps.getShelvedFiles(selectedShelfIndex, selectedStash.hash),
+                          await gitOps.getShelvedFiles(selectedShelfIndex, selectedStash.hash),
                       )
                     : [];
-            const suggestedCommitMessage = await this.gitOps.getPendingCommitMessage();
-            this.folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
+            const suggestedCommitMessage = await gitOps.getPendingCommitMessage();
+            const folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
                 ...files,
                 ...shelfFiles,
             ]);
 
+            if (this.repository?.root !== root) return;
+            this.folderIconsByName = folderIconsByName;
             this.files = files;
             if (this.activeFile && !this.hasWorkingFile(this.activeFile)) {
                 this.setActiveFile(null);
@@ -738,6 +751,8 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
     private async handleMessage(msg: { type: string; [key: string]: unknown }): Promise<void> {
         switch (msg.type) {
             case "ready":
+                // The webview listener is installed before it sends ready.
+                this.postToWebview({ type: "setRepositoryContext", repository: this.repository });
                 await this.refreshData();
                 break;
 
@@ -871,18 +886,20 @@ export class CommitPanelViewProvider implements vscode.WebviewViewProvider {
             }
 
             case "shelfSelect": {
+                const request = ++this.shelfSelectionRequest;
                 const { entry, repository } = this.getShelfSelection(msg);
-                this.selectedShelfIndex = entry.index;
                 const files = await this.iconTheme.decorateWorkingFiles(
                     await repository.gitOps.getShelvedFiles(entry.index, entry.hash),
                 );
-                if (this.repository?.root !== repository.root ||
-                    this.stashes.find(stash => stash.index === this.selectedShelfIndex)?.hash !== entry.hash) break;
-                this.shelfFiles = files;
-                this.folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
+                const folderIconsByName = await this.iconTheme.getFolderIconsByWorkingFiles([
                     ...this.files,
-                    ...this.shelfFiles,
+                    ...files,
                 ]);
+                if (request !== this.shelfSelectionRequest) break;
+                const selected = this.getShelfSelection(msg).entry;
+                this.selectedShelfIndex = selected.index;
+                this.shelfFiles = files;
+                this.folderIconsByName = folderIconsByName;
                 const { folderIcons, iconFonts } = this.iconTheme.getThemeData();
                 this.postToWebview({
                     type: "update",

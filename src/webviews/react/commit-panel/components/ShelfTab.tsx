@@ -9,7 +9,7 @@ import { TreeFolderIcon } from "./TreeIcons";
 import { getVsCodeApi } from "../hooks/useVsCodeApi";
 import type { StashEntry, ThemeFolderIconMap, ThemeTreeIcon, WorkingFile } from "../../../../types";
 import { useFileTree, collectAllDirPaths } from "../hooks/useFileTree";
-import type { TreeEntry } from "../types";
+import type { ShelfSelection, TreeEntry } from "../types";
 import { TEST_FILE_ROW_BACKGROUND } from "../../shared/tokens";
 import { getLeafName, isTestFilePath, resolveFolderIcon } from "../../shared/utils";
 import { OpenChangesButton } from "../../shared/components/OpenChangesButton";
@@ -18,6 +18,7 @@ interface Props {
     stashes: StashEntry[];
     shelfFiles: WorkingFile[];
     selectedIndex: number | null;
+    failedSelection?: ShelfSelection;
     folderIcon?: ThemeTreeIcon;
     folderExpandedIcon?: ThemeTreeIcon;
     folderIconsByName?: ThemeFolderIconMap;
@@ -32,6 +33,7 @@ export function ShelfTab({
     stashes,
     shelfFiles,
     selectedIndex,
+    failedSelection,
     folderIcon,
     folderExpandedIcon,
     folderIconsByName,
@@ -49,26 +51,28 @@ export function ShelfTab({
     // The useEffect below re-syncs expandedIndex from selectedIndex on parent-driven
     // changes (e.g. after apply/pop/delete removes the selected stash).
     const [expandedIndex, setExpandedIndex] = useState<number | null>(selectedIndex);
-    const [isLoading, setIsLoading] = useState(false);
+    const isLoading = !!repoRoot && expandedIndex !== null && expandedIndex !== selectedIndex;
 
     useEffect(() => {
         setExpandedIndex(selectedIndex);
-        setIsLoading(false);
     }, [selectedIndex]);
 
+    useEffect(() => {
+        if (!failedSelection || failedSelection.repoRoot !== repoRoot) return;
+        const failedIndex = stashes.find(stash => stash.hash === failedSelection.hash)?.index;
+        setExpandedIndex(index => index === failedIndex ? selectedIndex : index);
+    }, [failedSelection, repoRoot, selectedIndex, stashes]);
+
     const handleStashClick = useCallback(
-        (index: number) => {
-            if (expandedIndex === index) {
+        (stash: StashEntry) => {
+            if (expandedIndex === stash.index) {
                 setExpandedIndex(null);
-                setIsLoading(false);
-            } else {
-                setExpandedIndex(index);
-                setIsLoading(index !== selectedIndex);
-                const stash = stashes.find(entry => entry.index === index);
-                if (repoRoot && stash) vscode.postMessage({ type: "shelfSelect", hash: stash.hash, repoRoot });
+            } else if (repoRoot) {
+                setExpandedIndex(stash.index);
+                vscode.postMessage({ type: "shelfSelect", hash: stash.hash, repoRoot });
             }
         },
-        [expandedIndex, selectedIndex, repoRoot, stashes, vscode],
+        [expandedIndex, repoRoot, vscode],
     );
 
     const handleShelfAction = useCallback(
@@ -177,7 +181,7 @@ export function ShelfTab({
                                             ? "var(--vscode-list-activeSelectionBackground)"
                                             : "var(--vscode-list-hoverBackground)",
                                     }}
-                                    onClick={() => handleStashClick(stash.index)}
+                                    onClick={() => handleStashClick(stash)}
                                     title={stash.message}
                                 >
                                     <Box

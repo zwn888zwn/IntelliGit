@@ -15,6 +15,11 @@ import type {
     TreeLeaf as GenericTreeLeaf,
 } from "../shared/fileTree";
 
+export interface ShelfSelection {
+    repoRoot: string;
+    hash: string;
+}
+
 /** Messages sent FROM the webview TO the extension host. */
 export type OutboundMessage =
     | { type: "ready" }
@@ -69,7 +74,7 @@ export type InboundMessage =
     | { type: "setRepositoryContext"; repository: RepositoryContextInfo | null }
     | { type: "setActiveFile"; target: RepoPathRef | null }
     | { type: "refreshing"; active: boolean }
-    | { type: "error"; message: string };
+    | { type: "error"; message: string; shelfSelection?: ShelfSelection };
 
 /** Reducer state for the commit panel app. */
 export interface CommitPanelState {
@@ -93,6 +98,7 @@ export interface CommitPanelState {
     isAmend: boolean;
     isRefreshing: boolean;
     error: string | null;
+    failedShelfSelection?: ShelfSelection;
 }
 
 /** Actions dispatched by the message handler and UI events. */
@@ -118,7 +124,7 @@ export type CommitPanelAction =
     | { type: "SET_REPOSITORY_CONTEXT"; repository: RepositoryContextInfo | null }
     | { type: "SET_ACTIVE_FILE"; target: RepoPathRef | null }
     | { type: "SET_REFRESHING"; active: boolean }
-    | { type: "SET_ERROR"; message: string }
+    | { type: "SET_ERROR"; message: string; shelfSelection?: ShelfSelection }
     | { type: "SET_COMMIT_MESSAGE"; message: string }
     | { type: "SET_AMEND"; isAmend: boolean };
 

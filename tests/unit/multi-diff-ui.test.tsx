@@ -133,7 +133,7 @@ describe("multi-diff UI scopes", () => {
         expect(document.body.textContent).not.toContain("Loading...");
     });
 
-    it("disables stash open-all while the repository scope is unavailable", () => {
+    it("does not request or show stash loading while the repository scope is unavailable", () => {
         renderUi(
             <ShelfTab
                 stashes={[{ index: 4, message: "On main: work", date: "2026-02-19T00:00:00Z", hash: "a" }]}
@@ -149,9 +149,14 @@ describe("multi-diff UI scopes", () => {
         ) as HTMLButtonElement;
         expect(button.disabled).toBe(true);
         click(button);
+        click(document.querySelector('[title="On main: work"]'));
         expect(vscode.postMessage).not.toHaveBeenCalledWith(
             expect.objectContaining({ type: "showAllShelfDiff" }),
         );
+        expect(vscode.postMessage).not.toHaveBeenCalledWith(
+            expect.objectContaining({ type: "shelfSelect" }),
+        );
+        expect(document.body.textContent).not.toContain("Loading...");
     });
 
     it("opens changed files for the current commit without collapsing the header", () => {

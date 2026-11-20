@@ -2331,6 +2331,40 @@ describe("view providers integration", () => {
         provider.dispose();
     });
 
+    it("CommitPanelViewProvider delivers the stash repository to a ready webview", async () => {
+        const { provider, gitOps, webview } = await setupCommitPanelProvider();
+        gitOps.listShelved.mockResolvedValue([
+            { index: 0, message: "On main: first", date: "", hash: "first" },
+            { index: 1, message: "On main: second", date: "", hash: "second" },
+        ]);
+        // A fresh webview cannot receive messages posted before its listener is installed.
+        postMessageSpy.mockClear();
+        await webview.send({ type: "ready" });
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "setRepositoryContext",
+            repository: testRepository,
+        });
+        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
+            type: "update", selectedShelfIndex: 0,
+        }));
+
+        const selection = { hash: "second", repoRoot: "/repo" };
+        gitOps.getShelvedFiles.mockRejectedValueOnce(new Error("Preview failed"));
+        await webview.send({ type: "shelfSelect", ...selection });
+        expect(postMessageSpy).toHaveBeenCalledWith({
+            type: "error", message: "Preview failed", shelfSelection: selection,
+        });
+
+        await webview.send({ type: "shelfSelect", ...selection });
+        expect(gitOps.getShelvedFiles).toHaveBeenLastCalledWith(1, "second");
+        expect(postMessageSpy).toHaveBeenCalledWith(expect.objectContaining({
+            type: "update", selectedShelfIndex: 1,
+        }));
+        await webview.send({ type: "shelfApply", ...selection });
+        expect(gitOps.shelveApply).toHaveBeenCalledWith("second");
+        provider.dispose();
+    });
+
     it("CommitPanelViewProvider handles shelf operations", async () => {
         const { provider, gitOps, webview } = await setupCommitPanelProvider();
         await webview.send({

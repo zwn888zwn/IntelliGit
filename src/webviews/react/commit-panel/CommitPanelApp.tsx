@@ -208,6 +208,7 @@ function App(): React.ReactElement {
                             stashes={state.stashes}
                             shelfFiles={state.shelfFiles}
                             selectedIndex={state.selectedShelfIndex}
+                            failedSelection={state.failedShelfSelection}
                             folderIcon={state.folderIcon}
                             folderExpandedIcon={state.folderExpandedIcon}
                             folderIconsByName={state.folderIconsByName}

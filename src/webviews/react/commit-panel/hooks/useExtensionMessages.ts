@@ -54,6 +54,7 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
                     ? nextSuggestedCommitMessage
                     : state.commitMessage,
                 error: null,
+                failedShelfSelection: undefined,
             };
         }
         case "SET_REFRESHING":
@@ -77,11 +78,25 @@ function reducer(state: CommitPanelState, action: CommitPanelAction): CommitPane
                 amendMessages: {},
             };
         case "SET_REPOSITORY_CONTEXT":
+            if (action.repository?.root !== state.repository?.root) {
+                return {
+                    ...state,
+                    repository: action.repository,
+                    stashes: [],
+                    shelfFiles: [],
+                    selectedShelfIndex: null,
+                    failedShelfSelection: undefined,
+                };
+            }
             return { ...state, repository: action.repository };
         case "SET_ACTIVE_FILE":
             return { ...state, activeFile: action.target };
         case "SET_ERROR":
-            return { ...state, error: action.message };
+            return {
+                ...state,
+                error: action.message,
+                failedShelfSelection: action.shelfSelection ?? state.failedShelfSelection,
+            };
         case "SET_COMMIT_MESSAGE":
             return { ...state, commitMessage: action.message, draftRevision: state.draftRevision + 1 };
         case "SET_AMEND":
@@ -151,7 +166,7 @@ export function useExtensionMessages(): [CommitPanelState, React.Dispatch<Commit
                     dispatch({ type: "SET_REFRESHING", active: msg.active });
                     break;
                 case "error":
-                    dispatch({ type: "SET_ERROR", message: msg.message });
+                    dispatch({ type: "SET_ERROR", message: msg.message, shelfSelection: msg.shelfSelection });
                     break;
             }
         };
